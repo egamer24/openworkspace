@@ -19,6 +19,15 @@ const AccessLinkScreen = lazy(() =>
 const AdminPage = lazy(() =>
   import("@/admin/admin-page").then((module) => ({ default: module.AdminPage })),
 );
+const WorkspaceShell = lazy(() =>
+  import("@/components/workspace-shell").then((module) => ({ default: module.WorkspaceShell })),
+);
+const RepoListPage = lazy(() =>
+  import("@/code/repo-list-page").then((module) => ({ default: module.RepoListPage })),
+);
+const RepoPage = lazy(() =>
+  import("@/code/repo-page").then((module) => ({ default: module.RepoPage })),
+);
 const MailShell = lazy(() =>
   import("@/mail/mail-shell").then((module) => ({ default: module.MailShell })),
 );
@@ -111,6 +120,10 @@ export function App() {
             <Route path="notifications" element={<SettingsNotificationsPage />} />
             <Route path="sessions" element={<SettingsSessionsPage />} />
             <Route path="mcp" element={<SettingsMcpPage />} />
+          </Route>
+          <Route element={auth.authenticated ? <WorkspaceShell /> : <Navigate to="/" replace />}>
+            <Route path="/git" element={<RepoListPage />} />
+            <Route path="/git/:repo/*" element={<RepoPage />} />
           </Route>
           <Route path="/" element={mail} />
           <Route path="/mail/:mailboxId" element={mail} />

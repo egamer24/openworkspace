@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
 import { accessLinkKinds } from "../../shared/auth";
+import { branchPushPolicies } from "../../shared/code";
+import {
+  attemptStatuses,
+  reviewVerdicts,
+  taskNoteKinds,
+  taskStatuses,
+} from "../../shared/tasks";
 import {
   webhookDeliveryStatuses,
   webhookEventTypes,
@@ -807,5 +814,175 @@ export const rateLimitBuckets = sqliteTable(
   ],
 );
 
+export const codeRepositories = sqliteTable(
+  "code_repositories",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    // Artifacts names are immutable; keep them separate so a workspace rename
+    // does not move Git storage.
+    artifactsName: text("artifacts_name").notNull(),
+    description: text("description"),
+    defaultBranch: text("default_branch").notNull(),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("code_repositories_name_unique").on(table.name),
+    uniqueIndex("code_repositories_artifacts_name_unique").on(table.artifactsName),
+  ],
+);
+
+export const codeBranchProtections = sqliteTable(
+  "code_branch_protections",
+  {
+    id: text("id").primaryKey(),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => codeRepositories.id, { onDelete: "cascade" }),
+    pattern: text("pattern").notNull(),
+    push: text("push", { enum: branchPushPolicies }).notNull(),
+    allowDeletion: integer("allow_deletion", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("code_branch_protections_pattern_unique")
+      .on(table.repositoryId, table.pattern),
+  ],
+);
+
+export const tasks = sqliteTable(
+  "tasks",
+  {
+    id: text("id").primaryKey(),
+    repositoryId: text("repository_id")
+      .notNull()
+      .references(() => codeRepositories.id, { onDelete: "cascade" }),
+    // Human-facing sequence within the repository (`#42`).
+    number: integer("number").notNull(),
+    title: text("title").notNull(),
+    goal: text("goal").notNull().default(""),
+    acceptanceCriteria: text("acceptance_criteria").notNull().default(""),
+    scope: text("scope").notNull().default(""),
+    status: text("status", { enum: taskStatuses }).notNull().default("open"),
+    baseBranch: text("base_branch").notNull(),
+    assigneeUserId: text("assignee_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    mergedSha: text("merged_sha"),
+    mergedAt: integer("merged_at", { mode: "timestamp_ms" }),
+    mergedByUserId: text("merged_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("tasks_repository_number_unique").on(table.repositoryId, table.number),
+    index("tasks_repository_status_idx").on(table.repositoryId, table.status),
+  ],
+);
+
+export const taskDependencies = sqliteTable(
+  "task_dependencies",
+  {
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    dependsOnTaskId: text("depends_on_task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.taskId, table.dependsOnTaskId] }),
+    index("task_dependencies_depends_on_idx").on(table.dependsOnTaskId),
+    check(
+      "task_dependencies_not_self",
+      sql`${table.taskId} <> ${table.dependsOnTaskId}`,
+    ),
+  ],
+);
+
+export const taskAttempts = sqliteTable(
+  "task_attempts",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(),
+    executorUserId: text("executor_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    status: text("status", { enum: attemptStatuses }).notNull().default("active"),
+    branch: text("branch").notNull(),
+    baseSha: text("base_sha"),
+    headSha: text("head_sha"),
+    // Handoff context: what was done, what remains, checks that ran.
+    summary: text("summary"),
+    leaseExpiresAt: integer("lease_expires_at", { mode: "timestamp_ms" }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("task_attempts_number_unique").on(table.taskId, table.number),
+    // At most one live claim per task; concurrent claims fail on insert.
+    uniqueIndex("task_attempts_active_unique")
+      .on(table.taskId)
+      .where(sql`${table.status} = 'active'`),
+    index("task_attempts_status_idx").on(table.status),
+  ],
+);
+
+export const taskNotes = sqliteTable(
+  "task_notes",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    authorUserId: text("author_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    kind: text("kind", { enum: taskNoteKinds }).notNull(),
+    body: text("body").notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp_ms" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [index("task_notes_task_idx").on(table.taskId)],
+);
+
+/** Reviews judge one exact commit of an attempt; new commits make them stale. */
+export const taskReviews = sqliteTable(
+  "task_reviews",
+  {
+    id: text("id").primaryKey(),
+    taskId: text("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    attemptId: text("attempt_id")
+      .notNull()
+      .references(() => taskAttempts.id, { onDelete: "cascade" }),
+    reviewerUserId: text("reviewer_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    verdict: text("verdict", { enum: reviewVerdicts }).notNull(),
+    body: text("body").notNull().default(""),
+    headSha: text("head_sha").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [index("task_reviews_task_idx").on(table.taskId)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Mailbox = typeof mailboxes.$inferSelect;
+export type CodeRepositoryRecord = typeof codeRepositories.$inferSelect;

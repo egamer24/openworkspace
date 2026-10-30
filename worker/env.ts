@@ -1,3 +1,4 @@
+import type { ArtifactsBindings } from "./code/artifacts";
 import type { User } from "./db/schema";
 import type { CloudflareEmailAnalyticsBindings } from "./mail/email-authentication";
 
@@ -42,7 +43,8 @@ export type AppEnv = {
     & OidcBindings
     & SamlBindings
     & R2S3Bindings
-    & PushBindings;
+    & PushBindings
+    & ArtifactsBindings;
   Variables: {
     user: SessionUser;
     authKind: "session" | "api-token";

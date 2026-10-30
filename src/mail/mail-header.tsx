@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useAuth } from "@/auth/auth-context";
+import { AppSwitcher } from "@/components/app-switcher";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,6 +70,7 @@ export function MailHeader({
           OpenWorkspace
         </span>
       </div>
+      <AppSwitcher />
 
       <div className="ml-auto flex min-w-0 items-center gap-2">
         {showSearch && (

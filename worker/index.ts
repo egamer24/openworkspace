@@ -3,6 +3,7 @@ import { accountApi } from "./account-api";
 import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
+import { handleGitHttp, isGitHttpPath } from "./code/git-http";
 import { createDb } from "./db/client";
 import { domains, mailboxes } from "./db/schema";
 import { mailboxAddressPredicate } from "./db/mailboxes";
@@ -69,7 +70,12 @@ const app = new Hono<AppEnv>()
 export type AppType = typeof app;
 
 export default {
-  fetch: app.fetch,
+  fetch(request, env, ctx) {
+    if (isGitHttpPath(new URL(request.url).pathname)) {
+      return handleGitHttp(request, env);
+    }
+    return app.fetch(request, env, ctx);
+  },
   async email(message, env) {
     const receivedAt = Date.now();
     const recipient = normalizeMailboxAddress(message.to);

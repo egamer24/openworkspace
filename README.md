@@ -69,6 +69,27 @@ Run the real Word/Excel/PowerPoint conversion check with Docker running:
 bunx playwright test e2e/office-preview.spec.ts --project=desktop
 ```
 
+### Git repositories
+
+Repositories are stored in Cloudflare Artifacts (namespace `openworkspace`) and
+served by the Worker at `https://<workspace>/<name>.git`. Standard
+`git clone`, `fetch`, `pull`, and `push` work without extensions. Authenticate
+with an account API token as the HTTPS password (any username); a system Git
+credential helper can store it. Artifacts credentials stay on the server.
+
+Create repositories with `POST /api/code/repos` (`{ "name": "project" }`).
+Names are global within the workspace. The default branch starts protected:
+only administrators may push to it. Administrators can replace rules with
+`PUT /api/code/repos/<name>/branch-protections`; each rule matches branch names
+(`*` within a segment, `**` across segments) and sets `push` to `members`,
+`admins`, or `integration` (no direct pushes).
+
+Ref updates are checked before the packfile reaches Artifacts, so a rejected
+push stores nothing. A push is accepted or rejected as a whole. Tags may be
+created by members; moving or deleting them requires an administrator. Refs
+outside `refs/heads/` and `refs/tags/` are reserved. Force pushes are not
+detected separately; protect branches that must not be rewritten.
+
 ### Pull updates from upstream
 
 The Deploy button creates a copy of this repo on your GitHub account. To take template updates later:

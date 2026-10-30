@@ -9,7 +9,7 @@
   },
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/.well-known/*", "/oauth/*", "!/saml/login/*", "/saml/*"]
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/.well-known/*", "/oauth/*", "!/saml/login/*", "/saml/*", "/*.git/*"]
   },
   "durable_objects": {
     "bindings": [
@@ -47,6 +47,12 @@
     "instance_type": "standard-1",
     "max_instances": 2
   }],
+  "artifacts": [
+    {
+      "binding": "ARTIFACTS",
+      "namespace": "openworkspace"
+    }
+  ],
   "r2_buckets": [
     {
       "binding": "MAIL_STORAGE",
