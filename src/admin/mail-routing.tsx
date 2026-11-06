@@ -338,7 +338,9 @@ function Addresses({
                 </p>
               </div>
               <Badge variant="outline">
-                {!row.mailboxId ? "Forward only" : row.destinationIds.length ? "Store and forward" : "Alias"}
+                {row.throwaway
+                  ? `Throwaway${row.enabled ? "" : " · off"}`
+                  : !row.mailboxId ? "Forward only" : row.destinationIds.length ? "Store and forward" : "Alias"}
               </Badge>
               <Button
                 variant="ghost"

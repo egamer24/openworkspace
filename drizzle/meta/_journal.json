@@ -113,6 +113,13 @@
       "when": 1793982128146,
       "tag": "0015_calendar_and_booking",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1793984259830,
+      "tag": "0016_throwaway_addresses",
+      "breakpoints": true
     }
   ]
 }

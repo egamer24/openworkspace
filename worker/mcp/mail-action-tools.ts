@@ -411,4 +411,46 @@ export function registerMailActionTools(server: McpServer, api: AccountApiClient
       { method: "DELETE" },
     )),
   );
+
+  server.registerTool(
+    "list_throwaway_addresses",
+    {
+      title: "List throwaway addresses",
+      description: "List the current account's receive-only throwaway addresses with their labels and on/off state.",
+      inputSchema: z.object({}),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    () => runTool(() => api.json("/mail/throwaway-addresses")),
+  );
+
+  server.registerTool(
+    "create_throwaway_address",
+    {
+      title: "Create a throwaway address",
+      description: "Generate a random receive-only address (like quiet-otter-4821@domain) that delivers into a mailbox the account can send from.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        label: z.string().trim().max(80).optional().describe("Private note, such as the site the address is for."),
+      }),
+      annotations: { ...write, idempotentHint: false },
+    },
+    ({ mailboxId, label }) => runTool(() => api.json("/mail/throwaway-addresses", {
+      method: "POST",
+      json: { mailboxId, label: label ?? null },
+    })),
+  );
+
+  server.registerTool(
+    "set_throwaway_address_enabled",
+    {
+      title: "Turn a throwaway address on or off",
+      description: "While off, mail sent to the throwaway address is rejected.",
+      inputSchema: z.object({ addressId: entityIdSchema, enabled: z.boolean() }),
+      annotations: write,
+    },
+    ({ addressId, enabled }) => runTool(() => api.json(
+      `/mail/throwaway-addresses/${encodeURIComponent(addressId)}`,
+      { method: "PATCH", json: { enabled } },
+    )),
+  );
 }

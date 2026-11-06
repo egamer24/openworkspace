@@ -165,11 +165,18 @@ export const routingAddresses = sqliteTable(
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
+    /** Self-service receive-only address owned by createdByUserId. */
+    throwaway: integer("throwaway", { mode: "boolean" }).notNull().default(false),
+    /** Private note for a throwaway, such as the site it was given to. */
+    label: text("label"),
+    /** While set, mail to the address is rejected instead of delivered. */
+    disabledAt: integer("disabled_at", { mode: "timestamp_ms" }),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("routing_addresses_address_unique").on(table.domainId, table.localPart),
     index("routing_addresses_mailbox_idx").on(table.mailboxId),
+    index("routing_addresses_creator_idx").on(table.createdByUserId),
   ],
 );
 

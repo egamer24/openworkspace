@@ -12,6 +12,7 @@ import {
   ShieldAlert,
   ShieldCheck,
   UserRound,
+  VenetianMask,
   type LucideIcon,
 } from "lucide-react";
 import { Suspense, useState } from "react";
@@ -37,6 +38,7 @@ type SettingsSection =
   | "auto-replies"
   | "rules"
   | "spam"
+  | "throwaway"
   | "sessions"
   | "mcp";
 
@@ -97,6 +99,13 @@ const settingsSections: Array<{
     path: "/settings/spam",
   },
   {
+    id: "throwaway",
+    label: "Throwaway addresses",
+    description: "Random receive-only addresses you can turn off.",
+    Icon: VenetianMask,
+    path: "/settings/throwaway",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -119,6 +128,7 @@ function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/auto-replies")) return "auto-replies";
   if (pathname.startsWith("/settings/rules")) return "rules";
   if (pathname.startsWith("/settings/spam")) return "spam";
+  if (pathname.startsWith("/settings/throwaway")) return "throwaway";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";

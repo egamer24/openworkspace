@@ -42,6 +42,11 @@ const SettingsAppearancePage = lazy(() =>
     default: module.AppearanceSettings,
   })),
 );
+const SettingsThrowawayPage = lazy(() =>
+  import("@/settings/throwaway-addresses-page").then((module) => ({
+    default: module.ThrowawayAddressSettings,
+  })),
+);
 const SettingsMcpPage = lazy(() =>
   import("@/settings/mcp-page").then((module) => ({
     default: module.McpSettings,
@@ -155,6 +160,7 @@ export function App() {
             <Route path="rules" element={<SettingsRulesPage />} />
             <Route path="spam" element={<SettingsSpamPage />} />
             <Route path="sessions" element={<SettingsSessionsPage />} />
+            <Route path="throwaway" element={<SettingsThrowawayPage />} />
             <Route path="mcp" element={<SettingsMcpPage />} />
           </Route>
           <Route path="/" element={mail} />
