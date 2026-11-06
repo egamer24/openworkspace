@@ -21,6 +21,7 @@ import {
   folderShowsUnreadCount,
 } from "./mail-navigation";
 import { MessageList } from "./message-list";
+import { AutoReplyBanner } from "./auto-reply-banner";
 import type {
   ConversationSummary,
   Folder,
@@ -265,6 +266,7 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
         onCompose={openCompose}
         onAdministration={() => navigateRoute("/admin")}
       />
+      {mailbox ? <AutoReplyBanner mailbox={mailbox} /> : null}
       <FolderTabBar
         folder={folder}
         folders={folders}

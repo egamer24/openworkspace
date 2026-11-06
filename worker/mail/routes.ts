@@ -296,13 +296,17 @@ export const mailRoutes = new Hono<AppEnv>()
       );
 
     const rowsWithUnreadCounts = await Promise.all(rows.map(async (mailbox) => {
-      const inbox = await mailboxStub(c.env, mailbox.id)
-        .getFolderCounts(userId, "inbox");
+      const stub = mailboxStub(c.env, mailbox.id);
+      const [inbox, autoReply] = await Promise.all([
+        stub.getFolderCounts(userId, "inbox"),
+        mailbox.canSend ? stub.autoReplyState() : null,
+      ]);
       const { ownerUserId, isPrimary: _isPrimary, ...publicMailbox } = mailbox;
       return {
         ...publicMailbox,
         kind: mailboxKind(ownerUserId),
         unreadCount: inbox?.unreadCount ?? 0,
+        autoReply,
       };
     }));
 

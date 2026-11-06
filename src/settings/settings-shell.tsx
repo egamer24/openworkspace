@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   Menu,
   Palette,
+  Plane,
   ShieldCheck,
   UserRound,
   type LucideIcon,
@@ -25,7 +26,13 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-type SettingsSection = "profile" | "appearance" | "notifications" | "sessions" | "mcp";
+type SettingsSection =
+  | "profile"
+  | "appearance"
+  | "notifications"
+  | "auto-replies"
+  | "sessions"
+  | "mcp";
 
 const settingsSections: Array<{
   id: SettingsSection;
@@ -56,6 +63,13 @@ const settingsSections: Array<{
     path: "/settings/notifications",
   },
   {
+    id: "auto-replies",
+    label: "Auto-replies",
+    description: "Out-of-office replies for each mailbox.",
+    Icon: Plane,
+    path: "/settings/auto-replies",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -74,6 +88,7 @@ const settingsSections: Array<{
 function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/mcp")) return "mcp";
   if (pathname.startsWith("/settings/notifications")) return "notifications";
+  if (pathname.startsWith("/settings/auto-replies")) return "auto-replies";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";

@@ -8,6 +8,7 @@ const mailboxes = [{
   kind: "personal" as const,
   canSend: true,
   unreadCount: 0,
+  autoReply: null,
 }, {
   id: "mailbox-read-only",
   address: "readonly@example.test",
@@ -15,6 +16,7 @@ const mailboxes = [{
   kind: "shared" as const,
   canSend: false,
   unreadCount: 0,
+  autoReply: null,
 }];
 
 const folders = [
