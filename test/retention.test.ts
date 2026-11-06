@@ -42,15 +42,24 @@ function stateRows(mailbox: ReturnType<typeof mailboxStub>) {
 describe("Trash and Spam retention", () => {
   it("backfills existing Trash and Spam at deploy time so nothing is deleted at once", async () => {
     const mailbox = mailboxStub(env, `mbx_retention_upgrade_${crypto.randomUUID()}`);
-    await runInDurableObject(mailbox, async (instance, state) => {
+    await runInDurableObject(mailbox, async (_instance, state) => {
       await state.storage.deleteAll();
       const db = drizzle(state.storage);
       await migrate(db, {
         ...migrations,
-        journal: { entries: migrations.journal.entries.filter((entry) => entry.idx < 6) },
+        journal: { entries: migrations.journal.entries.filter((entry) => entry.idx < migrations.journal.entries.find((e) => e.tag.endsWith("_trash_retention"))!.idx) },
       });
-      await instance.insertEmail(email("old_trash"));
-      await instance.insertEmail(email("old_inbox"));
+      // Raw SQL keeps the fixture valid for the old schema when later
+      // migrations add email columns.
+      for (const id of ["old_trash", "old_inbox"]) {
+        state.storage.sql.exec(
+          `insert into emails (id, conversation_id, direction, from_json, subject, timeline_at, transport_state)
+            values (?, ?, 'incoming', '[{"address":"sender@example.test","name":null}]', 'Old', ?, 'received')`,
+          `msg_${id}`,
+          `conv_${id}`,
+          Date.now(),
+        );
+      }
       state.storage.sql.exec("update conversations set mailbox_state = 'trash' where id = 'conv_old_trash'");
       const before = Date.now();
       await migrate(db, migrations);
