@@ -313,6 +313,11 @@ export class CalendarDO extends DurableObject<Env> {
     if (!uid) return badRequest("The invitation has no event");
     const existing = this.master(uid);
     if (existing?.organizer?.mailboxId) return badRequest("You organize this event");
+    // A REQUEST can come from anyone: only the stored organizer may replace the event.
+    const organizer = input.parsed.find((event) => event.recurrenceId === null)?.organizer ?? input.parsed[0]!.organizer;
+    if (existing && !sameAddress(existing.organizer?.address ?? "", organizer?.address ?? "")) {
+      return badRequest("This invitation does not come from the event's organizer");
+    }
     const now = Date.now();
     const withAnswer = (event: ParsedIcsEvent) => {
       const own = event.attendees.some((attendee) => sameAddress(attendee.address, input.address));

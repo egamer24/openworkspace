@@ -498,4 +498,28 @@ describe("calendar invitations", () => {
     expect(await partstat()).toBe("DECLINED");
   });
 
+  it("keeps an accepted event when a REQUEST with its UID names another organizer", async () => {
+    const { cookie, mailboxId } = await signIn();
+    await setModule(cookie, true);
+    const uid = `hijack-${crypto.randomUUID()}`;
+    const respond = async (from: string, ics: string) => {
+      const invite = await deliver(mailboxId, {
+        from, to: "admin@example.test", subject: "Design review", method: "REQUEST", ics, style: "outlook",
+      });
+      return call(cookie, `/api/mail/mailboxes/${mailboxId}/messages/${invite.id}/invitation/respond`, {
+        method: "POST",
+        json: { response: "ACCEPTED" },
+      });
+    };
+    const request = outlookRequest.replaceAll(OUTLOOK_UID, uid);
+    const { eventId } = await (await respond("Alan Turing <alan@contoso.example>", request)).json<{ eventId: string }>();
+    const hijack = await respond(
+      "Mallory <mallory@evil.example>",
+      request.replace("mailto:alan@contoso.example", "mailto:mallory@evil.example").replace("SUMMARY;LANGUAGE=en-US:Design review", "SUMMARY:Moved"),
+    );
+    expect(hijack.status).toBe(400);
+    expect(await (await call(cookie, `/api/calendar/events/${eventId}`)).json()).toMatchObject({
+      event: { title: "Design review", organizer: { address: "alan@contoso.example" } },
+    });
+  });
 });
