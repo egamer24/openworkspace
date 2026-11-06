@@ -3,11 +3,15 @@ import { createDb } from "../db/client";
 import { domains, mailboxMembers, mailboxes } from "../db/schema";
 import { mailboxAddressSql, mailboxKindOrderSql } from "../db/mailboxes";
 import { createId } from "../lib/ids";
+import { inboundMessageId } from "../mail/inbound";
+import { ComposerAttachmentLimitError } from "../mail/outbound";
 import { submitOutgoing } from "../mail/outbound-service";
+import { storeFinalizedComposerUpload } from "../mail/uploads";
 import { composeSchema } from "../mail/schemas";
 import { mailboxStub, type JmapChangeType } from "../mailbox";
 import { systemFolderDefinitions, type MailboxState } from "../mailbox/folder-model";
 import type { Email } from "../mailbox/schema";
+import { loadUploadedBlob, MAX_UPLOAD_BYTES } from "./blobs";
 import { emailBoxes, type EmailFilter, type LocalBox } from "./email-query";
 import {
   decodeIdPart,
@@ -24,7 +28,7 @@ export const MAIL = "urn:ietf:params:jmap:mail";
 export const SUBMISSION = "urn:ietf:params:jmap:submission";
 
 export const LIMITS = {
-  maxSizeUpload: 0,
+  maxSizeUpload: MAX_UPLOAD_BYTES,
   maxConcurrentUpload: 1,
   maxSizeRequest: 10_000_000,
   maxConcurrentRequests: 4,
@@ -74,6 +78,16 @@ type Draft = {
   bodyHtml: string | undefined;
   inReplyTo: string[];
   references: string[];
+  attachments: DraftAttachment[];
+};
+
+type DraftAttachment = {
+  r2Key: string;
+  name: string;
+  type: string;
+  size: number;
+  disposition: "attachment" | "inline";
+  cid: string | undefined;
 };
 
 export type RequestContext = {
@@ -185,7 +199,7 @@ function groupByMailbox(ctx: RequestContext, ids: string[]) {
   return { groups, notFound };
 }
 
-export async function currentState(ctx: RequestContext): Promise<AccountState> {
+export async function currentState(ctx: Pick<RequestContext, "env" | "account">): Promise<AccountState> {
   const entries = await Promise.all(ctx.account.mailboxes.map(async (mailbox) => {
     const { seq } = await mailboxStub(ctx.env, mailbox.id).jmapSequence();
     return [mailbox.id, { seq, canSend: mailbox.canSend }] as const;
@@ -1172,10 +1186,17 @@ function draftBody(value: Args, bad: string[]) {
   const values = isObject(value.bodyValues) ? value.bodyValues : {};
   let text: string | undefined;
   let html: string | undefined;
+  // Parts that reference an uploaded blob are attachments.
+  const attachmentParts: Args[] = [];
   const take = (part: unknown, property: string) => {
     const partValue = isObject(part) && typeof part.partId === "string" ? values[part.partId] : undefined;
     if (isObject(part) && typeof part.type === "string" && part.type.startsWith("multipart/") && Array.isArray(part.subParts)) {
       for (const child of part.subParts) take(child, property);
+      return;
+    }
+    if (isObject(part) && part.blobId !== undefined && part.blobId !== null) {
+      if (property === "bodyStructure") attachmentParts.push(part);
+      else bad.push(property);
       return;
     }
     if (!isObject(partValue) || typeof partValue.value !== "string") {
@@ -1196,10 +1217,40 @@ function draftBody(value: Args, bad: string[]) {
     if (!Array.isArray(parts) || parts.length > 1) bad.push(property);
     else for (const part of parts) take(part, property);
   }
-  return { bodyText: text ?? "", bodyHtml: html };
+  if (Array.isArray(value.attachments)) {
+    for (const part of value.attachments) {
+      if (isObject(part)) attachmentParts.push(part);
+      else bad.push("attachments");
+    }
+  } else if (value.attachments !== undefined && value.attachments !== null) {
+    bad.push("attachments");
+  }
+  return { bodyText: text ?? "", bodyHtml: html, attachmentParts };
 }
 
-function createDraft(ctx: RequestContext, creationId: string, value: unknown): Args {
+async function draftAttachments(ctx: RequestContext, parts: Args[]) {
+  const attachments: DraftAttachment[] = [];
+  const notFound: string[] = [];
+  for (const part of parts) {
+    const blob = await loadUploadedBlob(ctx.env, ctx.account.userId, part.blobId);
+    if (!blob) {
+      notFound.push(String(part.blobId));
+      continue;
+    }
+    const inline = part.disposition === "inline" && typeof part.cid === "string";
+    attachments.push({
+      r2Key: blob.r2Key,
+      name: typeof part.name === "string" ? part.name : "attachment",
+      type: typeof part.type === "string" ? part.type : blob.contentType,
+      size: blob.size,
+      disposition: inline ? "inline" : "attachment",
+      cid: inline ? part.cid as string : undefined,
+    });
+  }
+  return { attachments, notFound };
+}
+
+async function createDraft(ctx: RequestContext, creationId: string, value: unknown): Promise<Args> {
   if (!ctx.submittedDraftRefs.has(creationId)) {
     return {
       type: "forbidden",
@@ -1212,7 +1263,6 @@ function createDraft(ctx: RequestContext, creationId: string, value: unknown): A
   if (from.length !== 1) bad.push("from");
   const replyTo = draftAddresses(value.replyTo, "replyTo", bad);
   if (replyTo.length > 1) bad.push("replyTo");
-  if (Array.isArray(value.attachments) && value.attachments.length) bad.push("attachments");
   if (value.subject !== undefined && value.subject !== null && typeof value.subject !== "string") bad.push("subject");
   const idList = (property: string) => {
     const ids = value[property];
@@ -1223,28 +1273,27 @@ function createDraft(ctx: RequestContext, creationId: string, value: unknown): A
     }
     return (ids as string[]).map((id) => `<${id}>`);
   };
-  const draft: Draft = {
+  const { attachmentParts, ...body } = draftBody(value, bad);
+  const draft: Omit<Draft, "attachments"> = {
     from: { email: from[0]?.email ?? "", name: from[0]?.name ?? null },
     to: draftAddresses(value.to, "to", bad).map((item) => item.email),
     cc: draftAddresses(value.cc, "cc", bad).map((item) => item.email),
     bcc: draftAddresses(value.bcc, "bcc", bad).map((item) => item.email),
     replyTo: replyTo[0]?.email,
     subject: typeof value.subject === "string" ? value.subject : "",
-    ...draftBody(value, bad),
+    ...body,
     inReplyTo: idList("inReplyTo"),
     references: idList("references"),
   };
-  if (bad.length) {
-    return {
-      type: "invalidProperties",
-      properties: [...new Set(bad)],
-      ...(bad.includes("attachments") ? { description: "Attachments need blob upload, which is not supported yet" } : {}),
-    };
-  }
+  if (bad.length) return { type: "invalidProperties", properties: [...new Set(bad)] };
+  const { attachments, notFound } = await draftAttachments(ctx, attachmentParts);
+  if (notFound.length) return { type: "blobNotFound", notFound };
   const id = `draft_${crypto.randomUUID().replaceAll("-", "")}`;
-  ctx.drafts.set(id, draft);
+  ctx.drafts.set(id, { ...draft, attachments });
   ctx.createdIds.set(creationId, id);
-  return { id, blobId: id, threadId: id, size: byteLength(draft.bodyText) + byteLength(draft.bodyHtml ?? "") };
+  const size = byteLength(draft.bodyText) + byteLength(draft.bodyHtml ?? "")
+    + attachments.reduce((sum, file) => sum + file.size, 0);
+  return { id, blobId: id, threadId: id, size };
 }
 
 async function emailSet(ctx: RequestContext, args: Args): Promise<Response[]> {
@@ -1260,7 +1309,7 @@ async function emailSet(ctx: RequestContext, args: Args): Promise<Response[]> {
   const notDestroyed: Args = {};
 
   for (const [creationId, value] of Object.entries(isObject(args.create) ? args.create : {})) {
-    const result = createDraft(ctx, creationId, value);
+    const result = await createDraft(ctx, creationId, value);
     if ("id" in result) created[creationId] = result;
     else notCreated[creationId] = result;
   }
@@ -1322,6 +1371,115 @@ async function emailSet(ctx: RequestContext, args: Args): Promise<Response[]> {
     notCreated,
     notUpdated,
     notDestroyed,
+  }]];
+}
+
+// --- Email/import ---------------------------------------------------------
+
+// An imported message starts its own Inbox conversation unless it threads
+// into an existing one, whose placement mailboxIds then sets.
+const IMPORTED_ROW = {
+  email: { direction: "incoming" },
+  mailboxState: "active",
+  folderId: null,
+  hasIncoming: true,
+} as EmailRow;
+
+async function importEmail(ctx: RequestContext, value: unknown): Promise<Args> {
+  if (!isObject(value)) return { type: "invalidProperties" };
+  const boxes = (isObject(value.mailboxIds) ? Object.entries(value.mailboxIds) : [])
+    .flatMap(([key, enabled]) => (enabled === true ? [resolveMailboxId(ctx, key)] : []));
+  const mailboxId = boxes[0]?.mailboxId;
+  const target = mailboxId && boxes.every((box) => box?.mailboxId === mailboxId && box.box !== "top")
+    ? placementFor(IMPORTED_ROW, boxes.map((box) => box!.box as LocalBox))
+    : null;
+  if (!mailboxId || !target) {
+    return {
+      type: "invalidProperties",
+      properties: ["mailboxIds"],
+      description: "Choose mailboxes of one OpenWorkspace mailbox that a received message can be in",
+    };
+  }
+  // Importing writes mail that every member sees as received, so it needs the
+  // same send access as composing; read-only members can only read and sort.
+  if (!accountMailbox(ctx, mailboxId)!.canSend) {
+    return { type: "forbidden", description: "Send access is required to import mail" };
+  }
+  if (value.keywords !== undefined && !isObject(value.keywords)) {
+    return { type: "invalidProperties", properties: ["keywords"] };
+  }
+  let receivedAt = Date.now();
+  if (value.receivedAt !== undefined && value.receivedAt !== null) {
+    try {
+      receivedAt = parseUtcDate(value.receivedAt, "receivedAt");
+    } catch {
+      return { type: "invalidProperties", properties: ["receivedAt"] };
+    }
+  }
+  const blob = await loadUploadedBlob(ctx.env, ctx.account.userId, value.blobId);
+  const object = blob ? await ctx.env.MAIL_STORAGE.get(blob.r2Key) : null;
+  if (!object) return { type: "blobNotFound", notFound: [value.blobId] };
+  const bytes = await object.arrayBuffer();
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  const hash = [...digest.slice(0, 16)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  // The delivery id is the content hash, so importing the same bytes twice
+  // into a mailbox finds the first copy.
+  const deliveryId = `jmap_${hash}`;
+  const stub = mailboxStub(ctx.env, mailboxId);
+  const alreadyExists = (id: string) => ({ type: "alreadyExists", existingId: scopedId(mailboxId, id) });
+  const existing = await stub.getEmail(inboundMessageId(deliveryId));
+  if (existing) return alreadyExists(existing.id);
+  const rawObjectKey = `mailboxes/${mailboxId}/raw/${deliveryId}.eml`;
+  await ctx.env.MAIL_STORAGE.put(rawObjectKey, bytes, { httpMetadata: { contentType: "message/rfc822" } });
+  const result = await stub.importEmail({
+    id: deliveryId,
+    rawObjectKey,
+    envelopeTo: accountMailbox(ctx, mailboxId)!.address,
+    receivedAt,
+  });
+  if (!result) {
+    await ctx.env.MAIL_STORAGE.delete(rawObjectKey);
+    return { type: "invalidEmail", description: "The blob is not a parseable message" };
+  }
+  if (!result.created) return alreadyExists(result.email.id);
+  const { email } = result;
+  const [row] = await loadEmailRows(ctx, mailboxId, [email.id]);
+  if (row) await moveConversation(ctx, mailboxId, row, target);
+  // Keywords other than $seen are not stored.
+  if (isObject(value.keywords) && value.keywords.$seen === true) {
+    await stub.setMessageRead(ctx.account.userId, email.id, true);
+  }
+  return {
+    id: scopedId(mailboxId, email.id),
+    blobId: scopedId(mailboxId, email.id),
+    threadId: scopedId(mailboxId, email.conversationId),
+    size: bytes.byteLength,
+  };
+}
+
+async function emailImport(ctx: RequestContext, args: Args): Promise<Response[]> {
+  checkAccount(ctx, args);
+  if (!isObject(args.emails)) invalid("emails is required");
+  if (Object.keys(args.emails).length > LIMITS.maxObjectsInSet) throw new MethodError("requestTooLarge");
+  const oldState = await currentState(ctx);
+  checkIfInState(args, oldState);
+  const created: Args = {};
+  const notCreated: Args = {};
+  for (const [creationId, value] of Object.entries(args.emails)) {
+    const result = await importEmail(ctx, value);
+    if (typeof result.id === "string") {
+      created[creationId] = result;
+      ctx.createdIds.set(creationId, result.id);
+    } else {
+      notCreated[creationId] = result;
+    }
+  }
+  return [["Email/import", {
+    accountId: ctx.account.id,
+    oldState: encodeState(oldState),
+    newState: encodeState(await currentState(ctx)),
+    created,
+    notCreated,
   }]];
 }
 
@@ -1469,6 +1627,22 @@ async function submitDraft(ctx: RequestContext, value: unknown): Promise<Args> {
     }
   }
   if (!recipients.length) return { type: "noRecipients" };
+  // Copy each uploaded blob into a composer upload of the sending mailbox so
+  // the web composer's attachment path (limits, storage, cleanup) applies.
+  const attachments = [];
+  for (const file of draft.attachments) {
+    const source = await ctx.env.MAIL_STORAGE.get(file.r2Key);
+    if (!source) return { type: "invalidEmail", description: "An attachment blob has expired; upload it again" };
+    const upload = await storeFinalizedComposerUpload({
+      env: ctx.env,
+      mailboxId: mailbox.id,
+      userId: ctx.account.userId,
+      filename: file.name,
+      contentType: file.type,
+      body: source.body,
+    });
+    attachments.push({ uploadId: upload.id, disposition: file.disposition, contentId: file.cid });
+  }
   const compose = composeSchema.safeParse({
     requestId: crypto.randomUUID(),
     mailboxId: mailbox.id,
@@ -1479,7 +1653,7 @@ async function submitDraft(ctx: RequestContext, value: unknown): Promise<Args> {
     subject: draft.subject,
     bodyText: draft.bodyText,
     bodyHtml: draft.bodyHtml,
-    attachments: [],
+    attachments,
   });
   if (!compose.success) {
     return { type: "invalidEmail", description: compose.error.issues[0]?.message ?? "Message is invalid" };
@@ -1489,18 +1663,24 @@ async function submitDraft(ctx: RequestContext, value: unknown): Promise<Args> {
     ? await stub.resolveParent(draft.inReplyTo, draft.references)
     : null;
   // Same send path as the web composer: validation, storage, transport, webhooks.
-  const submission = await submitOutgoing({
-    env: ctx.env,
-    requestUrl: ctx.requestUrl,
-    fromAddress: mailbox.address,
-    fromName: mailbox.displayName,
-    compose: { ...compose.data, userId: ctx.account.userId },
-    conversationId: related?.conversationId ?? createId("conv"),
-    related,
-    forwarded: null,
-    includeRelatedContext: false,
-    defer: ctx.defer,
-  });
+  let submission: Awaited<ReturnType<typeof submitOutgoing>>;
+  try {
+    submission = await submitOutgoing({
+      env: ctx.env,
+      requestUrl: ctx.requestUrl,
+      fromAddress: mailbox.address,
+      fromName: mailbox.displayName,
+      compose: { ...compose.data, userId: ctx.account.userId },
+      conversationId: related?.conversationId ?? createId("conv"),
+      related,
+      forwarded: null,
+      includeRelatedContext: false,
+      defer: ctx.defer,
+    });
+  } catch (error) {
+    if (error instanceof ComposerAttachmentLimitError) return { type: "invalidEmail", description: error.message };
+    throw error;
+  }
   const email = submission.email;
   if (email.transportState === "failed") {
     return { type: "serverFail", description: email.transportError ?? "The message could not be sent" };
@@ -1622,6 +1802,7 @@ export const METHODS: Record<string, { capability: string; handler: Handler }> =
   "Email/query": { capability: MAIL, handler: emailQuery },
   "Email/queryChanges": { capability: MAIL, handler: emailQueryChanges },
   "Email/set": { capability: MAIL, handler: emailSet },
+  "Email/import": { capability: MAIL, handler: emailImport },
   "SearchSnippet/get": { capability: MAIL, handler: searchSnippetGet },
   "Identity/get": { capability: SUBMISSION, handler: identityGet },
   "Identity/changes": { capability: SUBMISSION, handler: identityChanges },

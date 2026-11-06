@@ -1,7 +1,7 @@
 import { env, exports } from "cloudflare:workers";
 import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAccountApiToken } from "../worker/auth/api-tokens";
 import { createDb } from "../worker/db/client";
 import { accountApiTokens, domains, mailboxMembers, mailboxes, users } from "../worker/db/schema";
@@ -572,6 +572,13 @@ describe("JMAP emails", () => {
       }, "1"],
     ]);
     expect((responses[1]![1].notCreated as any).s.type).toBe("forbiddenToSend");
+
+    // Importing mail into a mailbox needs send access too.
+    const [, imported] = await call(f.token.token, "Email/import", {
+      accountId: f.accountId,
+      emails: { i: { blobId: "upl_00000000000000000000000000000000", mailboxIds: { [f.mbox(f.shared, "inbox")]: true } } },
+    });
+    expect((imported.notCreated as any).i.type).toBe("forbidden");
   });
 
   it("sends a draft through EmailSubmission and reports it in queryChanges", async () => {
@@ -626,5 +633,226 @@ describe("JMAP emails", () => {
     });
     expect(queryChanges.added).toEqual([{ id: sent.emailId, index: 0 }]);
     expect(queryChanges.removed).toContain(sent.emailId);
+  });
+});
+
+async function upload(token: string, accountId: string, body: BodyInit, type = "application/octet-stream", headers: Record<string, string> = {}) {
+  return exports.default.fetch(new Request(`http://example.test/jmap/upload/${accountId}`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": type, ...headers },
+    body,
+  }));
+}
+
+/** Spies on a mailbox DO's own bindings; RPC callers have separate wrappers. */
+async function spyOnMailbox<T>(mailboxId: string, spy: (bindings: Env, instance: object) => T) {
+  let result: T;
+  // The spies stay in this isolate; only their creation runs inside the object.
+  await runInDurableObject(mailboxStub(env, mailboxId), (instance) => {
+    result = spy(Reflect.get(instance, "bindings") as Env, instance);
+  });
+  return result!;
+}
+
+describe("JMAP blobs, import, and push", () => {
+  it("uploads blobs within the size limit and downloads them back", async () => {
+    const f = await fixture();
+    const response = await upload(f.token.token, f.accountId, "%PDF-invoice", "application/pdf; charset=binary");
+    expect(response.status).toBe(201);
+    const blob = await response.json<Record<string, any>>();
+    expect(blob).toMatchObject({ accountId: f.accountId, type: "application/pdf", size: 12 });
+    const download = await exports.default.fetch(new Request(
+      `http://example.test/jmap/download/${f.accountId}/${blob.blobId}/invoice.pdf`,
+      { headers: authHeaders(f.token.token) },
+    ));
+    expect(download.headers.get("content-type")).toBe("application/pdf");
+    expect(await download.text()).toBe("%PDF-invoice");
+
+    // Blobs are scoped to the uploading user.
+    const other = await fixture();
+    const foreign = await exports.default.fetch(new Request(
+      `http://example.test/jmap/download/${other.accountId}/${blob.blobId}/x`,
+      { headers: authHeaders(other.token.token) },
+    ));
+    expect(foreign.status).toBe(404);
+    await foreign.arrayBuffer();
+
+    const tooLarge = await upload(f.token.token, f.accountId, new ReadableStream(), "text/plain", {
+      "content-length": String(50_000_001),
+    });
+    expect(tooLarge.status).toBe(413);
+    expect(await tooLarge.json()).toMatchObject({ type: "urn:ietf:params:jmap:error:limit", limit: "maxSizeUpload" });
+    const wrongAccount = await upload(f.token.token, other.accountId, "x");
+    expect(wrongAccount.status).toBe(404);
+    await wrongAccount.arrayBuffer();
+    const anonymous = await exports.default.fetch(new Request(`http://example.test/jmap/upload/${f.accountId}`, {
+      method: "POST", body: "x",
+    }));
+    expect(anonymous.status).toBe(401);
+    await anonymous.arrayBuffer();
+
+    const session = await exports.default.fetch(new Request("http://example.test/.well-known/jmap", {
+      headers: authHeaders(f.token.token),
+    }));
+    const body = await session.json<Record<string, any>>();
+    expect(body.capabilities[CORE].maxSizeUpload).toBe(50_000_000);
+    expect(body.uploadUrl).toBe("http://example.test/jmap/upload/{accountId}");
+  });
+
+  it("sends uploaded blobs as attachments through EmailSubmission", async () => {
+    const f = await fixture();
+    const blob = await (await upload(f.token.token, f.accountId, "%PDF-invoice", "application/pdf")).json<{ blobId: string }>();
+    // The send_email binding cannot be spied on directly, so swap in a fake.
+    const send = vi.fn(async (_message: unknown) => ({ messageId: "<sent@example.test>" }));
+    const original = await spyOnMailbox(f.personal, (bindings) => {
+      const binding = bindings.EMAIL;
+      Reflect.set(bindings, "EMAIL", { send });
+      return () => Reflect.set(bindings, "EMAIL", binding);
+    });
+    try {
+      const responses = await jmap(f.token.token, [
+        ["Email/set", {
+          accountId: f.accountId,
+          create: {
+            draft: {
+              from: [{ email: f.address }],
+              to: [{ email: "carol@example.net" }],
+              subject: "Your invoice",
+              bodyStructure: {
+                type: "multipart/mixed",
+                subParts: [
+                  { partId: "t", type: "text/plain" },
+                  { blobId: blob.blobId, type: "application/pdf", name: "invoice.pdf", disposition: "attachment" },
+                ],
+              },
+              bodyValues: { t: { value: "Attached." } },
+            },
+            missing: {
+              from: [{ email: f.address }],
+              to: [{ email: "carol@example.net" }],
+              attachments: [{ blobId: "upl_00000000000000000000000000000000", type: "text/plain" }],
+            },
+          },
+        }, "0"],
+        ["EmailSubmission/set", {
+          accountId: f.accountId,
+          create: {
+            s: { identityId: encodeIdPart(f.personal), emailId: "#draft" },
+            m: { identityId: encodeIdPart(f.personal), emailId: "#missing" },
+          },
+        }, "1"],
+      ]);
+      expect((responses[0]![1].notCreated as any).missing).toMatchObject({
+        type: "blobNotFound", notFound: ["upl_00000000000000000000000000000000"],
+      });
+      expect((responses[0]![1].created as any).draft.size).toBe("Attached.".length + 12);
+      const sent = (responses[1]![1].created as any).s;
+      expect(sent.undoStatus).toBe("final");
+      expect(send).toHaveBeenCalledOnce();
+      const message = send.mock.calls[0]![0] as unknown as { text: string; attachments: any[] };
+      expect(message.text).toBe("Attached.");
+      expect(message.attachments).toHaveLength(1);
+      expect(message.attachments[0]).toMatchObject({ disposition: "attachment", filename: "invoice.pdf", type: "application/pdf" });
+      expect(new TextDecoder().decode(message.attachments[0].content)).toBe("%PDF-invoice");
+      const [, email] = await call(f.token.token, "Email/get", {
+        accountId: f.accountId, ids: [sent.emailId], properties: ["attachments"],
+      });
+      expect((email.list as any)[0].attachments).toEqual([expect.objectContaining({ name: "invoice.pdf", size: 12 })]);
+    } finally {
+      original();
+    }
+  });
+
+  it("imports raw messages once, without classification, webhooks, or push", async () => {
+    const f = await fixture();
+    const raw = [
+      "From: Erin <erin@example.net>",
+      `To: ${f.address}`,
+      "Subject: Imported invoice",
+      "Message-ID: <imported@example.net>",
+      "Date: Mon, 02 Mar 2026 10:00:00 +0000",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "From the old server.",
+    ].join("\r\n");
+    const blob = await (await upload(f.token.token, f.accountId, raw, "message/rfc822")).json<{ blobId: string }>();
+    const spies = await spyOnMailbox(f.personal, (bindings, instance) => [
+      vi.spyOn(bindings.WEBHOOKS, "send"),
+      vi.spyOn(bindings.PUSH_NOTIFICATIONS, "send"),
+      vi.spyOn(instance as { classifyInbound: () => Promise<unknown> }, "classifyInbound"),
+    ]);
+    try {
+      const archive = f.mbox(f.personal, "archive");
+      const imported = await call(f.token.token, "Email/import", {
+        accountId: f.accountId,
+        emails: {
+          a: { blobId: blob.blobId, mailboxIds: { [archive]: true }, keywords: { $seen: true }, receivedAt: "2026-03-02T10:00:00Z" },
+          sent: { blobId: blob.blobId, mailboxIds: { [f.mbox(f.personal, "sent")]: true } },
+          mixed: { blobId: blob.blobId, mailboxIds: { [archive]: true, [f.mbox(f.shared, "inbox")]: true } },
+          gone: { blobId: "upl_00000000000000000000000000000000", mailboxIds: { [archive]: true } },
+        },
+      });
+      const result = imported[1] as Record<string, any>;
+      const id = result.created.a.id as string;
+      expect(result.created.a).toMatchObject({ size: raw.length, blobId: id });
+      expect(result.notCreated.sent.type).toBe("invalidProperties");
+      expect(result.notCreated.mixed.type).toBe("invalidProperties");
+      expect(result.notCreated.gone.type).toBe("blobNotFound");
+      expect(result.newState).not.toBe(result.oldState);
+      for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+
+      const [, email] = await call(f.token.token, "Email/get", {
+        accountId: f.accountId, ids: [id], properties: ["subject", "mailboxIds", "keywords", "receivedAt", "messageId"],
+      });
+      expect((email.list as any)[0]).toEqual({
+        id,
+        subject: "Imported invoice",
+        mailboxIds: { [archive]: true },
+        keywords: { $seen: true },
+        receivedAt: "2026-03-02T10:00:00Z",
+        messageId: ["imported@example.net"],
+      });
+      const downloaded = await exports.default.fetch(new Request(
+        `http://example.test/jmap/download/${f.accountId}/${id}/m.eml`,
+        { headers: authHeaders(f.token.token) },
+      ));
+      expect(await downloaded.text()).toBe(raw);
+
+      // The same bytes, even from a fresh upload, are only imported once.
+      const again = await (await upload(f.token.token, f.accountId, raw, "message/rfc822")).json<{ blobId: string }>();
+      const duplicate = await call(f.token.token, "Email/import", {
+        accountId: f.accountId,
+        emails: { b: { blobId: again.blobId, mailboxIds: { [f.mbox(f.personal, "inbox")]: true } } },
+      });
+      expect((duplicate[1].notCreated as any).b).toEqual({ type: "alreadyExists", existingId: id });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  it("streams a StateChange over EventSource after a mutation", async () => {
+    const f = await fixture();
+    const anonymous = await exports.default.fetch(new Request("http://example.test/jmap/eventsource?types=*&closeafter=state&ping=0"));
+    expect(anonymous.status).toBe(401);
+    await anonymous.arrayBuffer();
+
+    const stream = await exports.default.fetch(new Request(
+      "http://example.test/jmap/eventsource?types=Email,Mailbox&closeafter=state&ping=0",
+      { headers: authHeaders(f.token.token) },
+    ));
+    expect(stream.status).toBe(200);
+    expect(stream.headers.get("content-type")).toBe("text/event-stream");
+    const update = await call(f.token.token, "Email/set", {
+      accountId: f.accountId, update: { [f.email("msg_a1")]: { "keywords/$seen": true } },
+    });
+    // closeafter=state ends the stream after the first StateChange.
+    const text = await stream.text();
+    const [event] = text.split("\n\n");
+    expect(event!.split("\n")[0]).toBe("event: state");
+    const data = JSON.parse(event!.split("\n")[1]!.slice("data: ".length));
+    expect(data).toEqual({
+      "@type": "StateChange",
+      changed: { [f.accountId]: { Email: update[1].newState, Mailbox: update[1].newState } },
+    });
   });
 });

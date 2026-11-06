@@ -1,10 +1,13 @@
 import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
+import { MAX_COMPOSER_ATTACHMENT_BYTES } from "../../shared/mail";
 import { authenticateAccountApiToken, bearerToken } from "../auth/api-tokens";
 import type { AppEnv } from "../env";
 import { hashToken } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rate-limit";
 import { mailboxStub } from "../mailbox";
+import { UploadValidationError } from "../mail/uploads";
+import { loadUploadedBlob, storeUploadedBlob } from "./blobs";
 import {
   CORE,
   LIMITS,
@@ -17,13 +20,14 @@ import {
   type RequestContext,
 } from "./methods";
 import { parseScopedId } from "./ids";
+import { eventSource } from "./push";
 
 const CAPABILITIES = [CORE, MAIL, SUBMISSION];
 const RATE_LIMIT_PER_MINUTE = 600;
 
 type JmapEnv = AppEnv & { Variables: { jmapAccount: Account } };
 
-function problem(c: Context, status: 400 | 401 | 404 | 429 | 501, type: string, detail: string, extra: object = {}) {
+function problem(c: Context, status: 400 | 401 | 404 | 411 | 413 | 429, type: string, detail: string, extra: object = {}) {
   return c.json({ type, status, detail, ...extra }, status, {
     "content-type": "application/problem+json",
   });
@@ -93,7 +97,7 @@ function sessionResource(origin: string, account: Account, state: string) {
             maxMailboxesPerEmail: null,
             maxMailboxDepth: 2,
             maxSizeMailboxName: 80,
-            maxSizeAttachmentsPerEmail: 0,
+            maxSizeAttachmentsPerEmail: MAX_COMPOSER_ATTACHMENT_BYTES,
             emailQuerySortOptions: ["receivedAt", "sentAt"],
             mayCreateTopLevelMailbox: false,
           },
@@ -197,6 +201,20 @@ function submittedDraftRefs(methodCalls: Array<[string, Record<string, unknown>,
   return refs;
 }
 
+function blobHeaders(c: Context, storedType: string) {
+  const requestedType = c.req.query("type");
+  return {
+    "content-type": requestedType && /^[\w.+-]+\/[\w.+-]+(?:\s*;.*)?$/u.test(requestedType)
+      ? requestedType
+      : storedType,
+    // Blobs are never rendered on this origin.
+    "content-disposition": contentDisposition(c.req.param("name") ?? "blob"),
+    "x-content-type-options": "nosniff",
+    "content-security-policy": "sandbox; default-src 'none'",
+    "cache-control": "private, max-age=3600",
+  };
+}
+
 function contentDisposition(name: string) {
   const fallback = name.replace(/[^\x20-\x7e]|["\\]/gu, "_");
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
@@ -273,8 +291,15 @@ export const jmapRoutes = new Hono<JmapEnv>()
   })
   .get("/jmap/download/:accountId/:blobId/:name", requireJmapAuth, async (c) => {
     const account = c.get("jmapAccount");
-    const blob = parseScopedId(c.req.param("blobId"));
     const notFound = () => problem(c, 404, "about:blank", "Blob not found");
+    if (c.req.param("accountId") !== account.id) return notFound();
+    const uploaded = await loadUploadedBlob(c.env, account.userId, c.req.param("blobId"));
+    if (uploaded) {
+      const object = await c.env.MAIL_STORAGE.get(uploaded.r2Key);
+      if (!object) return notFound();
+      return new Response(object.body, { headers: blobHeaders(c, uploaded.contentType) });
+    }
+    const blob = parseScopedId(c.req.param("blobId"));
     if (
       c.req.param("accountId") !== account.id || !blob
       || !account.mailboxes.some((mailbox) => mailbox.id === blob.mailboxId)
@@ -300,21 +325,35 @@ export const jmapRoutes = new Hono<JmapEnv>()
       storedType = file?.contentType ?? storedType;
     }
     if (body === null) return notFound();
-    const requestedType = c.req.query("type");
-    return new Response(body, {
-      headers: {
-        "content-type": requestedType && /^[\w.+-]+\/[\w.+-]+(?:\s*;.*)?$/u.test(requestedType)
-          ? requestedType
-          : storedType,
-        // Blobs are never rendered on this origin.
-        "content-disposition": contentDisposition(c.req.param("name")),
-        "x-content-type-options": "nosniff",
-        "content-security-policy": "sandbox; default-src 'none'",
-        "cache-control": "private, max-age=3600",
-      },
-    });
+    return new Response(body, { headers: blobHeaders(c, storedType) });
   })
-  .post("/jmap/upload/:accountId", requireJmapAuth, (c) =>
-    problem(c, 501, "about:blank", "Blob upload is not supported yet"))
-  .get("/jmap/eventsource", requireJmapAuth, (c) =>
-    problem(c, 501, "about:blank", "Push is not supported yet; poll with */changes"));
+  .post("/jmap/upload/:accountId", requireJmapAuth, async (c) => {
+    const account = c.get("jmapAccount");
+    if (c.req.param("accountId") !== account.id) return problem(c, 404, "about:blank", "Account not found");
+    const length = c.req.header("content-length");
+    if (length === undefined || !/^\d+$/u.test(length)) {
+      return problem(c, 411, "about:blank", "Content-Length is required");
+    }
+    if (Number(length) > LIMITS.maxSizeUpload) {
+      return problem(c, 413, "urn:ietf:params:jmap:error:limit", "Blob is too large", { limit: "maxSizeUpload" });
+    }
+    const type = (c.req.header("content-type") ?? "").split(";", 1)[0]!.trim().toLowerCase();
+    const contentType = /^[\w.+-]+\/[\w.+-]+$/u.test(type) ? type : "application/octet-stream";
+    try {
+      // The runtime holds a Content-Length body to its declared size, so the
+      // stream goes to R2 without buffering.
+      const blob = await storeUploadedBlob(c.env, account.userId, contentType, c.req.raw.body ?? new ArrayBuffer(0));
+      return c.json({ accountId: account.id, blobId: blob.id, type: blob.contentType, size: blob.size }, 201);
+    } catch (error) {
+      if (error instanceof UploadValidationError) return problem(c, 400, "about:blank", "The blob is empty");
+      throw error;
+    }
+  })
+  .get("/jmap/eventsource", requireJmapAuth, (c) => eventSource({
+    env: c.env,
+    account: c.get("jmapAccount"),
+    tokenId: c.get("sessionId"),
+    tokenHash: c.get("sessionTokenHash"),
+    url: new URL(c.req.url),
+    signal: c.req.raw.signal,
+  }));

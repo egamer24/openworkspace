@@ -28,23 +28,27 @@ export async function listActiveMailboxSessions(
   if (!sessionIds.length) return [];
   // D1 allows only 100 bound parameters, so the complete ID set is bound as
   // one JSON value and expanded by SQLite instead of generating a large IN.
+  // Account API tokens hold JMAP push connections; they never expire but are
+  // deleted on revocation.
   const result = await db.prepare(`
     with requested_sessions(id) as (
       select cast(value as text) from json_each(?)
     )
     select
-      session.id,
-      session.token_hash,
-      session.user_id
+      requested.id,
+      coalesce(session.token_hash, token.token_hash) as token_hash,
+      user.id as user_id
     from requested_sessions requested
-    inner join sessions session on session.id = requested.id
-    inner join users user on user.id = session.user_id
+    left join sessions session
+      on session.id = requested.id
+      and session.expires_at > ?
+    left join account_api_tokens token on token.id = requested.id
+    inner join users user on user.id = coalesce(session.user_id, token.user_id)
     inner join mailbox_members member
-      on member.user_id = session.user_id
+      on member.user_id = user.id
       and member.mailbox_id = ?
-    where session.expires_at > ?
-      and user.status = 'active'
-  `).bind(idList(sessionIds), mailboxId, now).all<ActiveMailboxSessionRow>();
+    where user.status = 'active'
+  `).bind(idList(sessionIds), now, mailboxId).all<ActiveMailboxSessionRow>();
   return result.results.map((session) => ({
     id: session.id,
     tokenHash: session.token_hash,

@@ -1282,6 +1282,48 @@ export class MailboxDO extends DurableObject<Env> {
     return stored;
   }
 
+  /**
+   * Stores a client-imported message (JMAP Email/import) through the inbound
+   * parser, without AI classification, webhooks, or push notifications. The
+   * caller derives `id` from the content hash, so re-imports are deduplicated.
+   * Returns null when the raw message cannot be parsed.
+   */
+  async importEmail(input: { id: string; rawObjectKey: string; envelopeTo: string; receivedAt: number }) {
+    const messageId = inboundMessageId(input.id);
+    const existing = this.getEmail(messageId);
+    if (existing) return { email: existing, created: false };
+    const receivedAt = new Date(input.receivedAt);
+    const job: PendingInbound = {
+      id: input.id,
+      rawObjectKey: input.rawObjectKey,
+      envelopeFrom: "",
+      envelopeTo: input.envelopeTo,
+      receivedAt,
+      attempts: 0,
+      aiAttempts: 0,
+      nextAttemptAt: receivedAt,
+    };
+    let email: NewEmail;
+    try {
+      email = await prepareInboundEmail({
+        env: this.bindings,
+        mailboxId: this.state.id.name ?? "unknown-mailbox",
+        job,
+        rawMime: await readInboundRawMime(this.bindings, job),
+        resolveParent: (inReplyTo, references) => this.resolveParent(inReplyTo, references),
+      });
+    } catch (error) {
+      if (error instanceof UnprocessableInboundEmailError) return null;
+      throw error;
+    }
+    const stored = this.insertClassifiedInboundEmail(email, null);
+    // Office previews of imported attachments run on the alarm.
+    await this.scheduleRemainingWork();
+    if (!stored) return { email: this.getEmail(messageId)!, created: false };
+    this.publishUpdate();
+    return { email: stored, created: true };
+  }
+
   setEmailAuthenticationResults(
     emailId: string,
     results: EmailAuthenticationResults,

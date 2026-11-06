@@ -487,6 +487,45 @@ export async function loadComposerUpload(input: {
   };
 }
 
+/**
+ * Stores server-received bytes as an already finalized composer upload, so
+ * they expire with the composer-uploads/ lifecycle rule and can be sent
+ * through the normal outbound attachment path.
+ */
+export async function storeFinalizedComposerUpload(input: {
+  env: Bindings;
+  mailboxId: string;
+  userId: string;
+  filename: string;
+  contentType: string;
+  body: ReadableStream | ArrayBuffer;
+}): Promise<UploadedAttachment> {
+  const id = createId("upl");
+  const keys = composerUploadKeys(input.mailboxId, input.userId, id);
+  const filename = input.filename.trim().slice(0, 255) || "attachment";
+  const contentType = input.contentType.trim().slice(0, 255) || "application/octet-stream";
+  const stored = await input.env.MAIL_STORAGE.put(keys.immutable, input.body, {
+    httpMetadata: { contentType },
+  });
+  if (!stored || stored.size <= 0 || stored.size > MAX_COMPOSER_ATTACHMENT_BYTES) {
+    await deleteComposerUploadObjects(input.env, keys);
+    throw new UploadValidationError("Attachment upload is invalid");
+  }
+  await putUploadMeta({
+    env: input.env,
+    metadataKey: keys.metadata,
+    meta: {
+      filename,
+      contentType,
+      size: stored.size,
+      uploadedBy: input.userId,
+      mailboxId: input.mailboxId,
+      finalizedAt: Date.now(),
+    },
+  });
+  return { id, r2Key: keys.immutable, filename, contentType, size: stored.size };
+}
+
 export async function copyStoredAttachmentToMessage(input: {
   env: Bindings;
   sourceKey: string;
