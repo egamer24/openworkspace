@@ -321,7 +321,7 @@ curl https://mail.example.com/api/mail/messages \
 
 ### Connect a JMAP client
 
-OpenWorkspace speaks JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620) core, [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621) mail and submission) for native mail clients. Point the client at `https://mail.example.com/.well-known/jmap` and authenticate with a personal token from **Settings → MCP**, either as `Authorization: Bearer mcp_…` or as the password of HTTP Basic auth (the username is ignored). Tokens are checked on every request, so revoking one cuts the client off immediately.
+OpenWorkspace speaks JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620) core, [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621) mail and submission) for native mail clients. Point the client at `https://mail.example.com/.well-known/jmap` and authenticate with a full-access personal token from **Settings → MCP** (send-only tokens are refused), either as `Authorization: Bearer mcp_…` or as the password of HTTP Basic auth (the username is ignored). Tokens are checked on every request, so revoking one cuts the client off immediately.
 
 How OpenWorkspace maps onto JMAP:
 

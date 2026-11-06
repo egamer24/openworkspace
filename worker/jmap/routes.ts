@@ -27,7 +27,7 @@ const RATE_LIMIT_PER_MINUTE = 600;
 
 type JmapEnv = AppEnv & { Variables: { jmapAccount: Account } };
 
-function problem(c: Context, status: 400 | 401 | 404 | 411 | 413 | 429, type: string, detail: string, extra: object = {}) {
+function problem(c: Context, status: 400 | 401 | 403 | 404 | 411 | 413 | 429, type: string, detail: string, extra: object = {}) {
   return c.json({ type, status, detail, ...extra }, status, {
     "content-type": "application/problem+json",
   });
@@ -54,6 +54,10 @@ const requireJmapAuth = createMiddleware<JmapEnv>(async (c, next) => {
   if (!identity) {
     c.header("www-authenticate", 'Basic realm="OpenWorkspace JMAP", Bearer realm="OpenWorkspace JMAP"');
     return problem(c, 401, "about:blank", "Authentication is required");
+  }
+  // JMAP exposes whole mailboxes; send-only tokens stay on their REST allowlist.
+  if (identity.scope !== "full") {
+    return problem(c, 403, "about:blank", "This token can only send mail; JMAP needs a full-access token");
   }
   const limit = await checkRateLimit(c.env.DB, {
     action: "jmap",

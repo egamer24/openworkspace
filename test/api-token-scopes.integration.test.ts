@@ -90,5 +90,24 @@ describe("API token scopes", () => {
     });
     expect(mcp.status).toBe(403);
     await mcp.json();
+
+    // JMAP reads and writes whole mailboxes, so it needs a full-scope token
+    // whether the token arrives as a Bearer token or as the Basic password.
+    const basic = { authorization: `Basic ${btoa(`client:${token.token}`)}` };
+    for (const headers of [auth, basic]) {
+      const session = await fetchApi("/.well-known/jmap", { headers });
+      expect(session.status).toBe(403);
+      await session.json();
+    }
+    const api = await fetchApi("/jmap/api", {
+      method: "POST",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({
+        using: ["urn:ietf:params:jmap:core", "urn:ietf:params:jmap:mail"],
+        methodCalls: [["Mailbox/get", { accountId: "any" }, "a"]],
+      }),
+    });
+    expect(api.status).toBe(403);
+    await api.json();
   });
 });
