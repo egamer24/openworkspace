@@ -38,6 +38,10 @@
     {
       "binding": "MAIL_STORAGE",
       "bucket_name": "openworkspace-test"
+    },
+    {
+      "binding": "BACKUP_STORAGE",
+      "bucket_name": "openworkspace-backups-test"
     }
   ],
   "images": {

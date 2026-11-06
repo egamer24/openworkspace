@@ -30,6 +30,7 @@ import { normalizeMailboxAddress } from "./lib/ids";
 import { consumeWebhooks } from "./webhooks/delivery";
 import { WEBHOOK_QUEUE } from "./webhooks/service";
 import { samlLoginRoutes, samlRoutes } from "./saml/routes";
+import { runBackupTick } from "./backups/job";
 
 const app = new Hono<AppEnv>()
   .use("/api/*", verifySameOrigin)
@@ -121,5 +122,8 @@ export default {
       return consumeWebhooks(batch, env);
     }
     return consumeDeliveryEvents(batch, env);
+  },
+  async scheduled(controller, env) {
+    await runBackupTick(env, new Date(controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;

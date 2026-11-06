@@ -917,5 +917,44 @@ export const rateLimitBuckets = sqliteTable(
   ],
 );
 
+/**
+ * One row per dated snapshot in BACKUP_STORAGE. The cursor columns let the
+ * scheduled job resume in bounded batches; `mailboxId` is null once every
+ * mailbox has been written and only retention remains.
+ */
+export const backupRuns = sqliteTable("backup_runs", {
+  id: text("id").primaryKey(),
+  status: text("status", { enum: ["running", "completed"] }).notNull(),
+  mailboxId: text("mailbox_id"),
+  mailboxAddress: text("mailbox_address"),
+  emailCursor: text("email_cursor"),
+  part: integer("part").notNull().default(0),
+  messageCount: integer("message_count").notNull().default(0),
+  byteCount: integer("byte_count").notNull().default(0),
+  newObjectCount: integer("new_object_count").notNull().default(0),
+  errorsJson: text("errors_json", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default([]),
+  leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+});
+
+/**
+ * Content-addressed .eml objects in BACKUP_STORAGE. `lastRunId` is the newest
+ * snapshot that references the object, so anything older than the oldest
+ * retained snapshot is unreferenced and safe to delete.
+ */
+export const backupObjects = sqliteTable(
+  "backup_objects",
+  {
+    sha256: text("sha256").primaryKey(),
+    size: integer("size").notNull(),
+    lastRunId: text("last_run_id").notNull(),
+  },
+  (table) => [index("backup_objects_last_run_idx").on(table.lastRunId)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Mailbox = typeof mailboxes.$inferSelect;

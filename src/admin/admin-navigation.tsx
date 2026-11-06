@@ -1,5 +1,6 @@
 import { Fragment, useState } from "react";
 import {
+  Archive,
   ArrowLeft,
   AtSign,
   FileKey2,
@@ -36,7 +37,8 @@ export type AdminSection =
   | "sso-applications"
   | "saml-applications"
   | "groups"
-  | "webhooks";
+  | "webhooks"
+  | "backups";
 
 const adminSections: Array<{
   id: AdminSection;
@@ -50,6 +52,7 @@ const adminSections: Array<{
   { id: "domains", label: "Domains", Icon: Globe2 },
   { id: "addresses", label: "Addresses", Icon: AtSign },
   { id: "webhooks", label: "Webhooks", Icon: Webhook },
+  { id: "backups", label: "Backups", Icon: Archive },
   { id: "sso-applications", label: "OIDC applications", Icon: KeyRound, separatorBefore: true },
   { id: "saml-applications", label: "SAML applications", Icon: FileKey2 },
   { id: "groups", label: "Identity groups", Icon: UsersRound },

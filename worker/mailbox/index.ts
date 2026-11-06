@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle, type DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "../../drizzle/mailbox/migrations.js";
@@ -1255,6 +1255,27 @@ export class MailboxDO extends DurableObject<Env> {
 
   getEmail(id: string) {
     return this.db.select().from(emails).where(eq(emails.id, id)).all()[0] ?? null;
+  }
+
+  /** Stable id-ordered page of messages with their folder placement, for backups. */
+  listBackupEmails(afterId: string | null, limit: number) {
+    return this.db
+      .select({
+        email: emails,
+        mailboxState: conversations.mailboxState,
+        folderName: folders.name,
+        seen: sql<number>`exists (
+          select 1 from ${emailReadStates}
+          where ${emailReadStates.emailId} = ${emails.id}
+        )`.mapWith(Boolean),
+      })
+      .from(emails)
+      .innerJoin(conversations, eq(conversations.id, emails.conversationId))
+      .leftJoin(folders, eq(folders.id, conversations.folderId))
+      .where(afterId ? gt(emails.id, afterId) : undefined)
+      .orderBy(asc(emails.id))
+      .limit(limit)
+      .all();
   }
 
   getEmailByMessageId(messageIdHeader: string) {

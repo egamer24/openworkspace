@@ -61,6 +61,7 @@ import {
 } from "./schemas";
 import { insertOidcAudit } from "../oidc/service";
 import { webhookAdminRoutes } from "./webhook-routes";
+import { backupAdminRoutes } from "./backup-routes";
 import {
   deferWebhookTask,
   mailboxWebhookData,
@@ -370,6 +371,7 @@ export const adminRoutes = new Hono<AppEnv>()
     },
   )
   .route("/", mailboxAdminRoutes)
+  .route("/", backupAdminRoutes)
   .post(
     "/invitations",
     zValidator("json", createInvitationSchema),
