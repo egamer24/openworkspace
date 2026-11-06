@@ -165,7 +165,6 @@
     "wrangler": "4.127.1"
   },
   "overrides": {
-    "@xmldom/xmldom": "0.9.12",
     "esbuild": "0.28.2"
   }
 }
