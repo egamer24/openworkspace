@@ -73,7 +73,7 @@ export function BackupsPanel() {
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-4">
             <div>
               <dt className="text-xs text-muted-foreground">Snapshot</dt>
-              <dd className="mt-0.5 flex items-center gap-2 font-medium">
+              <dd className="mt-0.5 flex flex-wrap items-center gap-2 font-medium whitespace-nowrap">
                 {latest.id}
                 <Badge variant={running ? "info" : "success"}>
                   {running ? "Running" : "Completed"}
@@ -101,6 +101,11 @@ export function BackupsPanel() {
               <dt className="text-xs text-muted-foreground">Size</dt>
               <dd className="mt-0.5 font-medium">{formatBytes(latest.byteCount)}</dd>
             </div>
+            {running ? (
+              <p className="col-span-full text-xs text-muted-foreground">
+                Large backups continue with the hourly job.
+              </p>
+            ) : null}
             {running && latest.currentMailbox ? (
               <div className="col-span-full">
                 <dt className="text-xs text-muted-foreground">Current mailbox</dt>
