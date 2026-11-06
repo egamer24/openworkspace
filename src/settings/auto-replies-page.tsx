@@ -22,12 +22,13 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, responseJson, type SuccessfulResponse } from "@/lib/api";
-import type { Mailbox } from "@/mail/types";
+import { cn } from "@/lib/utils";
 import { useMailboxes } from "@/mail/use-mail-data";
 
 type AutoReplyRoute = (typeof api.api.mail.mailboxes)[":id"]["auto-reply"];
 type AutoReplyState = SuccessfulResponse<Awaited<ReturnType<AutoReplyRoute["$get"]>>>;
 type Audience = "everyone" | "knownSenders";
+type AutoReplyMailbox = { id: string; address: string };
 
 function toLocalInput(value: string | Date | null | undefined) {
   return value ? format(new Date(value), "yyyy-MM-dd'T'HH:mm") : "";
@@ -47,7 +48,15 @@ function statusLine(state: AutoReplyState) {
   return "Off";
 }
 
-function AutoReplyEditor({ mailbox, state }: { mailbox: Mailbox; state: AutoReplyState }) {
+function AutoReplyEditor({
+  mailbox,
+  state,
+  showAddress,
+}: {
+  mailbox: AutoReplyMailbox;
+  state: AutoReplyState;
+  showAddress: boolean;
+}) {
   const client = useQueryClient();
   const saved = state.settings;
   const [enabled, setEnabled] = useState(saved?.enabled ?? false);
@@ -92,8 +101,10 @@ function AutoReplyEditor({ mailbox, state }: { mailbox: Mailbox; state: AutoRepl
 
   return (
     <div className="space-y-4 py-5 first:pt-0">
-      <div className="flex items-center justify-between gap-3">
-        <Label htmlFor={`${id}-enabled`} className="font-mono text-xs">{mailbox.address}</Label>
+      <div className={cn("flex items-center gap-3", showAddress ? "justify-between" : "justify-end")}>
+        <Label htmlFor={`${id}-enabled`} className={showAddress ? "font-mono text-xs" : "sr-only"}>
+          {mailbox.address}
+        </Label>
         <div className="flex items-center gap-3">
           <Badge variant={state.status === "active" ? "default" : "outline"}>{statusLine(state)}</Badge>
           <Switch id={`${id}-enabled`} checked={enabled} onCheckedChange={setEnabled} />
@@ -193,14 +204,28 @@ function AutoReplyEditor({ mailbox, state }: { mailbox: Mailbox; state: AutoRepl
   );
 }
 
-function MailboxAutoReply({ mailbox }: { mailbox: Mailbox }) {
-  const query = useQuery({
-    queryKey: ["auto-reply", mailbox.id],
+export function useAutoReply(mailboxId: string) {
+  return useQuery({
+    queryKey: ["auto-reply", mailboxId],
     queryFn: async ({ signal }) => responseJson(await api.api.mail.mailboxes[":id"]["auto-reply"].$get(
-      { param: { id: mailbox.id } },
+      { param: { id: mailboxId } },
       { init: { signal } },
     )),
   });
+}
+
+export function autoReplyStatusLabel(state: AutoReplyState) {
+  return statusLine(state);
+}
+
+export function MailboxAutoReply({
+  mailbox,
+  showAddress = true,
+}: {
+  mailbox: AutoReplyMailbox;
+  showAddress?: boolean;
+}) {
+  const query = useAutoReply(mailbox.id);
   if (query.isLoading) {
     return (
       <div className="flex items-center gap-2 py-5 text-sm text-muted-foreground">
@@ -216,6 +241,7 @@ function MailboxAutoReply({ mailbox }: { mailbox: Mailbox }) {
       key={String(query.data.settings?.updatedAt ?? "new")}
       mailbox={mailbox}
       state={query.data}
+      showAddress={showAddress}
     />
   );
 }

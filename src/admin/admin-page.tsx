@@ -41,6 +41,7 @@ import { UserAccessEditor } from "./user-access-editor";
 import { GroupsManager } from "./groups-manager";
 import { SsoApplications } from "./sso-applications";
 import { WebhooksManager } from "./webhooks-manager";
+import { AutoRepliesManager } from "./auto-replies-manager";
 import { DomainsManager } from "./domains-manager";
 import { AdminUserSessions } from "./user-sessions";
 import { SamlApplications } from "./saml-applications";
@@ -48,6 +49,7 @@ import { SamlApplications } from "./saml-applications";
 type AdminView =
   | "people"
   | "mailboxes"
+  | "auto-replies"
   | "domains"
   | "sso-applications"
   | "saml-applications"
@@ -66,6 +68,7 @@ type ResourceDetailView = Extract<
 const viewCopy: Record<AdminView, { title: string; description: string }> = {
   people: { title: "People", description: "Workspace members and their mailbox access." },
   mailboxes: { title: "Mailboxes", description: "Personal and shared addresses provisioned for this workspace." },
+  "auto-replies": { title: "Auto-replies", description: "Out-of-office replies for every mailbox in the workspace." },
   domains: { title: "Domains", description: "Mail domains and Cloudflare zone IDs." },
   "sso-applications": { title: "OIDC applications", description: "OIDC clients, callbacks, user assignments, and released claims." },
   "saml-applications": { title: "SAML applications", description: "Service providers, assertions, assignments, and attributes." },
@@ -360,6 +363,12 @@ export function AdminPage() {
                 loading={state.isLoading}
                 selectedId={selectedId}
                 onSelect={(id) => go("groups", id)}
+              />
+            )}
+            {view === "auto-replies" && (
+              <AutoRepliesManager
+                mailboxes={state.data?.mailboxes}
+                loading={state.isLoading}
               />
             )}
             {view === "webhooks" && (
