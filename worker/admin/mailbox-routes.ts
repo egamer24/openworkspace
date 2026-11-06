@@ -2,7 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, eq, exists } from "drizzle-orm";
 import { Hono } from "hono";
 import { createDb } from "../db/client";
-import { domains, mailboxMembers, mailboxes, users } from "../db/schema";
+import { domains, mailboxMembers, mailboxes, routingAddresses, users } from "../db/schema";
 import type { AppEnv } from "../env";
 import { apiError } from "../lib/http";
 import { createId, mailboxAddressParts } from "../lib/ids";
@@ -51,6 +51,17 @@ export const mailboxAdminRoutes = new Hono<AppEnv>()
       const id = createId("mbx");
       const now = new Date();
       const address = mailboxAddressParts(input.address);
+      const [routed] = await db
+        .select({ id: routingAddresses.id })
+        .from(routingAddresses)
+        .where(and(
+          eq(routingAddresses.domainId, domain.id),
+          eq(routingAddresses.localPart, address.localPart),
+        ))
+        .limit(1);
+      if (routed) {
+        return apiError(c, 409, "CONFLICT", "Address is already used by an alias or forwarding address");
+      }
       const members = input.ownerUserId
         ? [{ userId: input.ownerUserId, canSend: true }]
         : input.members;

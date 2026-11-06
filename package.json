@@ -73,6 +73,15 @@
       "CLOUDFLARE_ANALYTICS_TOKEN": {
         "description": "Optional secret. Cloudflare API token with Analytics Read for every configured mail zone."
       },
+      "CLOUDFLARE_API_TOKEN": {
+        "description": "Optional secret. Cloudflare API token that lets Administration → Domains configure Email Routing and Email Sending. See README for permissions."
+      },
+      "CLOUDFLARE_ACCOUNT_ID": {
+        "description": "Optional secret. Limits the Cloudflare zones offered for domain onboarding to this account."
+      },
+      "WORKER_NAME": {
+        "description": "This Worker's script name, used as the Email Routing catch-all target."
+      },
       "PUSH_NOTIFICATIONS": {
         "description": "Queue for Web Push delivery after incoming mail is committed."
       },

@@ -16,6 +16,7 @@ import {
   accessLinks,
   accountApiTokens,
   authChallenges,
+  domainOnboardingSteps,
   domains,
   groupMembers,
   identityGroups,
@@ -71,8 +72,10 @@ import {
   mailboxKind,
   mailboxKindOrderSql,
 } from "../db/mailboxes";
+import { cloudflareAdminRoutes } from "./cloudflare-routes";
 import { domainAdminRoutes } from "./domain-routes";
 import { mailboxAdminRoutes } from "./mailbox-routes";
+import { routingAdminRoutes } from "./routing-routes";
 import {
   domainForAddress,
   hasKnownGroupIds,
@@ -174,6 +177,7 @@ export const adminRoutes = new Hono<AppEnv>()
       samlRows,
       samlAssignments,
       samlGroupClaims,
+      onboardingSteps,
     ] = await Promise.all([
       globalAiProcessingEnabled(c.env.DB),
       db
@@ -272,6 +276,7 @@ export const adminRoutes = new Hono<AppEnv>()
       }).from(samlApplications).orderBy(samlApplications.name),
       db.select().from(samlApplicationAssignments),
       db.select().from(samlApplicationGroupClaims),
+      db.select().from(domainOnboardingSteps),
     ]);
     const mailboxMembersById = groupByKey(
       memberships,
@@ -302,11 +307,21 @@ export const adminRoutes = new Hono<AppEnv>()
       (claim) => claim.applicationId,
       (claim) => claim.groupId,
     );
+    const onboardingStepsById = groupByKey(
+      onboardingSteps,
+      (step) => step.domainId,
+    );
     const samlProvider = adminSamlProvider(c.env);
     return c.json({
       ok: true as const,
       aiProcessingEnabled,
-      domains: domainRows,
+      cloudflareOnboarding: Boolean(c.env.CLOUDFLARE_API_TOKEN),
+      domains: domainRows.map((domain) => ({
+        ...domain,
+        onboarding: (onboardingStepsById.get(domain.id) ?? []).map(
+          ({ step, status, detail, updatedAt }) => ({ step, status, detail, updatedAt }),
+        ),
+      })),
       users: userRows,
       mailboxes: mailboxRows.map((mailbox) => ({
         ...mailbox,
@@ -337,6 +352,8 @@ export const adminRoutes = new Hono<AppEnv>()
   })
   .route("/", userSessionAdminRoutes)
   .route("/", domainAdminRoutes)
+  .route("/", cloudflareAdminRoutes)
+  .route("/", routingAdminRoutes)
   .route("/", samlApplicationAdminRoutes)
   .put(
     "/ai",

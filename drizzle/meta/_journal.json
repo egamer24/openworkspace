@@ -85,6 +85,13 @@
       "when": 1793981720943,
       "tag": "0011_mailbox_signatures",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793981917899,
+      "tag": "0012_domain_onboarding_and_routing",
+      "breakpoints": true
     }
   ]
 }

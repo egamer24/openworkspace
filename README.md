@@ -82,7 +82,32 @@ The script merges upstream (`main` or `master`) and keeps your Cloudflare-provis
 
 ### Connect mail domains
 
-For every domain used by a mailbox, configure Cloudflare manually:
+#### Automatic (recommended)
+
+Administration → Domains can configure steps 1 to 3 below through the Cloudflare API.
+
+1. Create a [User API token](https://dash.cloudflare.com/profile/api-tokens) (**Create Token → Custom token**) with:
+   - **Zone → Zone → Read**, **Zone → DNS → Edit**, **Zone → Zone Settings → Edit**, and **Zone → Email Routing Rules → Edit**, scoped to the mail domains' zones.
+   - **Account → Email Sending → Edit** for the account that owns them.
+   - Optional: **Account → Email Routing Addresses → Edit** to manage forwarding destinations from Administration → Addresses (this also needs `CLOUDFLARE_ACCOUNT_ID`).
+2. Store it, and optionally the account ID to limit the zone list to one account:
+
+   ```bash
+   bunx wrangler secret put CLOUDFLARE_API_TOKEN
+   bunx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+   ```
+
+   If you renamed the Worker, set the `WORKER_NAME` var in `wrangler.jsonc` to its script name. This token is separate from `CLOUDFLARE_ANALYTICS_TOKEN`.
+3. Under **Connect via Cloudflare**, choose a zone and an optional subdomain, then **Preview**. The preview is read-only. If the hostname has MX records for another mail provider, they are listed and are only deleted after you tick **Replace these MX records**.
+4. **Connect** enables Email Routing, points the catch-all at this Worker, onboards the hostname for Email Sending, and saves the Zone ID (which also enables Show original authentication once `CLOUDFLARE_ANALYTICS_TOKEN` is set). Steps already in place are skipped. If a step fails, only the changes made by that run are undone, including restoring deleted MX records and the previous catch-all rule.
+
+Each domain then shows the status of every step. **Check** re-reads them from Cloudflare, and **Repair** re-runs the steps that failed or drifted. Admin MCP clients can call the same actions with `check_domain_cloudflare` and `connect_domain_cloudflare`.
+
+Step 4 (delivery events) remains manual: Cloudflare's API does not yet document an Email Sending source for queue event subscriptions.
+
+#### Manual
+
+Without `CLOUDFLARE_API_TOKEN`, configure steps 1 to 4 manually for every domain used by a mailbox. The remaining steps apply to both setups:
 
 1. **Email Routing** — In **Compute → Email Service → Email Routing**, enable Email Routing for the domain.
 2. **Catch-all** — Under **Routing Rules**, enable **Catch-all**, choose **Send to a Worker**, and select this Worker.
@@ -216,6 +241,7 @@ Outbound mail is logged locally instead of sent. To test push locally, add a key
 - **Auto-replies** — under **Settings → Auto-replies**, owners and members with send access set an out-of-office reply per mailbox, optionally between a start and end time; admins can see and change every mailbox's auto-reply under **Administration → Auto-replies**, or through the API and MCP. Replies follow RFC 3834: they go to the envelope sender, carry `Auto-Submitted: auto-replied`, are not stored in Sent, and are never sent for spam, mailing lists (`List-Id`, `List-Unsubscribe`, `Precedence`), bounces, other auto-replies, `X-Auto-Response-Suppress`, mail the mailbox received by Bcc, calendar invitations and responses (`text/calendar` or `.ics` parts), or system senders such as `noreply@`. Each sender gets at most one reply per interval (default four days), with a cap of 50 replies per hour per mailbox.
 - **Trash and Spam** — members with send access can empty Trash or Spam from the folder header, and choose to delete conversations automatically after they have been there for 7, 30 or 90 days (any 1–365 through the API or MCP). Each mailbox remembers when a conversation entered its current folder, and cleanup runs on the mailbox's own alarm in batches of 100, so no cron job is needed. Conversations already in Trash or Spam when this was deployed count from the deploy time.
 - **Rules** — under **Settings → Rules**, members with send access add ordered rules per mailbox. Conditions: sender (address or domain), To/Cc, subject, mailing list, attachment, combined with all or any. Actions: move to a custom folder, archive, Trash, Spam, never Spam, mark read, and forward. Rules run on new mail after spam classification, can stop later rules, and can be tested against the latest 500 messages before saving. Forwards are new messages from the mailbox with `Reply-To` set to the original sender (so they pass DMARC), marked `Auto-Submitted: auto-forwarded` with a hop counter; spam, mail already forwarded three times, and mail from the destination itself are never forwarded. "Forward only" moves the original to Trash once every forward was accepted.
+- **Addresses** — under Administration → Addresses an admin can add aliases (extra addresses that deliver into an existing mailbox), forward-only addresses with no mailbox, and forwards on a mailbox's own address (optionally without keeping a copy), and choose per domain whether unknown recipients are rejected (default) or delivered to a catch-all mailbox. Forwarding uses Email Routing's unchanged forward, so it only goes to verified destination addresses. With `CLOUDFLARE_API_TOKEN` (plus **Account → Email Routing Addresses → Edit**) and `CLOUDFLARE_ACCOUNT_ID`, adding a destination creates it in Cloudflare, which emails a verification link, and **Refresh** reads its status. Without them, add the destination in the dashboard under **Email Routing → Destination addresses** and mark it verified once confirmed. Forwards add an `X-OpenWorkspace-Forwarded` hop count and are skipped after 3 hops or when the destination is the sender; if a forward is skipped, the mailbox keeps the message. Admin MCP tools: `get_mail_routing`, `add_forwarding_destination`, `refresh_forwarding_destination`, `set_forwarding_destination_verified`, `delete_forwarding_destination`, `create_routing_address`, `delete_routing_address`, `set_unknown_recipient_mailbox`.
 - **PWA notifications** — desktop and Android browsers can subscribe from Settings. On iPhone and iPad, first add OpenWorkspace to the Home Screen, then enable notifications from the installed app.
 
 ### Connect an MCP client

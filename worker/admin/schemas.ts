@@ -52,6 +52,12 @@ export const createDomainSchema = z.object({
   cloudflareZoneId: cloudflareZoneIdSchema.default(null),
 });
 
+export const cloudflareDomainSchema = z.object({ name: domainNameSchema });
+
+export const cloudflareConnectSchema = cloudflareDomainSchema.extend({
+  replaceMx: z.boolean().default(false),
+});
+
 export const updateDomainSchema = z.object({
   cloudflareZoneId: cloudflareZoneIdSchema.optional(),
   isPrimary: z.literal(true).optional(),
@@ -203,4 +209,22 @@ export const mailImportQuerySchema = z.object({
   seen: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
   folder: z.string().trim().min(1).max(80).optional(),
   receivedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional(),
+});
+
+export const forwardingDestinationSchema = z.object({
+  // Cloudflare limits destination addresses to 90 characters.
+  email: emailSchema.refine((email) => email.length <= 90, "Address is too long"),
+});
+
+export const destinationVerifiedSchema = z.object({ verified: z.boolean() });
+
+export const routingAddressSchema = z.object({
+  address: emailSchema,
+  mailboxId: z.string().min(1).nullable().default(null),
+  destinationIds: uniqueStrings(z.string().min(1), 10).default([]),
+  keepCopy: z.boolean().default(true),
+});
+
+export const unknownRecipientSchema = z.object({
+  mailboxId: z.string().min(1).nullable(),
 });

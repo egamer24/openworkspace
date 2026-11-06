@@ -23,6 +23,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, responseJson } from "@/lib/api";
+import { CloudflareConnect, DomainOnboarding } from "./cloudflare-onboarding";
 import {
   adminPanelClass,
   AdminPanelBody,
@@ -33,9 +34,11 @@ import type { AdminDomain, DomainInput } from "./types";
 export function DomainsManager({
   domains,
   loading,
+  cloudflareOnboarding,
 }: {
   domains: AdminDomain[];
   loading: boolean;
+  cloudflareOnboarding: boolean;
 }) {
   const client = useQueryClient();
   const [name, setName] = useState("");
@@ -65,6 +68,7 @@ export function DomainsManager({
     <div className={adminPanelClass}>
       <AdminPanelHeader Icon={Globe2} title="Domains" />
       <AdminPanelBody className="space-y-5">
+        {cloudflareOnboarding ? <CloudflareConnect /> : null}
         <form className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]" onSubmit={submit}>
           <div className="space-y-1.5">
             <Label htmlFor="domain-name">Domain</Label>
@@ -98,6 +102,7 @@ export function DomainsManager({
             <DomainRow
               key={domain.id}
               domain={domain}
+              cloudflareOnboarding={cloudflareOnboarding}
             />
           ))}
         </div>
@@ -106,7 +111,13 @@ export function DomainsManager({
   );
 }
 
-function DomainRow({ domain }: { domain: AdminDomain }) {
+function DomainRow({
+  domain,
+  cloudflareOnboarding,
+}: {
+  domain: AdminDomain;
+  cloudflareOnboarding: boolean;
+}) {
   const client = useQueryClient();
   const [zoneId, setZoneId] = useState(domain.cloudflareZoneId ?? "");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -189,6 +200,7 @@ function DomainRow({ domain }: { domain: AdminDomain }) {
             </>
           ) : null}
         </div>
+        {cloudflareOnboarding ? <DomainOnboarding domain={domain} /> : null}
       </div>
 
       <Dialog
