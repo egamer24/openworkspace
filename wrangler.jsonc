@@ -52,7 +52,19 @@
       "binding": "MAIL_STORAGE",
       "bucket_name": "openworkspace"
     }
+    // Optional scheduled backups (see README "Backups"). Create a separate
+    // bucket with `wrangler r2 bucket create openworkspace-backups`, then
+    // uncomment this binding. Backups stay disabled while it is absent.
+    // {
+    //   "binding": "BACKUP_STORAGE",
+    //   "bucket_name": "openworkspace-backups"
+    // }
   ],
+  // Hourly backup tick: starts one snapshot per UTC day and continues an
+  // unfinished one in bounded batches. A no-op without BACKUP_STORAGE.
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
   "images": {
     "binding": "IMAGES"
   },

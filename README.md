@@ -13,6 +13,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Attachment previews** — PDF, images, text, and background PDF conversion for Office documents
 - **Realtime and push** — mailbox-scoped WebSockets plus optional PWA notifications
 - **Signed webhooks** — account-wide email and administration events with retry history
+- **Scheduled backups** — optional daily `.eml` + manifest snapshots in a separate R2 bucket with retention
 - **Runs on Cloudflare** — Workers, D1, Durable Objects, R2, Images, Email Service, and Queues
 
 ## Deploy to Cloudflare
@@ -108,6 +109,35 @@ For every domain used by a mailbox, configure Cloudflare manually:
 11. **Push notifications** — Generate one persistent VAPID key pair with `bun run push:keygen`. Set `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and a contact such as `mailto:admin@example.com` in `VAPID_SUBJECT` with `wrangler secret put`. Users can then enable the current browser and choose mailboxes under **Settings → Notifications**. Each browser endpoint belongs directly to the current account and is rebound idempotently when the app starts. Natural session expiry and remote session revocation do not affect push; explicit logout detaches the current endpoint, while disabling notifications unsubscribes it from the browser.
 
 Unknown catch-all recipients are rejected permanently. Only addresses you create in the app accept mail.
+
+### Backups and restore
+
+OpenWorkspace has two layers of recovery.
+
+**Portable snapshots (optional).** Create a separate bucket so a mistake in the mail bucket cannot take the backups with it, then uncomment the `BACKUP_STORAGE` binding in `wrangler.jsonc` and deploy:
+
+```bash
+bunx wrangler r2 bucket create openworkspace-backups
+```
+
+An hourly cron tick starts one snapshot per UTC day and continues an unfinished one in bounded batches (50 messages per step, 20 steps per invocation), so large installs never approach Worker limits; the cursor lives in D1 and an interrupted batch is retried. Each snapshot writes:
+
+- `backups/<date>/account.json` — users, domains, mailboxes and members. Sessions, API tokens, passkeys and other secrets are never exported.
+- `backups/<date>/<mailbox-address>/manifest.jsonl` — one line per message: `file`, `sha256`, `mailbox_address`, `folder_role` (`inbox`, `sent`, `archive`, `spam`, `trash`, `custom`), `folder_name`, `seen` (read by any member), `received_at`, `size`, `subject`.
+- `backups/objects/<sha256>.eml` — the raw message. `file` in the manifest is relative to the manifest (`../../objects/<sha256>.eml`). Objects are content-addressed, so unchanged mail is uploaded once and every manifest is still complete. Outgoing mail has no stored MIME and is serialized from its stored fields, body and attachments.
+
+The job keeps the newest 14 daily and the newest snapshot of each of the last 8 weeks, deletes older dated folders, and removes objects no snapshot still references. **Administration → Backups** shows the last run, size, errors, and a **Run now** button. To keep a copy outside Cloudflare, sync the bucket with any S3-compatible client (for example `rclone sync`) using an R2 API token scoped to the backup bucket. Scheduled backups need the Workers Paid plan (the Free plan allows 50 subrequests per invocation).
+
+**Point-in-time recovery (built in).** Cloudflare keeps 30 days of history for both stores on the Workers Paid plan (D1 keeps 7 days on Free):
+
+- **D1** (accounts, domains, mailboxes, permissions) — restore with [Time Travel](https://developers.cloudflare.com/d1/reference/time-travel/). Restores overwrite the database in place and print a bookmark that undoes them.
+
+  ```bash
+  bunx wrangler d1 time-travel info openworkspace --timestamp=2026-03-10T03:00:00Z
+  bunx wrangler d1 time-travel restore openworkspace --timestamp=2026-03-10T03:00:00Z
+  ```
+
+- **Mailbox Durable Objects** (message metadata, folders, read state) — SQLite-backed Durable Objects support [point-in-time recovery](https://developers.cloudflare.com/durable-objects/api/sqlite-storage-api/) through `ctx.storage.getBookmarkForTime()` and `onNextSessionRestoreBookmark()` from inside the object. There is no Wrangler command for it and OpenWorkspace does not expose it yet. R2 objects are not versioned, so a restored mailbox can reference raw messages or attachments that were permanently deleted afterwards; prefer the portable snapshots for message content.
 
 ### Enable the OIDC identity provider
 

@@ -35,6 +35,11 @@ export type PushBindings = {
   VAPID_SUBJECT?: string;
 };
 
+/** Optional: scheduled backups are disabled until this R2 binding exists. */
+export type BackupBindings = {
+  BACKUP_STORAGE?: R2Bucket;
+};
+
 export type AppEnv = {
   Bindings: Env
     & AuthBindings
@@ -42,7 +47,8 @@ export type AppEnv = {
     & OidcBindings
     & SamlBindings
     & R2S3Bindings
-    & PushBindings;
+    & PushBindings
+    & BackupBindings;
   Variables: {
     user: SessionUser;
     authKind: "session" | "api-token";

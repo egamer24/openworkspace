@@ -44,6 +44,7 @@ import { WebhooksManager } from "./webhooks-manager";
 import { DomainsManager } from "./domains-manager";
 import { AdminUserSessions } from "./user-sessions";
 import { SamlApplications } from "./saml-applications";
+import { BackupsPanel } from "./backups-panel";
 
 type AdminView =
   | "people"
@@ -53,6 +54,7 @@ type AdminView =
   | "saml-applications"
   | "groups"
   | "webhooks"
+  | "backups"
   | "invite"
   | "new-mailbox"
   | "user"
@@ -71,6 +73,7 @@ const viewCopy: Record<AdminView, { title: string; description: string }> = {
   "saml-applications": { title: "SAML applications", description: "Service providers, assertions, assignments, and attributes." },
   groups: { title: "Identity groups", description: "Reusable memberships exposed to approved identity applications." },
   webhooks: { title: "Webhooks", description: "Signed account events delivered to external systems." },
+  backups: { title: "Backups", description: "Portable mail snapshots and retention." },
   invite: { title: "Invite person", description: "Create a personal mailbox and a one-time registration link." },
   "new-mailbox": { title: "New mailbox", description: "Personal or shared address." },
   user: { title: "Person", description: "Profile details and passkey recovery." },
@@ -367,6 +370,11 @@ export function AdminPage() {
                 selectedId={selectedId}
                 onSelect={(id) => go("webhooks", id)}
               />
+            )}
+            {view === "backups" && (
+              <div className="max-w-3xl">
+                <BackupsPanel />
+              </div>
             )}
             {view === "invite" && (
               <div className="max-w-3xl">
