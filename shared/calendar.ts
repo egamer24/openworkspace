@@ -201,7 +201,10 @@ export function zoneOffset(ms: number, timeZone: string) {
  */
 export function zonedToUtc(value: WallClock, timeZone: string) {
   const guess = wallClockAsUtc(value);
-  const first = guess - zoneOffset(guess, timeZone);
-  const second = guess - zoneOffset(first, timeZone);
-  return first === second ? first : Math.max(first, second);
+  // The offsets a day either side cover any transition near this time.
+  const candidates = [...new Set([-86_400_000, 86_400_000]
+    .map((delta) => guess - zoneOffset(guess + delta, timeZone)))];
+  const exact = candidates.filter((ms) => wallClockAsUtc(wallClock(ms, timeZone)) === guess);
+  // Repeated times take the first occurrence; skipped ones the later offset.
+  return exact.length ? Math.min(...exact) : Math.max(...candidates);
 }
