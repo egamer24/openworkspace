@@ -14,7 +14,7 @@ import {
   RotateCw,
   Trash2,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -40,6 +40,7 @@ import {
   ReplyActionIcon,
   type SentReply,
 } from "./conversation-reply";
+import { fetchDraft, useDrafts, type SavedDraft } from "./use-draft-autosave";
 import { ConversationLoadingSkeleton } from "./conversation-loading-skeleton";
 import { DeliveryIndicator } from "./delivery-indicator";
 import { MessageAttachments } from "./message-attachments";
@@ -106,6 +107,25 @@ export function ConversationView({
   onOpenConversation: (conversationId: string) => void;
 }) {
   const [replySelection, setReplySelection] = useState<ReplySelection | null>(null);
+  const drafts = useDrafts(mailbox?.id, Boolean(mailbox?.canSend));
+  const [restoredReply, setRestoredReply] = useState<SavedDraft | null>(null);
+  const replyDraftId = drafts.data?.find((draft) =>
+    draft.kind === "reply"
+    && messages.some((message) => message.id === draft.sourceMessageId)
+  )?.id;
+  // Reopen a saved reply once; collapsing it afterwards leaves it closed.
+  useEffect(() => {
+    if (!mailbox || !replyDraftId || replySelection || restoredReply?.id === replyDraftId) return;
+    let cancelled = false;
+    void fetchDraft(mailbox.id, replyDraftId).then((draft) => {
+      if (cancelled || !draft.replyMode || !draft.sourceMessageId) return;
+      setRestoredReply(draft);
+      setReplySelection({ parentId: draft.sourceMessageId, mode: draft.replyMode });
+    }).catch((error) => console.error("Could not open reply draft", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [mailbox, replyDraftId, replySelection, restoredReply?.id]);
   const resendMessage = useResendMessage();
   const setMessageRead = useSetMessageRead();
 
@@ -291,8 +311,11 @@ export function ConversationView({
 
         {selectedParent && selectedMode && (
           <ConversationReply
-            key={selectedParent.id}
+            key={`${selectedParent.id}:${restoredReply?.id ?? ""}`}
             mailbox={mailbox}
+            draft={restoredReply?.sourceMessageId === selectedParent.id
+              ? restoredReply
+              : undefined}
             parent={selectedParent}
             mode={selectedMode}
             onModeChange={(mode) => setReplySelection({

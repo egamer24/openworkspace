@@ -21,6 +21,14 @@ import {
   folderShowsUnreadCount,
 } from "./mail-navigation";
 import { MessageList } from "./message-list";
+import { DraftList } from "./draft-list";
+import {
+  fetchDraft,
+  useDrafts,
+  type DraftSummary,
+  type SavedDraft,
+} from "./use-draft-autosave";
+import { api, responseJson } from "@/lib/api";
 import type {
   ConversationSummary,
   Folder,
@@ -46,6 +54,8 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
   const [params] = useSearchParams();
   const [composerMailboxId, setComposerMailboxId] = useState<string | null>(null);
   const [forwardedMessage, setForwardedMessage] = useState<MessageDetail | undefined>();
+  const [composerDraft, setComposerDraft] = useState<SavedDraft | undefined>();
+  const [openingDraftId, setOpeningDraftId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const mailboxQuery = useMailboxes();
@@ -105,7 +115,11 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
     folder,
     debouncedSearch,
     unreadOnly,
-    locationReady && !conversationId,
+    locationReady && !conversationId && folder !== "drafts",
+  );
+  const draftsQuery = useDrafts(
+    mailbox?.id,
+    locationReady && folder === "drafts" && Boolean(mailbox?.canSend),
   );
   const conversationQuery = useConversation(
     mailbox?.id,
@@ -160,18 +174,48 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
   function openCompose() {
     if (!mailbox?.canSend) return;
     setForwardedMessage(undefined);
+    setComposerDraft(undefined);
     setComposerMailboxId(mailbox.id);
   }
 
   function openForward(message: MessageDetail) {
     if (!mailbox?.canSend) return;
     setForwardedMessage(message);
+    setComposerDraft(undefined);
     setComposerMailboxId(mailbox.id);
   }
 
   function closeComposer() {
     setComposerMailboxId(null);
     setForwardedMessage(undefined);
+    setComposerDraft(undefined);
+  }
+
+  async function openDraft(summary: DraftSummary) {
+    if (!mailbox?.canSend) return;
+    if (summary.kind === "reply") {
+      // The conversation view reopens its saved reply.
+      if (summary.conversationId) navigate({ conversation: summary.conversationId });
+      return;
+    }
+    setOpeningDraftId(summary.id);
+    try {
+      const draft = await fetchDraft(mailbox.id, summary.id);
+      const source = draft.kind === "forward"
+        ? await findMessage(mailbox.id, draft.conversationId, draft.sourceMessageId)
+        : undefined;
+      if (draft.kind === "forward" && !source) {
+        toast.error("The forwarded message is no longer available");
+        return;
+      }
+      setForwardedMessage(source);
+      setComposerDraft(draft);
+      setComposerMailboxId(mailbox.id);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Draft could not be opened");
+    } finally {
+      setOpeningDraftId(null);
+    }
   }
 
   // Reads the live URL: a mutation can settle after the user already moved to
@@ -252,7 +296,7 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
         mailboxes={mailboxQuery.data?.mailboxes ?? []}
         search={search}
         searchPlaceholder={`Search in ${folderName}`}
-        showSearch={!conversationId}
+        showSearch={!conversationId && folder !== "drafts"}
         onSearchChange={(value) => {
           setSearch(value);
           selection.exit();
@@ -315,7 +359,12 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
                   {folderName}
                 </h1>
               </div>
-              {selection.active && mailbox ? (
+              {folder === "drafts" ? (
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {draftsQuery.data?.length ?? 0}{" "}
+                  {draftsQuery.data?.length === 1 ? "draft" : "drafts"}
+                </p>
+              ) : selection.active && mailbox ? (
                 <TooltipProvider delay={300}>
                   <ConversationSelectionToolbar
                     sharedMailboxName={mailbox.kind === "shared"
@@ -375,7 +424,7 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
               )}
             </div>
 
-            <label className="relative mb-4 block xl:hidden">
+            <label className={folder === "drafts" ? "hidden" : "relative mb-4 block xl:hidden"}>
               <Search className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 className="h-11 rounded-full pl-10"
@@ -388,6 +437,16 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
               />
             </label>
 
+            {folder === "drafts" ? (
+              <DraftList
+                drafts={draftsQuery.data}
+                loading={draftsQuery.isLoading}
+                error={draftsQuery.error?.message}
+                openingId={openingDraftId}
+                onRetry={() => void draftsQuery.refetch()}
+                onOpen={(draft) => void openDraft(draft)}
+              />
+            ) : (
             <MessageList
               folderName={folderName}
               messages={conversations}
@@ -412,6 +471,7 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
                 onToggle: selection.toggle,
               } : undefined}
             />
+            )}
           </section>
         )}
       </div>
@@ -419,13 +479,35 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
       {composeOpen && mailbox && (
         <Suspense fallback={null}>
           <ComposeWindow
-            key={`${mailbox.id}:${forwardedMessage?.id ?? "compose"}`}
+            key={`${mailbox.id}:${forwardedMessage?.id ?? "compose"}:${composerDraft?.id ?? ""}`}
             mailbox={mailbox}
             forwardedMessage={forwardedMessage}
+            draft={composerDraft}
             onClose={closeComposer}
           />
         </Suspense>
       )}
     </main>
   );
+}
+
+/** Finds a message in a conversation by paging back through it, for reopening forward drafts. */
+async function findMessage(
+  mailboxId: string,
+  conversationId: string | null,
+  messageId: string | null,
+) {
+  if (!conversationId || !messageId) return undefined;
+  let cursor: string | undefined;
+  for (let page = 0; page < 20; page += 1) {
+    const result = await responseJson(await api.api.mail.conversations[":id"].$get({
+      param: { id: conversationId },
+      query: { mailboxId, limit: "50", cursor },
+    }));
+    const message = result.messages.find((candidate) => candidate.id === messageId);
+    if (message) return message;
+    if (!result.nextCursor) return undefined;
+    cursor = result.nextCursor;
+  }
+  return undefined;
 }

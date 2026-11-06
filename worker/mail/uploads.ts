@@ -487,6 +487,38 @@ export async function loadComposerUpload(input: {
   };
 }
 
+/**
+ * Re-creates a sealed composer upload from a saved draft copy, so a draft
+ * reopened after the composer-uploads/ lifecycle expiry can still be sent.
+ */
+export async function restoreComposerUpload(input: {
+  env: Bindings;
+  mailboxId: string;
+  userId: string;
+  uploadId: string;
+  filename: string;
+  contentType: string;
+  body: ReadableStream | ArrayBuffer;
+  size: number;
+}) {
+  const keys = composerUploadKeys(input.mailboxId, input.userId, input.uploadId);
+  await input.env.MAIL_STORAGE.put(keys.immutable, input.body, {
+    httpMetadata: { contentType: input.contentType },
+  });
+  await putUploadMeta({
+    env: input.env,
+    metadataKey: keys.metadata,
+    meta: {
+      filename: input.filename,
+      contentType: input.contentType,
+      size: input.size,
+      uploadedBy: input.userId,
+      mailboxId: input.mailboxId,
+      finalizedAt: Date.now(),
+    },
+  });
+}
+
 export async function copyStoredAttachmentToMessage(input: {
   env: Bindings;
   sourceKey: string;

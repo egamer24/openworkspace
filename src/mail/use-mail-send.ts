@@ -19,6 +19,8 @@ type MessageContent = {
   bodyText: string;
   bodyHtml?: string;
   uploadedAttachments?: SubmittedComposerUpload[];
+  /** The server deletes this draft once the message is accepted. */
+  draftId?: string;
 };
 
 export type MailSendInput =
@@ -77,6 +79,7 @@ export function useMailSend() {
         bodyText: input.bodyText,
         bodyHtml: input.bodyHtml,
         attachments: input.uploadedAttachments ?? [],
+        draftId: input.draftId,
       };
       if (input.kind === "reply") {
         return responseJson(

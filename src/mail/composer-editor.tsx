@@ -35,6 +35,8 @@ export type { ComposerContent } from "./composer-editor-document";
 
 export type ComposerEditorHandle = {
   content: () => ComposerContent;
+  /** Raw editor HTML, including composer asset references, for drafts. */
+  html: () => string;
   assetIds: () => string[];
   insertAssets: (assets: ComposerAssetRecord[], position?: number) => void;
   reconcileAssets: () => void;
@@ -54,8 +56,10 @@ export const ComposerEditor = forwardRef<
     onSubmitShortcut: () => void;
     dragging: boolean;
     disabled: boolean;
-    /** HTML placed in the editor when it opens, e.g. a signature. */
+    /** HTML placed in the editor when it opens, e.g. a signature or saved draft. */
     initialHtml?: string;
+    /** Saved regular attachments to bookmark again; inline images are in initialHtml. */
+    initialAttachments?: readonly ComposerAssetRecord[];
   }
 >(function ComposerEditor({
   session,
@@ -68,6 +72,7 @@ export const ComposerEditor = forwardRef<
   dragging,
   disabled,
   initialHtml,
+  initialAttachments,
 }, ref) {
   const callbacks = useRef({
     onChange,
@@ -110,6 +115,17 @@ export const ComposerEditor = forwardRef<
       }),
     ],
     content: initialHtml ?? "",
+    onCreate: ({ editor: created }) => {
+      // Regular attachments are position bookmarks, not nodes, so they are
+      // re-added once per editor instance rather than parsed from HTML.
+      if (!initialAttachments?.length) return;
+      const transaction = insertComposerAssets(
+        created.state,
+        [...initialAttachments],
+        created.state.doc.content.size,
+      );
+      if (transaction) created.view.dispatch(transaction);
+    },
     editorProps: {
       attributes: {
         class: [
@@ -201,6 +217,7 @@ export const ComposerEditor = forwardRef<
 
   useImperativeHandle(ref, () => ({
     content: () => composerContent(editor, session),
+    html: () => editor.getHTML(),
     assetIds: () => composerAssetIds(editor.state),
     insertAssets: (assets, position) => {
       const transaction = insertComposerAssets(editor.state, assets, position);
