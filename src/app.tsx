@@ -37,6 +37,11 @@ const SettingsMcpPage = lazy(() =>
     default: module.McpSettings,
   })),
 );
+const SettingsSpamPage = lazy(() =>
+  import("@/settings/spam-page").then((module) => ({
+    default: module.SpamSettings,
+  })),
+);
 const SettingsNotificationsPage = lazy(() =>
   import("@/settings/notifications-page").then((module) => ({
     default: module.NotificationsSettings,
@@ -127,6 +132,7 @@ export function App() {
             <Route path="signatures" element={<SettingsSignaturesPage />} />
             <Route path="auto-replies" element={<SettingsAutoRepliesPage />} />
             <Route path="rules" element={<SettingsRulesPage />} />
+            <Route path="spam" element={<SettingsSpamPage />} />
             <Route path="sessions" element={<SettingsSessionsPage />} />
             <Route path="mcp" element={<SettingsMcpPage />} />
           </Route>

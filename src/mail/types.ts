@@ -19,6 +19,9 @@ type MailboxAiGet = typeof api.api.mail.mailboxes[":id"]["ai"]["$get"];
 type MailboxAiSettingsResponse = SuccessfulResponse<
   Awaited<ReturnType<MailboxAiGet>>
 >;
+type SpamSettingsResponse = SuccessfulResponse<
+  Awaited<ReturnType<typeof api.api.mail.mailboxes[":id"]["spam"]["$get"]>>
+>;
 type ConversationsResponse = SuccessfulResponse<
   Awaited<ReturnType<typeof api.api.mail.conversations.$get>>
 >;
@@ -30,6 +33,7 @@ export type Mailbox = MailboxesResponse["mailboxes"][number];
 export type MailFolder = FoldersResponse["folders"][number];
 export type MailboxAiSettings = MailboxAiSettingsResponse["settings"];
 export type MailboxAiConfiguration = MailboxAiSettings["configuration"];
+export type SpamSettings = SpamSettingsResponse["settings"];
 export type ConversationSummary =
   ConversationsResponse["conversations"][number];
 export type MessageDetail = ConversationResponse["messages"][number];

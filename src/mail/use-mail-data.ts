@@ -127,6 +127,30 @@ export function useResendMessage() {
   });
 }
 
+export function useSetSpamSender() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      mailboxId,
+      entry,
+      list,
+    }: {
+      mailboxId: string;
+      entry: string;
+      list: "allow" | "block";
+    }) => responseJson(
+      await api.api.mail.mailboxes[":id"].spam.senders[":entry"].$put({
+        // The RPC client does not encode path parameters.
+        param: { id: mailboxId, entry: encodeURIComponent(entry) },
+        json: { list },
+      }),
+    ),
+    onSuccess: (result, { mailboxId }) => {
+      client.setQueryData(["mailbox-spam", mailboxId], result);
+    },
+  });
+}
+
 export function useSetMessageRead() {
   const client = useQueryClient();
   return useMutation({

@@ -198,6 +198,13 @@ function toMessageDetail(
     quotedText: email.quotedText,
     bodyHtml,
     aiClassification: email.aiClassificationJson,
+    spam: email.spamScore === null || !email.spamVerdict
+      ? null
+      : {
+          score: email.spamScore,
+          verdict: email.spamVerdict,
+          reasons: email.spamReasonsJson ?? [],
+        },
     hasOriginal: Boolean(email.rawMimeR2Key),
     attachments: email.attachmentsJson.map((file) => ({
       id: file.id,

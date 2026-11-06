@@ -71,6 +71,13 @@
       "when": 1793981881792,
       "tag": "0009_mail_rules",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793981982797,
+      "tag": "0010_spam_filter",
+      "breakpoints": true
     }
   ]
 }

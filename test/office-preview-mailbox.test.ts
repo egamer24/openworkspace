@@ -23,19 +23,25 @@ function emailFixture(): NewEmail {
 
 it("upgrades an existing mailbox once without rewriting its emails", async () => {
   const mailbox = mailboxStub(env, `mbx_preview_migration_${crypto.randomUUID()}`);
-  await runInDurableObject(mailbox, async (instance, state) => {
+  await runInDurableObject(mailbox, async (_instance, state) => {
     await state.storage.deleteAll();
     const db = drizzle(state.storage);
     await migrate(db, {
       ...migrations,
       journal: { entries: migrations.journal.entries.filter((entry) => entry.idx < 5) },
     });
-    const original = { ...emailFixture(), attachmentsJson: [] };
-    await instance.insertEmail(original);
-    const before = instance.getEmail(original.id);
+    // Raw SQL keeps the fixture valid for the old schema when later
+    // migrations add email columns.
+    state.storage.sql.exec(
+      `insert into emails (id, conversation_id, direction, from_json, subject, timeline_at, transport_state)
+        values ('msg_atomic_preview', 'conv_atomic_preview', 'incoming', ?, 'Office', ?, 'received')`,
+      JSON.stringify(emailFixture().fromJson),
+      Date.now(),
+    );
+    const before = state.storage.sql.exec("select * from emails").one();
     await migrate(db, migrations);
     await migrate(db, migrations);
-    expect(instance.getEmail(original.id)).toEqual(before);
+    expect(state.storage.sql.exec("select * from emails").one()).toMatchObject(before);
     expect(state.storage.sql.exec("select * from pending_office_previews").toArray()).toEqual([]);
     expect(state.storage.sql.exec("select * from __drizzle_migrations").toArray())
       .toHaveLength(migrations.journal.entries.length);

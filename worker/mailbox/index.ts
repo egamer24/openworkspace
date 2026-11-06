@@ -31,7 +31,29 @@ import {
   prepareUnprocessableInboundEmail,
   readInboundRawMime,
   UnprocessableInboundEmailError,
+  type PreparedInboundEmail,
 } from "../mail/inbound";
+import {
+  assessSpam,
+  DEFAULT_SPAM_THRESHOLD,
+  DEFAULT_SUSPICIOUS_THRESHOLD,
+  matchSenderList,
+  MAX_SPAM_SENDER_RULES,
+  parseAuthenticationResults,
+  readHeaderBlock,
+  spamSenderCandidates,
+  type SpamAssessment,
+  type SpamSenderList,
+  type SpamThresholds,
+} from "../mail/spam-filter";
+import {
+  learnedSpamProbability,
+  MAX_SPAM_TOKENS,
+  messageSpamTokens,
+  SPAM_LEARNING_MINIMUM,
+  SPAM_TOKENS_PRUNE_TO,
+  type SpamLabel,
+} from "../mail/spam-learning";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
 import {
   suggestParticipants,
@@ -89,6 +111,8 @@ import {
   pendingObjectDeletions,
   type Draft,
   type AutoReplySettings,
+  spamFilterSettings,
+  spamSenderRules,
   type Email,
   type FolderRecord,
   type RetentionSettings,
@@ -112,6 +136,8 @@ const schema = {
   mailboxAiConfiguration,
   pendingInbound,
   pendingObjectDeletions,
+  spamFilterSettings,
+  spamSenderRules,
 };
 type MailboxDatabase = DrizzleSqliteDODatabase<typeof schema>;
 const INBOUND_ALARM_BATCH_SIZE = 1;
@@ -121,6 +147,7 @@ const MAX_INBOUND_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
 const ALARM_WAKE_DELAY_MS = 1_000;
 const PRESENCE_TTL_MS = 60_000;
 const AI_CONFIGURATION_ID = "default";
+const SPAM_SETTINGS_ID = "default";
 
 type MailboxSocketAttachment = {
   userId: string;
@@ -176,6 +203,11 @@ export type ConversationListItem = {
   messageCount: number;
   unreadCount: number;
   hasIncoming: boolean;
+};
+
+export type SpamSettings = SpamThresholds & {
+  allow: string[];
+  block: string[];
 };
 
 export type SubmitOutgoingResult = {
@@ -1412,6 +1444,278 @@ export class MailboxDO extends DurableObject<Env> {
     return email?.attachmentsJson.find((file) => file.id === attachmentId) ?? null;
   }
 
+  private spamThresholds(): SpamThresholds {
+    const stored = this.db
+      .select()
+      .from(spamFilterSettings)
+      .where(eq(spamFilterSettings.id, SPAM_SETTINGS_ID))
+      .all()[0];
+    return {
+      spamThreshold: stored?.spamThreshold ?? DEFAULT_SPAM_THRESHOLD,
+      suspiciousThreshold: stored?.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD,
+    };
+  }
+
+  getSpamSettings(): SpamSettings {
+    const rules = this.db
+      .select()
+      .from(spamSenderRules)
+      .orderBy(asc(spamSenderRules.entry))
+      .all();
+    return {
+      ...this.spamThresholds(),
+      allow: rules.filter((rule) => rule.list === "allow").map((rule) => rule.entry),
+      block: rules.filter((rule) => rule.list === "block").map((rule) => rule.entry),
+    };
+  }
+
+  /** Replaces thresholds and both lists. Entries arrive normalized by the API. */
+  setSpamSettings(settings: SpamSettings) {
+    const allow = [...new Set(settings.allow)];
+    const block = [...new Set(settings.block)].filter((entry) => !allow.includes(entry));
+    if (
+      settings.suspiciousThreshold < 1
+      || settings.spamThreshold > 100
+      || settings.suspiciousThreshold >= settings.spamThreshold
+      || allow.length + block.length > MAX_SPAM_SENDER_RULES
+    ) {
+      throw new Error("Invalid spam filter settings");
+    }
+    const now = new Date();
+    this.db.transaction((tx) => {
+      const thresholds = {
+        spamThreshold: settings.spamThreshold,
+        suspiciousThreshold: settings.suspiciousThreshold,
+        updatedAt: now,
+      };
+      tx.insert(spamFilterSettings)
+        .values({ id: SPAM_SETTINGS_ID, ...thresholds })
+        .onConflictDoUpdate({ target: spamFilterSettings.id, set: thresholds })
+        .run();
+      tx.delete(spamSenderRules).run();
+      for (const [list, entries] of [["allow", allow], ["block", block]] as const) {
+        for (const entry of entries) {
+          tx.insert(spamSenderRules).values({ entry, list, createdAt: now }).run();
+        }
+      }
+    });
+    return this.getSpamSettings();
+  }
+
+  /** Adds an entry, moving it if it is already on the other list. */
+  setSpamSender(entry: string, list: SpamSenderList) {
+    const added = this.db.transaction((tx) => {
+      const existing = tx
+        .select({ entry: spamSenderRules.entry })
+        .from(spamSenderRules)
+        .where(eq(spamSenderRules.entry, entry))
+        .all()[0];
+      if (!existing) {
+        const count = tx.select({ count: sql<number>`count(*)` }).from(spamSenderRules).all()[0]?.count ?? 0;
+        if (count >= MAX_SPAM_SENDER_RULES) return false;
+      }
+      tx.insert(spamSenderRules)
+        .values({ entry, list, createdAt: new Date() })
+        .onConflictDoUpdate({ target: spamSenderRules.entry, set: { list } })
+        .run();
+      return true;
+    });
+    return added ? { status: "ok" as const, settings: this.getSpamSettings() } : { status: "limit" as const };
+  }
+
+  removeSpamSender(entry: string) {
+    const removed = this.db
+      .delete(spamSenderRules)
+      .where(eq(spamSenderRules.entry, entry))
+      .returning({ entry: spamSenderRules.entry })
+      .all().length > 0;
+    return removed ? this.getSpamSettings() : null;
+  }
+
+  private senderSpamList(sender: string) {
+    const rules = this.db
+      .select({ list: spamSenderRules.list })
+      .from(spamSenderRules)
+      .where(inArray(spamSenderRules.entry, spamSenderCandidates(sender)))
+      .all();
+    return matchSenderList(rules.map((rule) => rule.list));
+  }
+
+  private senderRelationship(sender: string) {
+    const address = sender.toLowerCase();
+    const domain = address.slice(address.lastIndexOf("@") + 1);
+    // ponytail: scans every outgoing recipient per delivery; add an indexed
+    // correspondents table if very large mailboxes make this slow.
+    const row = this.state.storage.sql.exec<{
+      known_address: number | null;
+      known_domain: number;
+    }>(`
+      select max(address = ?) as known_address, count(*) as known_domain
+      from (
+        select lower(json_extract(recipient.value, '$.address')) as address
+        from emails, json_each(emails.to_json) recipient
+        where emails.direction = 'outgoing'
+        union all
+        select lower(json_extract(recipient.value, '$.address'))
+        from emails, json_each(emails.cc_json) recipient
+        where emails.direction = 'outgoing'
+        union all
+        select lower(json_extract(recipient.value, '$.address'))
+        from emails, json_each(emails.bcc_json) recipient
+        where emails.direction = 'outgoing'
+      )
+      where substr(address, instr(address, '@') + 1) = ?
+    `, address, domain).one();
+    return {
+      address: Boolean(row.known_address),
+      domain: row.known_domain > 0,
+    };
+  }
+
+  private spamTrainingTotals() {
+    const row = this.state.storage.sql.exec<{ spam: number; ham: number }>(`
+      select
+        coalesce(sum(label = 'spam'), 0) as spam,
+        coalesce(sum(label = 'ham'), 0) as ham
+      from spam_training
+    `).one();
+    return { spam: row.spam, ham: row.ham };
+  }
+
+  getSpamLearning() {
+    const totals = this.spamTrainingTotals();
+    const tokens = this.state.storage.sql
+      .exec<{ count: number }>("select count(*) as count from spam_tokens")
+      .one().count;
+    return {
+      spamMessages: totals.spam,
+      hamMessages: totals.ham,
+      tokens,
+      minimum: SPAM_LEARNING_MINIMUM,
+      active: totals.spam >= SPAM_LEARNING_MINIMUM && totals.ham >= SPAM_LEARNING_MINIMUM,
+    };
+  }
+
+  resetSpamLearning() {
+    this.state.storage.transactionSync(() => {
+      this.state.storage.sql.exec("delete from spam_tokens");
+      this.state.storage.sql.exec("delete from spam_training");
+    });
+    return this.getSpamLearning();
+  }
+
+  private learnedProbability(tokens: string[]) {
+    const totals = this.spamTrainingTotals();
+    if (totals.spam < SPAM_LEARNING_MINIMUM || totals.ham < SPAM_LEARNING_MINIMUM) {
+      return null;
+    }
+    const rows = this.state.storage.sql.exec<{ spam_count: number; ham_count: number }>(`
+      select spam_count, ham_count from spam_tokens
+      where token in (select cast(value as text) from json_each(?))
+    `, JSON.stringify(tokens)).toArray();
+    return learnedSpamProbability(
+      rows.map((row) => ({ spamCount: row.spam_count, hamCount: row.ham_count })),
+      totals,
+    );
+  }
+
+  /**
+   * Trains the incoming messages of conversations a member moved into or out
+   * of Spam. A message already trained the same way is skipped; one trained
+   * the other way has its earlier counts subtracted first.
+   */
+  private trainSpamConversations(conversationIds: string[], label: SpamLabel) {
+    if (!conversationIds.length) return;
+    const sql = this.state.storage.sql;
+    const now = Date.now();
+    const column = label === "spam" ? "spam_count" : "ham_count";
+    this.state.storage.transactionSync(() => {
+      const messages = sql.exec<{
+        id: string;
+        subject: string;
+        body_text: string | null;
+        from_json: string;
+        label: SpamLabel | null;
+        tokens_json: string | null;
+      }>(`
+        select e.id, e.subject, e.body_text, e.from_json, t.label, t.tokens_json
+        from emails e
+        left join spam_training t on t.email_id = e.id
+        where e.direction = 'incoming'
+          and e.conversation_id in (select cast(value as text) from json_each(?))
+      `, stringListJson(conversationIds)).toArray();
+      for (const message of messages) {
+        if (message.label === label) continue;
+        let tokensJson = message.tokens_json;
+        if (message.label && tokensJson) {
+          const previous = message.label === "spam" ? "spam_count" : "ham_count";
+          sql.exec(`
+            update spam_tokens set ${previous} = max(0, ${previous} - 1)
+            where token in (select cast(value as text) from json_each(?))
+          `, tokensJson);
+        } else {
+          const from = (JSON.parse(message.from_json) as Array<{ address: string }>)[0];
+          tokensJson = JSON.stringify(messageSpamTokens({
+            subject: message.subject,
+            bodyText: message.body_text,
+            from: from?.address ?? "",
+          }));
+        }
+        sql.exec(`
+          insert into spam_tokens (token, ${column}, updated_at)
+          select cast(value as text), 1, ? from json_each(?) where true
+          on conflict (token) do update
+            set ${column} = ${column} + 1, updated_at = excluded.updated_at
+        `, now, tokensJson);
+        sql.exec(`
+          insert into spam_training (email_id, label, tokens_json, trained_at)
+          values (?, ?, ?, ?)
+          on conflict (email_id) do update
+            set label = excluded.label, trained_at = excluded.trained_at
+        `, message.id, label, tokensJson, now);
+      }
+      sql.exec("delete from spam_tokens where spam_count = 0 and ham_count = 0");
+      this.pruneSpamTokens();
+    });
+  }
+
+  /** Keeps the token table bounded by dropping least-used, then oldest, rows. */
+  private pruneSpamTokens(limit = MAX_SPAM_TOKENS, pruneTo = SPAM_TOKENS_PRUNE_TO) {
+    const sql = this.state.storage.sql;
+    const count = sql.exec<{ count: number }>("select count(*) as count from spam_tokens").one().count;
+    if (count <= limit) return;
+    sql.exec(`
+      delete from spam_tokens where token in (
+        select token from spam_tokens
+        order by spam_count + ham_count, updated_at
+        limit ?
+      )
+    `, count - pruneTo);
+  }
+
+  private assessInboundSpam(
+    rawMime: ArrayBuffer,
+    prepared: PreparedInboundEmail,
+  ): SpamAssessment {
+    const { email } = prepared;
+    const from = email.fromJson[0] ?? { address: "", name: null };
+    return assessSpam({
+      learnedProbability: this.learnedProbability(messageSpamTokens({
+        subject: email.subject ?? "",
+        bodyText: email.bodyText ?? null,
+        from: from.address,
+      })),
+      authentication: parseAuthenticationResults(readHeaderBlock(rawMime)),
+      relationship: this.senderRelationship(from.address),
+      senderList: this.senderSpamList(from.address),
+      from,
+      recipientCount: (email.toJson?.length ?? 0) + (email.ccJson?.length ?? 0),
+      html: prepared.html,
+      hasTextPart: prepared.hasTextPart,
+      attachments: email.attachmentsJson ?? [],
+    }, this.spamThresholds());
+  }
+
   async completeOfficePreview(emailId: string, attachmentId: string, sourceKey: string, status: "ready" | "failed") {
     const email = this.getEmail(emailId);
     const file = email?.attachmentsJson.find((file) => file.id === attachmentId && file.r2Key === sourceKey);
@@ -1721,15 +2025,15 @@ export class MailboxDO extends DurableObject<Env> {
     };
     let email: NewEmail;
     try {
-      email = await prepareInboundEmail({
-      env: this.bindings,
-      mailboxId: this.state.id.name ?? "unknown-mailbox",
-      job,
-      rawMime: input.raw,
-      resolveParent: (inReplyTo, references) =>
-        this.resolveParent(inReplyTo, references),
-      preferHeaderDate: input.receivedAt === null,
-      });
+      ({ email } = await prepareInboundEmail({
+        env: this.bindings,
+        mailboxId: this.state.id.name ?? "unknown-mailbox",
+        job,
+        rawMime: input.raw,
+        resolveParent: (inReplyTo, references) =>
+          this.resolveParent(inReplyTo, references),
+        preferHeaderDate: input.receivedAt === null,
+      }));
     } catch (error) {
       if (!(error instanceof UnprocessableInboundEmailError)) throw error;
       return { status: "unparseable", message: error.message };
@@ -1848,6 +2152,7 @@ export class MailboxDO extends DurableObject<Env> {
   private insertClassifiedInboundEmail(
     email: NewEmail,
     classification: EmailAiClassification | null,
+    spam: SpamAssessment,
   ) {
     email = prepareOfficePreviews(email);
     const stored = this.db.transaction((tx) => {
@@ -1866,6 +2171,9 @@ export class MailboxDO extends DurableObject<Env> {
         .values({
           ...email,
           aiClassificationJson: normalizedClassification,
+          spamScore: spam.score,
+          spamVerdict: spam.verdict,
+          spamReasonsJson: spam.reasons,
         })
         .onConflictDoNothing()
         .returning()
@@ -1873,7 +2181,11 @@ export class MailboxDO extends DurableObject<Env> {
       if (!inserted) return null;
       insertOfficePreviewJobs(this.state.storage.sql, email);
 
-      if (normalizedClassification?.spam) {
+      // The local verdict already reflects the lists. AI may add a spam
+      // decision, but never for an allowed sender.
+      const isSpam = spam.verdict === "spam"
+        || (spam.senderList !== "allow" && Boolean(normalizedClassification?.spam));
+      if (isSpam) {
         tx.update(conversations)
           .set({ mailboxState: "spam", folderId: null })
           .where(and(
@@ -2050,6 +2362,14 @@ export class MailboxDO extends DurableObject<Env> {
       ? "and c.has_incoming = 1"
       : "";
 
+    const previousStates = new Map(this.state.storage.sql.exec<{
+      id: string;
+      mailbox_state: MailboxState;
+    }>(`
+      select id, mailbox_state from conversations
+      where id in (select cast(value as text) from json_each(?))
+    `, candidatesJson).toArray().map((row) => [row.id, row.mailbox_state]));
+
     // Keep the source-folder guard in the update itself so a stale shared
     // selection cannot overwrite a teammate's newer move.
     const result = this.state.storage.sql.exec<{ id: string }>(`
@@ -2062,6 +2382,20 @@ export class MailboxDO extends DurableObject<Env> {
         ${targetPredicate}
       returning id
     `, ...values, candidatesJson, ...membership.bindings).toArray();
+    // Only these explicit moves train the learned filter: Report spam, and
+    // Not spam back to Inbox, Archive or a folder. Moving spam to Trash does not.
+    const moved = result.map((row) => row.id);
+    if (mailboxState === "spam") {
+      this.trainSpamConversations(
+        moved.filter((id) => previousStates.get(id) !== "spam"),
+        "spam",
+      );
+    } else if (mailboxState === "active" || mailboxState === "archive") {
+      this.trainSpamConversations(
+        moved.filter((id) => previousStates.get(id) === "spam"),
+        "ham",
+      );
+    }
     if (result.length) this.publishUpdate();
     // A conversation moved into Trash or Spam may need a retention alarm.
     if (result.length && (mailboxState === "trash" || mailboxState === "spam")) {
@@ -2305,7 +2639,7 @@ export class MailboxDO extends DurableObject<Env> {
 
       try {
         const rawMime = await readInboundRawMime(this.bindings, job);
-        const email = await prepareInboundEmail({
+        const prepared = await prepareInboundEmail({
           env: this.bindings,
           mailboxId: this.state.id.name ?? "unknown-mailbox",
           job,
@@ -2313,6 +2647,7 @@ export class MailboxDO extends DurableObject<Env> {
           resolveParent: (inReplyTo, references) =>
             this.resolveParent(inReplyTo, references),
         });
+        const spam = this.assessInboundSpam(rawMime, prepared);
         let classification: EmailAiClassification | null = null;
         try {
           classification = await this.classifyInbound(rawMime);
@@ -2339,7 +2674,11 @@ export class MailboxDO extends DurableObject<Env> {
             error,
           );
         }
-        const stored = this.insertClassifiedInboundEmail(email, classification);
+        const stored = this.insertClassifiedInboundEmail(
+          prepared.email,
+          classification,
+          spam,
+        );
         if (!stored) {
           throw new Error("Parsed inbound email was not persisted");
         }

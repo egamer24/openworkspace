@@ -107,6 +107,13 @@ export function prepareUnprocessableInboundEmail(input: {
   };
 }
 
+/** The stored row plus parsed bodies the spam filter inspects in memory. */
+export type PreparedInboundEmail = {
+  email: NewEmail;
+  html: string | null;
+  hasTextPart: boolean;
+};
+
 export async function prepareInboundEmail(input: {
   env: Env;
   mailboxId: string;
@@ -115,7 +122,7 @@ export async function prepareInboundEmail(input: {
   resolveParent: (inReplyTo: string[], references: string[]) => Email | null;
   /** Imports use the message's own Date header, falling back to job.receivedAt. */
   preferHeaderDate?: boolean;
-}): Promise<NewEmail> {
+}): Promise<PreparedInboundEmail> {
   const { job } = input;
   const parsed = await parseMime(input.rawMime);
   const inReplyTo = messageIds(parsed.inReplyTo);
@@ -187,7 +194,7 @@ export async function prepareInboundEmail(input: {
     });
   }
 
-  return {
+  const email: NewEmail = {
     id: messageId,
     conversationId: parent && !detached ? parent.conversationId : createId("conv"),
     direction: "incoming",
@@ -211,6 +218,11 @@ export async function prepareInboundEmail(input: {
     timelineAt: input.preferHeaderDate ? headerDate(parsed.date) ?? job.receivedAt : job.receivedAt,
     transportState: "received",
     deliveryStatusJson: [],
+  };
+  return {
+    email,
+    html: parsed.html ?? null,
+    hasTextPart: Boolean(parsed.text?.trim()),
   };
 }
 

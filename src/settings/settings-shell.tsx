@@ -9,6 +9,7 @@ import {
   Palette,
   PenLine,
   Plane,
+  ShieldAlert,
   ShieldCheck,
   UserRound,
   type LucideIcon,
@@ -35,6 +36,7 @@ type SettingsSection =
   | "signatures"
   | "auto-replies"
   | "rules"
+  | "spam"
   | "sessions"
   | "mcp";
 
@@ -88,6 +90,13 @@ const settingsSections: Array<{
     path: "/settings/rules",
   },
   {
+    id: "spam",
+    label: "Spam filter",
+    description: "Thresholds and sender lists for mailboxes you can send from.",
+    Icon: ShieldAlert,
+    path: "/settings/spam",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -109,6 +118,7 @@ function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/signatures")) return "signatures";
   if (pathname.startsWith("/settings/auto-replies")) return "auto-replies";
   if (pathname.startsWith("/settings/rules")) return "rules";
+  if (pathname.startsWith("/settings/spam")) return "spam";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";
