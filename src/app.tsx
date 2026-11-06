@@ -47,6 +47,11 @@ const SettingsProfilePage = lazy(() =>
     default: module.ProfileSettings,
   })),
 );
+const SettingsRulesPage = lazy(() =>
+  import("@/settings/rules-page").then((module) => ({
+    default: module.RuleSettings,
+  })),
+);
 const SettingsSessionsPage = lazy(() =>
   import("@/settings/sessions-page").then((module) => ({
     default: module.SessionsSettings,
@@ -109,6 +114,7 @@ export function App() {
             <Route path="profile" element={<SettingsProfilePage />} />
             <Route path="appearance" element={<SettingsAppearancePage />} />
             <Route path="notifications" element={<SettingsNotificationsPage />} />
+            <Route path="rules" element={<SettingsRulesPage />} />
             <Route path="sessions" element={<SettingsSessionsPage />} />
             <Route path="mcp" element={<SettingsMcpPage />} />
           </Route>

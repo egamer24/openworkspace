@@ -5,6 +5,7 @@ import m0002 from "./0002_open_susan_delgado.sql";
 import m0003 from "./0003_omniscient_satana.sql";
 import m0004 from "./0004_harsh_rattler.sql";
 import m0005 from "./0005_office_previews.sql";
+import m0006 from "./0006_mail_rules.sql";
 
 export default {
   journal,
@@ -15,5 +16,6 @@ export default {
     m0003,
     m0004,
     m0005,
+    m0006,
   },
 };

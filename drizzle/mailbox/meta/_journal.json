@@ -43,6 +43,13 @@
       "when": 1791081433051,
       "tag": "0005_office_previews",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793944779306,
+      "tag": "0006_mail_rules",
+      "breakpoints": true
     }
   ]
 }

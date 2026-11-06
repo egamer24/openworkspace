@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Bell,
+  Filter,
   Inbox,
   KeyRound,
   LoaderCircle,
@@ -25,7 +26,13 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-type SettingsSection = "profile" | "appearance" | "notifications" | "sessions" | "mcp";
+type SettingsSection =
+  | "profile"
+  | "appearance"
+  | "notifications"
+  | "rules"
+  | "sessions"
+  | "mcp";
 
 const settingsSections: Array<{
   id: SettingsSection;
@@ -56,6 +63,13 @@ const settingsSections: Array<{
     path: "/settings/notifications",
   },
   {
+    id: "rules",
+    label: "Rules",
+    description: "Sort, mark read or forward new mail automatically.",
+    Icon: Filter,
+    path: "/settings/rules",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -74,6 +88,7 @@ const settingsSections: Array<{
 function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/mcp")) return "mcp";
   if (pathname.startsWith("/settings/notifications")) return "notifications";
+  if (pathname.startsWith("/settings/rules")) return "rules";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";

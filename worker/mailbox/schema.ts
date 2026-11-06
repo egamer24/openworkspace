@@ -7,6 +7,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { transportStates } from "../../shared/mail";
+import type { RuleAction, RuleCondition } from "../mail/rules";
 import { mailboxStates } from "./folder-model";
 import type {
   EmailAiClassification,
@@ -242,8 +243,27 @@ export const emailReadStates = sqliteTable(
   ],
 );
 
+/** Ordered per-mailbox rules applied to live deliveries after AI classification. */
+export const mailRules = sqliteTable(
+  "mail_rules",
+  {
+    id: text("id").primaryKey(),
+    position: integer("position").notNull(),
+    name: text("name").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    match: text("match", { enum: ["all", "any"] }).notNull(),
+    conditionsJson: text("conditions_json", { mode: "json" }).$type<RuleCondition[]>().notNull(),
+    actionsJson: text("actions_json", { mode: "json" }).$type<RuleAction[]>().notNull(),
+    stopProcessing: integer("stop_processing", { mode: "boolean" }).notNull(),
+    createdBy: text("created_by").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [index("mail_rules_position_idx").on(table.position)],
+);
+
 export type Email = typeof emails.$inferSelect;
 export type NewEmail = typeof emails.$inferInsert;
+export type MailRule = typeof mailRules.$inferSelect;
 export type EmailReadState = typeof emailReadStates.$inferSelect;
 export type PendingInbound = typeof pendingInbound.$inferSelect;
 export type PendingObjectDeletion = typeof pendingObjectDeletions.$inferSelect;

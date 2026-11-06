@@ -40,6 +40,18 @@ import {
 import { listActiveMailboxSessions } from "../mail/mailbox-directory";
 import { buildEmailSearchQuery } from "../mail/search";
 import {
+  evaluateRules,
+  forwardHops,
+  headerBlock,
+  MAX_FORWARD_HOPS,
+  ruleMatches,
+  type RuleInput,
+} from "../mail/rules";
+import { buildRuleForward } from "../mail/rule-forward";
+import { createDb } from "../db/client";
+import { mailboxMembers, mailboxes } from "../db/schema";
+import { createId, normalizeMailboxAddress } from "../lib/ids";
+import {
   deferWebhookTask,
   emailWebhookEventId,
   queueWebhookEvent,
@@ -55,6 +67,7 @@ import {
 import {
   conversations,
   emailReadStates,
+  mailRules,
   emails,
   folders,
   mailboxAiConfiguration,
@@ -62,6 +75,7 @@ import {
   pendingObjectDeletions,
   type Email,
   type FolderRecord,
+  type MailRule,
   type NewEmail,
   type NewFolder,
   type PendingInbound,
@@ -160,6 +174,24 @@ export type InboundDeliveryInput = {
   envelopeTo: string;
   receivedAt: number;
 };
+
+const MAX_RULES = 100;
+const RULE_TEST_SCAN = 500;
+
+function ruleView(rule: MailRule) {
+  return {
+    id: rule.id,
+    name: rule.name,
+    enabled: rule.enabled,
+    match: rule.match,
+    conditions: rule.conditionsJson,
+    actions: rule.actionsJson,
+    stopProcessing: rule.stopProcessing,
+    updatedAt: rule.updatedAt,
+  };
+}
+
+export type MailRuleView = ReturnType<typeof ruleView>;
 
 export type FolderListItem = {
   id: string;
@@ -477,7 +509,9 @@ export class MailboxDO extends DurableObject<Env> {
         .from(conversations)
         .where(eq(conversations.id, email.conversationId))
         .all()[0];
-      if (conversation?.mailboxState !== "spam") {
+      // Only Inbox and custom folders notify; at delivery time a conversation
+      // is elsewhere only because spam classification or a rule moved it.
+      if (conversation?.mailboxState === "active") {
         await this.queueIncomingNotification(email);
       }
       this.db.delete(pendingInbound).where(eq(pendingInbound.id, job.id)).run();
@@ -587,6 +621,195 @@ export class MailboxDO extends DurableObject<Env> {
         ? { timelineAt: Number(last.timeline_at), emailId: last.email_id }
         : null,
     };
+  }
+
+  listRules(): MailRuleView[] {
+    return this.db.select().from(mailRules).orderBy(asc(mailRules.position)).all().map(ruleView);
+  }
+
+  private ruleFolderError(input: RuleInput) {
+    for (const action of input.actions) {
+      if (action.type === "moveToFolder" && this.getFolder(action.folderId)?.kind !== "custom") {
+        return "Move to folder needs an existing custom folder";
+      }
+    }
+    return null;
+  }
+
+  createRule(input: RuleInput, userId: string) {
+    const error = this.ruleFolderError(input);
+    if (error) return { status: "invalid" as const, error };
+    const existing = this.db.select({ position: mailRules.position }).from(mailRules).all();
+    if (existing.length >= MAX_RULES) return { status: "limit" as const };
+    const rule: MailRule = {
+      id: createId("rule"),
+      position: Math.max(0, ...existing.map((row) => row.position)) + 1,
+      name: input.name,
+      enabled: input.enabled,
+      match: input.match,
+      conditionsJson: input.conditions,
+      actionsJson: input.actions,
+      stopProcessing: input.stopProcessing,
+      createdBy: userId,
+      updatedAt: new Date(),
+    };
+    this.db.insert(mailRules).values(rule).run();
+    this.publishUpdate();
+    return { status: "ok" as const, rule: ruleView(rule) };
+  }
+
+  updateRule(id: string, input: RuleInput) {
+    const error = this.ruleFolderError(input);
+    if (error) return { status: "invalid" as const, error };
+    const [updated] = this.db.update(mailRules)
+      .set({
+        name: input.name,
+        enabled: input.enabled,
+        match: input.match,
+        conditionsJson: input.conditions,
+        actionsJson: input.actions,
+        stopProcessing: input.stopProcessing,
+        updatedAt: new Date(),
+      })
+      .where(eq(mailRules.id, id))
+      .returning()
+      .all();
+    if (!updated) return { status: "not_found" as const };
+    this.publishUpdate();
+    return { status: "ok" as const, rule: ruleView(updated) };
+  }
+
+  deleteRule(id: string) {
+    const deleted = this.db.delete(mailRules).where(eq(mailRules.id, id)).returning({ id: mailRules.id }).all();
+    if (deleted.length) this.publishUpdate();
+    return deleted.length > 0;
+  }
+
+  reorderRules(ruleIds: string[]) {
+    const current = this.db.select({ id: mailRules.id }).from(mailRules).all().map((row) => row.id);
+    if (current.length !== ruleIds.length || !current.every((id) => ruleIds.includes(id))) return false;
+    this.db.transaction((tx) => {
+      ruleIds.forEach((id, index) => {
+        tx.update(mailRules).set({ position: index + 1 }).where(eq(mailRules.id, id)).run();
+      });
+    });
+    this.publishUpdate();
+    return true;
+  }
+
+  /** How many of the latest messages a rule would match, without changing anything. */
+  testRule(rule: Pick<RuleInput, "match" | "conditions">) {
+    const recent = this.db
+      .select()
+      .from(emails)
+      .where(eq(emails.direction, "incoming"))
+      .orderBy(desc(emails.timelineAt))
+      .limit(RULE_TEST_SCAN)
+      .all();
+    const matches = recent.filter((email) => ruleMatches(rule, email));
+    return {
+      scanned: recent.length,
+      matches: matches.length,
+      sample: matches.slice(0, 5).map((email) => ({
+        id: email.id,
+        conversationId: email.conversationId,
+        subject: email.subject,
+        from: email.fromJson[0]?.address ?? null,
+        timelineAt: email.timelineAt,
+      })),
+    };
+  }
+
+  /**
+   * Applies the mailbox's rules to a live delivery, after AI classification
+   * and before notifications. Forwarding runs afterwards in waitUntil.
+   */
+  private async applyRules(job: PendingInbound, email: Email, rawMime: ArrayBuffer) {
+    const rules = this.listRules().filter((rule) => rule.enabled);
+    if (!rules.length) return;
+    const conversation = this.db
+      .select({ mailboxState: conversations.mailboxState })
+      .from(conversations)
+      .where(eq(conversations.id, email.conversationId))
+      .all()[0];
+    if (!conversation) return;
+    const outcome = evaluateRules(rules, email, conversation.mailboxState);
+    if (!outcome.matchedRuleIds.length) return;
+
+    const folderId = outcome.folderId && this.getFolder(outcome.folderId)?.kind === "custom"
+      ? outcome.folderId
+      : null;
+    if (outcome.mailboxState) {
+      this.db.update(conversations)
+        .set({
+          mailboxState: outcome.mailboxState,
+          folderId: outcome.mailboxState === "active" ? folderId : null,
+        })
+        .where(eq(conversations.id, email.conversationId))
+        .run();
+    }
+    const db = createDb(this.bindings.DB);
+    const mailboxId = this.state.id.name ?? "";
+    if (outcome.markRead) {
+      const members = await db
+        .select({ userId: mailboxMembers.userId })
+        .from(mailboxMembers)
+        .where(eq(mailboxMembers.mailboxId, mailboxId));
+      if (members.length) {
+        this.db.insert(emailReadStates)
+          .values(members.map((member) => ({ userId: member.userId, emailId: email.id, readAt: new Date() })))
+          .onConflictDoNothing()
+          .run();
+      }
+    }
+
+    const finalState = outcome.mailboxState ?? conversation.mailboxState;
+    const hops = forwardHops(headerBlock(rawMime));
+    const sender = normalizeMailboxAddress(job.envelopeFrom || email.fromJson[0]?.address || "");
+    const forwards = outcome.forwards.filter((forward) =>
+      finalState !== "spam"
+      && hops < MAX_FORWARD_HOPS
+      && normalizeMailboxAddress(forward.to) !== sender
+    );
+    if (!forwards.length) return;
+    const [mailbox] = await db
+      .select({ displayName: mailboxes.displayName })
+      .from(mailboxes)
+      .where(eq(mailboxes.id, mailboxId))
+      .limit(1);
+    this.state.waitUntil(this.sendRuleForwards(email, forwards, {
+      mailboxAddress: normalizeMailboxAddress(job.envelopeTo),
+      mailboxName: mailbox?.displayName ?? "",
+      hops,
+    }));
+  }
+
+  private async sendRuleForwards(
+    email: Email,
+    forwards: Array<{ to: string; keepCopy: boolean }>,
+    input: { mailboxAddress: string; mailboxName: string; hops: number },
+  ) {
+    let allSent = true;
+    for (const forward of forwards) {
+      try {
+        await this.bindings.EMAIL.send(await buildRuleForward(this.bindings, {
+          email,
+          ...input,
+          to: forward.to,
+        }));
+      } catch (error) {
+        allSent = false;
+        console.error(`Rule forward of ${email.id} to ${forward.to} failed`, error);
+      }
+    }
+    // "Forward only" discards the copy only once every forward was accepted.
+    if (allSent && forwards.every((forward) => !forward.keepCopy)) {
+      this.db.update(conversations)
+        .set({ mailboxState: "trash", folderId: null })
+        .where(eq(conversations.id, email.conversationId))
+        .run();
+      this.publishUpdate();
+    }
   }
 
   getFolder(id: string): MailFolder | null {
@@ -1710,6 +1933,12 @@ export class MailboxDO extends DurableObject<Env> {
         const stored = this.insertClassifiedInboundEmail(email, classification);
         if (!stored) {
           throw new Error("Parsed inbound email was not persisted");
+        }
+        try {
+          await this.applyRules(job, stored, rawMime);
+        } catch (error) {
+          // A broken rule must never block delivery.
+          console.error(`Rules failed for ${stored.id}`, error);
         }
         await this.finishStoredInbound(job, stored, now, true);
       } catch (error) {
