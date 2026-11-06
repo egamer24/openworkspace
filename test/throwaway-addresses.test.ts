@@ -140,6 +140,24 @@ describe("throwaway addresses", () => {
       .bind(sharedMailboxId, "usr_throwaway_member").run();
   });
 
+  it("stops delivering when the creator's account is disabled", async () => {
+    const creatorId = "usr_throwaway_disabled";
+    await env.DB.prepare(
+      "INSERT INTO users (id, name, role, status) VALUES (?, 'Leaver', 'member', 'active')",
+    ).bind(creatorId).run();
+    await env.DB.prepare(
+      "INSERT INTO mailbox_members (mailbox_id, user_id, can_send) VALUES (?, ?, 1)",
+    ).bind(sharedMailboxId, creatorId).run();
+    const creatorCookie = await sessionCookie("login", { userId: creatorId });
+    const created = await create(sharedMailboxId, "Before leaving", creatorCookie);
+    expect(created.status).toBe(201);
+    const { address } = created.body.address;
+    expect((await deliver(address)).setReject).not.toHaveBeenCalled();
+    const disabled = await call(`/admin/users/${creatorId}`, { method: "PATCH", json: { status: "disabled" } });
+    expect(disabled.status).toBe(200);
+    expect((await deliver(address)).setReject).toHaveBeenCalled();
+  });
+
   it("shows throwaways to admins with their state", async () => {
     const routing = await call("/admin/routing");
     const throwaways = routing.body.addresses.filter((row: { throwaway: boolean }) => row.throwaway);
