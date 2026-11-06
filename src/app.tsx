@@ -4,6 +4,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useParams,
 } from "react-router";
 import { AuthScreen } from "@/auth/auth-screen";
@@ -18,6 +19,9 @@ const AccessLinkScreen = lazy(() =>
 );
 const AdminPage = lazy(() =>
   import("@/admin/admin-page").then((module) => ({ default: module.AdminPage })),
+);
+const BookingPages = lazy(() =>
+  import("@/booking/booking-pages").then((module) => ({ default: module.BookingPages })),
 );
 const CalendarPage = lazy(() =>
   import("@/calendar/calendar-page").then((module) => ({ default: module.CalendarPage })),
@@ -87,6 +91,15 @@ function LoadingScreen() {
 
 export function App() {
   const auth = useAuth();
+  const location = useLocation();
+  // Public booking pages work for guests and do not wait on the session check.
+  if (location.pathname.startsWith("/book/")) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes><Route path="/book/*" element={<BookingPages />} /></Routes>
+      </Suspense>
+    );
+  }
   if (auth.loading) return <LoadingScreen />;
   if (auth.error) return <AuthCheckError onRetry={auth.retry} />;
   const mail = auth.authenticated ? <MailboxRoute /> : <AuthScreen />;

@@ -13,7 +13,10 @@ import {
   type CalendarReminderPushJob,
   type CalendarTransparency,
 } from "../../shared/calendar";
+import { computeSlots, MAX_BOOKING_TYPES } from "../../shared/booking";
+import { randomToken } from "../lib/crypto";
 import { createId } from "../lib/ids";
+import { signBookingToken, verifyBookingToken } from "./booking";
 import { parseIcs, serializeCalendar, type IcsSkip } from "./ics";
 import { calendarModuleEnabled } from "./module";
 import {
@@ -23,13 +26,18 @@ import {
   type ExpandedOccurrence,
 } from "./recurrence";
 import {
+  bookings,
+  bookingTypes,
   calendars,
   events,
+  type BookingRecord,
+  type BookingTypeRecord,
   type CalendarEventRecord,
   type CalendarRecord,
+  type NewCalendarEvent,
 } from "./schema";
 
-const schema = { calendars, events };
+const schema = { calendars, events, bookingTypes, bookings };
 type CalendarDatabase = DrizzleSqliteDODatabase<typeof schema>;
 
 const DEFAULT_CALENDAR_COLOR = "#2563eb";
@@ -37,6 +45,9 @@ const REMINDER_CURSOR_KEY = "reminderCursor";
 /** Reminders older than this when the alarm finally runs are dropped. */
 const STALE_REMINDER_MS = 15 * 60_000;
 const REMINDER_HORIZON_MS = 30 * 86_400_000;
+const BOOKING_SECRET_KEY = "bookingSecret";
+const BOOKING_SEEDED_KEY = "bookingTypesSeeded";
+const DAY_MS = 86_400_000;
 
 export type CalendarEventFields = {
   title: string;
@@ -64,10 +75,28 @@ export type UpdateCalendarEventInput = Partial<CalendarEventFields> & {
 
 export type CalendarResult<T> =
   | { ok: true; value: T }
-  | { ok: false; status: 400 | 404; message: string };
+  | { ok: false; status: 400 | 404 | 409; message: string };
 
 const notFound = { ok: false, status: 404, message: "Event not found" } as const;
 const badRequest = (message: string) => ({ ok: false, status: 400, message }) as const;
+const slugTaken = { ok: false, status: 409, message: "Another booking type uses this slug" } as const;
+const slotTaken = { ok: false, status: 409, message: "That time is no longer available" } as const;
+
+/** What guests may see of a booking type: no calendars, mailboxes or rules. */
+function publicBookingTypeView(type: BookingTypeRecord) {
+  return {
+    slug: type.slug,
+    name: type.name,
+    description: type.description,
+    location: type.location,
+    durationMinutes: type.durationMinutes,
+    timeZone: type.timeZone,
+    maxDaysAhead: type.maxDaysAhead,
+    collectNotes: type.collectNotes,
+  };
+}
+
+export type PublicBookingType = ReturnType<typeof publicBookingTypeView>;
 
 export type CalendarOccurrence = {
   /** Row to pass back for updates: the series master or an override. */
@@ -254,9 +283,9 @@ export class CalendarDO extends DurableObject<Env> {
   }
 
   /** Busy intervals, merged, ignoring free and cancelled events. */
-  freeBusy(from: number, to: number) {
+  freeBusy(from: number, to: number, excludeEventId?: string) {
     const busy = expandOccurrences(this.rowsOverlapping(from, to), from, to)
-      .filter(({ row }) => row.transparency === "busy" && row.status !== "cancelled")
+      .filter(({ row }) => row.transparency === "busy" && row.status !== "cancelled" && row.id !== excludeEventId)
       .map(({ startsAt, endsAt }) => ({ startsAt: Math.max(startsAt, from), endsAt: Math.min(endsAt, to) }))
       .filter((interval) => interval.endsAt > interval.startsAt);
     const merged: Array<{ startsAt: number; endsAt: number }> = [];
@@ -285,8 +314,14 @@ export class CalendarDO extends DurableObject<Env> {
   async createEvent(input: CreateCalendarEventInput): Promise<CalendarResult<CalendarEventRecord>> {
     const calendarId = input.calendarId ?? this.listCalendars()[0]!.id;
     if (!this.calendarExists(calendarId)) return { ok: false, status: 404, message: "Calendar not found" };
+    const row = this.insertEvent({ ...input, calendarId });
+    await this.scheduleReminders();
+    return { ok: true, value: row };
+  }
+
+  private insertEvent(input: CreateCalendarEventInput & { calendarId: string }, db: Pick<CalendarDatabase, "insert"> = this.db) {
     const now = Date.now();
-    const row = this.db.insert(events).values({
+    return db.insert(events).values({
       description: "",
       location: "",
       allDay: false,
@@ -296,16 +331,13 @@ export class CalendarDO extends DurableObject<Env> {
       reminders: [],
       ...input,
       id: createId("evt"),
-      calendarId,
       uid: `${crypto.randomUUID()}@openworkspace`,
       recurrenceId: null,
       sequence: 0,
       exdates: [],
       createdAt: now,
       updatedAt: now,
-    }).returning().get();
-    await this.scheduleReminders();
-    return { ok: true, value: row };
+    } satisfies NewCalendarEvent).returning().get();
   }
 
   /**
@@ -556,6 +588,282 @@ export class CalendarDO extends DurableObject<Env> {
     }
     await this.scheduleReminders();
     return { imported, skipped };
+  }
+
+  // Booking pages. Every public write lands here, in the host's object, so
+  // checking a slot and inserting its event happen without interleaving.
+
+  /** Lists booking types, adding the two disabled starters on first use. */
+  listBookingTypes(seedTimeZone = "UTC") {
+    if (this.state.storage.kv.get(BOOKING_SEEDED_KEY) === undefined) {
+      const now = Date.now();
+      const weeklyHours = (["MO", "TU", "WE", "TH", "FR"] as const)
+        .map((day) => ({ day, start: 9 * 60, end: 17 * 60 }));
+      for (const minutes of [15, 30]) {
+        this.db.insert(bookingTypes).values({
+          id: createId("bkt"),
+          slug: `${minutes}min`,
+          name: `${minutes} minute meeting`,
+          durationMinutes: minutes,
+          slotIntervalMinutes: minutes,
+          timeZone: seedTimeZone,
+          weeklyHours,
+          minimumNoticeMinutes: 4 * 60,
+          createdAt: now,
+          updatedAt: now,
+        }).onConflictDoNothing().run();
+      }
+      this.state.storage.kv.put(BOOKING_SEEDED_KEY, true);
+    }
+    return this.db.select().from(bookingTypes).orderBy(asc(bookingTypes.createdAt)).all();
+  }
+
+  createBookingType(
+    input: Partial<Omit<BookingTypeRecord, "id" | "createdAt" | "updatedAt">>
+      & Pick<BookingTypeRecord, "slug" | "name" | "durationMinutes" | "timeZone">,
+  ): CalendarResult<BookingTypeRecord> {
+    if (this.listBookingTypes().length >= MAX_BOOKING_TYPES) {
+      return badRequest(`A user can have at most ${MAX_BOOKING_TYPES} booking types`);
+    }
+    if (this.bookingTypeBySlug(input.slug)) return slugTaken;
+    const now = Date.now();
+    return {
+      ok: true,
+      value: this.db.insert(bookingTypes).values({
+        slotIntervalMinutes: input.durationMinutes,
+        ...input,
+        id: createId("bkt"),
+        createdAt: now,
+        updatedAt: now,
+      }).returning().get(),
+    };
+  }
+
+  updateBookingType(
+    id: string,
+    patch: Partial<Omit<BookingTypeRecord, "id" | "createdAt" | "updatedAt">>,
+  ): CalendarResult<BookingTypeRecord> {
+    const existing = patch.slug ? this.bookingTypeBySlug(patch.slug) : undefined;
+    if (existing && existing.id !== id) return slugTaken;
+    const row = this.db.update(bookingTypes)
+      .set({ ...patch, updatedAt: Date.now() })
+      .where(eq(bookingTypes.id, id))
+      .returning()
+      .get();
+    return row ? { ok: true, value: row } : { ok: false, status: 404, message: "Booking type not found" };
+  }
+
+  /** Bookings already made keep their calendar events. */
+  deleteBookingType(id: string) {
+    return Boolean(this.db.delete(bookingTypes).where(eq(bookingTypes.id, id)).returning().get());
+  }
+
+  private bookingTypeBySlug(slug: string) {
+    return this.db.select().from(bookingTypes).where(eq(bookingTypes.slug, slug)).get();
+  }
+
+  /** An enabled booking type, as the public page may see it. */
+  publicBookingType(slug: string) {
+    const type = this.bookingTypeBySlug(slug);
+    return type?.enabled ? publicBookingTypeView(type) : null;
+  }
+
+  publicBookingTypes() {
+    return this.listBookingTypes().filter((type) => type.enabled).map(publicBookingTypeView);
+  }
+
+  private slotsFor(type: BookingTypeRecord, from: number, to: number, exclude?: BookingRecord) {
+    const duration = type.durationMinutes * 60_000;
+    const padBefore = type.bufferBeforeMinutes * 60_000;
+    const padAfter = type.bufferAfterMinutes * 60_000;
+    const busy = this.freeBusy(from - padBefore - duration, to + duration + padAfter, exclude?.eventId);
+    const bookedStarts = this.db.select({ startsAt: bookings.startsAt }).from(bookings).where(and(
+      eq(bookings.bookingTypeId, type.id),
+      eq(bookings.status, "confirmed"),
+      exclude ? ne(bookings.id, exclude.id) : undefined,
+      sql`${bookings.startsAt} >= ${from - 2 * DAY_MS}`,
+      sql`${bookings.startsAt} < ${to + 2 * DAY_MS}`,
+    )).all().map((row) => row.startsAt);
+    return computeSlots({ rules: type, busy, bookedStarts, now: Date.now(), from, to });
+  }
+
+  /** Free slot starts only; nothing about the host's events leaves here. */
+  availableSlots(slug: string, from: number, to: number) {
+    const type = this.bookingTypeBySlug(slug);
+    if (!type?.enabled) return null;
+    return this.slotsFor(type, from, to);
+  }
+
+  private bookingSecret() {
+    let secret = this.state.storage.kv.get<string>(BOOKING_SECRET_KEY);
+    if (!secret) {
+      secret = randomToken();
+      this.state.storage.kv.put(BOOKING_SECRET_KEY, secret);
+    }
+    return secret;
+  }
+
+  /** Cancel/reschedule links stay valid until the meeting starts. */
+  private manageToken(booking: BookingRecord) {
+    return signBookingToken(this.bookingSecret(), {
+      u: this.userId,
+      b: booking.id,
+      e: Math.floor(booking.startsAt / 1_000),
+    });
+  }
+
+  private bookingResult(booking: BookingRecord) {
+    const type = this.db.select().from(bookingTypes).where(eq(bookingTypes.id, booking.bookingTypeId)).get()!;
+    const event = this.getEvent(booking.eventId);
+    return { booking, type, event };
+  }
+
+  /**
+   * Re-checks the slot against current events and inserts the event and the
+   * booking in one synchronous step, so two guests cannot take one slot.
+   */
+  async book(slug: string, input: {
+    start: number;
+    name: string;
+    email: string;
+    notes: string;
+    timeZone: string;
+  }) {
+    const type = this.bookingTypeBySlug(slug);
+    if (!type?.enabled) return { ok: false, status: 404, message: "Booking type not found" } as const;
+    if (!this.slotsFor(type, input.start, input.start + 1).includes(input.start)) return slotTaken;
+    const calendars = this.listCalendars();
+    const calendarId = calendars.some((calendar) => calendar.id === type.calendarId)
+      ? type.calendarId!
+      : calendars[0]!.id;
+    const now = Date.now();
+    const endsAt = input.start + type.durationMinutes * 60_000;
+    const booking = this.db.transaction((tx) => {
+      const event = this.insertEvent({
+        calendarId,
+        title: `${type.name}: ${input.name}`,
+        description: [
+          `Booked by ${input.name} <${input.email}>`,
+          input.notes ? `\n${input.notes}` : "",
+        ].join(""),
+        location: type.location,
+        startsAt: input.start,
+        endsAt,
+        timeZone: type.timeZone,
+      }, tx);
+      return tx.insert(bookings).values({
+        id: createId("bkg"),
+        bookingTypeId: type.id,
+        eventId: event.id,
+        guestName: input.name,
+        guestEmail: input.email,
+        guestTimeZone: input.timeZone,
+        notes: input.notes,
+        startsAt: input.start,
+        endsAt,
+        createdAt: now,
+        updatedAt: now,
+      }).returning().get();
+    });
+    await this.scheduleReminders();
+    return { ok: true, value: { ...this.bookingResult(booking), token: await this.manageToken(booking) } } as const;
+  }
+
+  private async bookingFromToken(token: string) {
+    const payload = await verifyBookingToken(this.bookingSecret(), token);
+    if (!payload || payload.u !== this.userId) return null;
+    const booking = this.db.select().from(bookings).where(eq(bookings.id, payload.b)).get();
+    return booking?.status === "confirmed" ? booking : null;
+  }
+
+  async managedBooking(token: string) {
+    const booking = await this.bookingFromToken(token);
+    if (!booking) return null;
+    const { type } = this.bookingResult(booking);
+    return { booking, type: publicBookingTypeView(type), enabled: type.enabled };
+  }
+
+  /** Free slots for moving a booking; its own event does not block them. */
+  async rescheduleSlots(token: string, from: number, to: number) {
+    const booking = await this.bookingFromToken(token);
+    if (!booking) return null;
+    return this.slotsFor(this.bookingResult(booking).type, from, to, booking);
+  }
+
+  async cancelByToken(token: string) {
+    const booking = await this.bookingFromToken(token);
+    return booking ? this.cancelBooking(booking.id) : null;
+  }
+
+  /** Removes the booking's event; returns what the notifications need. */
+  async cancelBooking(bookingId: string) {
+    const booking = this.db.select().from(bookings).where(eq(bookings.id, bookingId)).get();
+    if (booking?.status !== "confirmed") return null;
+    const { type, event } = this.bookingResult(booking);
+    const cancelled = this.db.transaction((tx) => {
+      if (event) tx.delete(events).where(eq(events.uid, event.uid)).run();
+      return tx.update(bookings)
+        .set({ status: "cancelled", updatedAt: Date.now() })
+        .where(eq(bookings.id, booking.id))
+        .returning()
+        .get()!;
+    });
+    await this.scheduleReminders();
+    return {
+      booking: cancelled,
+      type,
+      event: event ? { ...event, status: "cancelled" as const, sequence: event.sequence + 1 } : null,
+    };
+  }
+
+  async rescheduleByToken(token: string, start: number) {
+    const booking = await this.bookingFromToken(token);
+    if (!booking) return { ok: false, status: 404, message: "Booking not found" } as const;
+    const { type, event } = this.bookingResult(booking);
+    if (!type.enabled) return { ok: false, status: 404, message: "Booking not found" } as const;
+    if (!this.slotsFor(type, start, start + 1, booking).includes(start)) return slotTaken;
+    const endsAt = start + type.durationMinutes * 60_000;
+    const now = Date.now();
+    const moved = this.db.transaction((tx) => {
+      if (event) {
+        tx.update(events)
+          .set({ startsAt: start, endsAt, sequence: event.sequence + 1, updatedAt: now })
+          .where(eq(events.id, event.id))
+          .run();
+      }
+      return tx.update(bookings)
+        .set({ startsAt: start, endsAt, updatedAt: now })
+        .where(eq(bookings.id, booking.id))
+        .returning()
+        .get()!;
+    });
+    await this.scheduleReminders();
+    return {
+      ok: true,
+      value: { ...this.bookingResult(moved), previousStart: booking.startsAt, token: await this.manageToken(moved) },
+    } as const;
+  }
+
+  listUpcomingBookings(from = Date.now()) {
+    return this.db.select({
+      id: bookings.id,
+      bookingTypeId: bookings.bookingTypeId,
+      bookingTypeName: bookingTypes.name,
+      eventId: bookings.eventId,
+      guestName: bookings.guestName,
+      guestEmail: bookings.guestEmail,
+      guestTimeZone: bookings.guestTimeZone,
+      notes: bookings.notes,
+      startsAt: bookings.startsAt,
+      endsAt: bookings.endsAt,
+      createdAt: bookings.createdAt,
+    })
+      .from(bookings)
+      .innerJoin(bookingTypes, eq(bookings.bookingTypeId, bookingTypes.id))
+      .where(and(eq(bookings.status, "confirmed"), sql`${bookings.endsAt} > ${from}`))
+      .orderBy(asc(bookings.startsAt))
+      .limit(500)
+      .all();
   }
 
   /** Reminder triggers `start - minutes` with `from < trigger <= to`. */

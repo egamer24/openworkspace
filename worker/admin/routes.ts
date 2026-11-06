@@ -36,6 +36,7 @@ import {
   samlAuthnRequests,
   sessions,
   users,
+  bookingHandles,
 } from "../db/schema";
 import type { AppEnv } from "../env";
 import {
@@ -46,7 +47,7 @@ import {
   calendarModuleEnabled,
   setCalendarModuleEnabled,
 } from "../calendar/module";
-import { calendarModuleSchema } from "../calendar/schemas";
+import { bookingHandleSchema, calendarModuleSchema } from "../calendar/schemas";
 import { randomToken, hashToken } from "../lib/crypto";
 import { apiError } from "../lib/http";
 import { createId } from "../lib/ids";
@@ -203,8 +204,10 @@ export const adminRoutes = new Hono<AppEnv>()
           status: users.status,
           createdAt: users.createdAt,
           personalEmail: mailboxAddressSql,
+          bookingHandle: bookingHandles.handle,
         })
         .from(users)
+        .leftJoin(bookingHandles, eq(bookingHandles.userId, users.id))
         .leftJoin(
           mailboxes,
           and(
@@ -434,6 +437,29 @@ export const adminRoutes = new Hono<AppEnv>()
         { ok: true as const, accessLink: invitation.result },
         201,
       );
+    },
+  )
+  .put(
+    "/users/:id/booking-handle",
+    zValidator("json", bookingHandleSchema),
+    async (c) => {
+      const db = createDb(c.env.DB);
+      const userId = c.req.param("id");
+      const { handle } = c.req.valid("json");
+      const [target] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!target) return apiError(c, 404, "NOT_FOUND", "User not found");
+      const [taken] = await db.select({ userId: bookingHandles.userId })
+        .from(bookingHandles)
+        .where(eq(bookingHandles.handle, handle))
+        .limit(1);
+      if (taken && taken.userId !== userId) {
+        return apiError(c, 409, "CONFLICT", "Another user has this booking handle");
+      }
+      // Old links stop working; the handle is the only public identifier.
+      await db.insert(bookingHandles)
+        .values({ userId, handle })
+        .onConflictDoUpdate({ target: bookingHandles.userId, set: { handle } });
+      return c.json({ ok: true as const, handle });
     },
   )
   .post("/users/:id/access-link", async (c) => {

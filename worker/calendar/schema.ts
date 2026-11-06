@@ -6,6 +6,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { BookingDateOverride, BookingWeeklyRange } from "../../shared/booking";
 import {
   calendarEventStatuses,
   calendarTransparencies,
@@ -74,6 +75,66 @@ export const events = sqliteTable(
   ],
 );
 
+/** Public booking page types; times and ranges as in `BookingRules`. */
+export const bookingTypes = sqliteTable(
+  "booking_types",
+  {
+    id: text("id").primaryKey(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    location: text("location").notNull().default(""),
+    durationMinutes: integer("duration_minutes").notNull(),
+    timeZone: text("time_zone").notNull(),
+    weeklyHours: text("weekly_hours", { mode: "json" })
+      .$type<BookingWeeklyRange[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    dateOverrides: text("date_overrides", { mode: "json" })
+      .$type<BookingDateOverride[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    bufferBeforeMinutes: integer("buffer_before_minutes").notNull().default(0),
+    bufferAfterMinutes: integer("buffer_after_minutes").notNull().default(0),
+    minimumNoticeMinutes: integer("minimum_notice_minutes").notNull().default(0),
+    maxDaysAhead: integer("max_days_ahead").notNull().default(60),
+    slotIntervalMinutes: integer("slot_interval_minutes").notNull(),
+    dailyCap: integer("daily_cap"),
+    collectNotes: integer("collect_notes", { mode: "boolean" }).notNull().default(true),
+    /** Null: the first calendar. */
+    calendarId: text("calendar_id"),
+    /** Mailbox the guest confirmation is sent from; null sends none. */
+    senderMailboxId: text("sender_mailbox_id"),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [uniqueIndex("booking_types_slug_unique").on(table.slug)],
+);
+
+export const bookings = sqliteTable(
+  "bookings",
+  {
+    id: text("id").primaryKey(),
+    bookingTypeId: text("booking_type_id")
+      .notNull()
+      .references(() => bookingTypes.id, { onDelete: "cascade" }),
+    eventId: text("event_id").notNull(),
+    guestName: text("guest_name").notNull(),
+    guestEmail: text("guest_email").notNull(),
+    guestTimeZone: text("guest_time_zone").notNull(),
+    notes: text("notes").notNull().default(""),
+    startsAt: integer("starts_at").notNull(),
+    endsAt: integer("ends_at").notNull(),
+    status: text("status", { enum: ["confirmed", "cancelled"] }).notNull().default("confirmed"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (table) => [index("bookings_type_start_idx").on(table.bookingTypeId, table.startsAt)],
+);
+
 export type CalendarRecord = typeof calendars.$inferSelect;
 export type CalendarEventRecord = typeof events.$inferSelect;
 export type NewCalendarEvent = typeof events.$inferInsert;
+export type BookingTypeRecord = typeof bookingTypes.$inferSelect;
+export type BookingRecord = typeof bookings.$inferSelect;

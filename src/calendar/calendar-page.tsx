@@ -16,6 +16,7 @@ import {
 } from "date-fns";
 import {
   ArrowLeft,
+  CalendarCheck,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -43,6 +44,7 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, responseJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { BookingPanel } from "./booking-panel";
 import { EventDialog } from "./event-dialog";
 import type { CalendarItem, CalendarOccurrence } from "./types";
 
@@ -93,6 +95,7 @@ export function CalendarPage() {
   const [view, setView] = useState<CalendarView>("month");
   const [cursor, setCursor] = useState(() => new Date());
   const [dialog, setDialog] = useState<{ occurrence: CalendarOccurrence | null; start: number } | null>(null);
+  const [bookingOpen, setBookingOpen] = useState(false);
   const range = visibleRange(view, cursor);
 
   const calendars = useQuery({
@@ -147,6 +150,9 @@ export function CalendarPage() {
               <TabsTrigger value="agenda">Agenda</TabsTrigger>
             </TabsList>
           </Tabs>
+          <Button variant="ghost" size="icon" aria-label="Booking pages" onClick={() => setBookingOpen(true)}>
+            <CalendarCheck />
+          </Button>
           <Button
             className="hidden sm:inline-flex"
             disabled={!calendars.data?.length}
@@ -192,6 +198,7 @@ export function CalendarPage() {
       >
         <Plus />
       </Button>
+      <BookingPanel open={bookingOpen} onOpenChange={setBookingOpen} calendars={calendars.data ?? []} />
       <EventDialog
         open={dialog !== null}
         occurrence={dialog?.occurrence ?? null}

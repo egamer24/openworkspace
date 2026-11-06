@@ -113,4 +113,42 @@ export function registerCalendarTools(server: McpServer, api: AccountApiClient) 
     },
     (input) => runTool(() => api.json(apiPath("/calendar/freebusy", input))),
   );
+
+  server.registerTool(
+    "list_booking_types",
+    {
+      title: "List booking types",
+      description: "List the current account's public booking page types (slug, duration, weekly hours, enabled) and the booking page URL.",
+      inputSchema: z.object({}),
+      annotations: readOnly,
+    },
+    () => runTool(() => api.json("/calendar/booking")),
+  );
+
+  server.registerTool(
+    "list_upcoming_bookings",
+    {
+      title: "List upcoming bookings",
+      description: "List confirmed bookings made through the booking pages that have not ended yet, with guest names and emails. Times are epoch milliseconds (UTC).",
+      inputSchema: z.object({}),
+      annotations: readOnly,
+    },
+    () => runTool(() => api.json("/calendar/booking/bookings")),
+  );
+
+  server.registerTool(
+    "cancel_booking",
+    {
+      title: "Cancel booking",
+      description: "Cancel a booking: removes its calendar event and emails the guest from the booking type's sending mailbox.",
+      inputSchema: z.object({
+        bookingId: entityIdSchema.describe("id of a booking from list_upcoming_bookings."),
+      }),
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ bookingId }) => runTool(() => api.json(
+      `/calendar/booking/bookings/${encodeURIComponent(bookingId)}/cancel`,
+      { method: "POST" },
+    )),
+  );
 }

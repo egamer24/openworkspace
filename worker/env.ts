@@ -35,6 +35,11 @@ export type PushBindings = {
   VAPID_SUBJECT?: string;
 };
 
+export type BookingBindings = {
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+};
+
 export type AppEnv = {
   Bindings: Env
     & AuthBindings
@@ -42,7 +47,8 @@ export type AppEnv = {
     & OidcBindings
     & SamlBindings
     & R2S3Bindings
-    & PushBindings;
+    & PushBindings
+    & BookingBindings;
   Variables: {
     user: SessionUser;
     authKind: "session" | "api-token";

@@ -8,6 +8,7 @@ import type { AppEnv } from "../env";
 import { hashToken, randomToken } from "../lib/crypto";
 import { apiError } from "../lib/http";
 import { calendarStub, type CalendarResult } from ".";
+import { bookingHostRoutes } from "./booking-routes";
 import { calendarModuleEnabled, requireCalendarModule } from "./module";
 import {
   calendarInputSchema,
@@ -149,7 +150,8 @@ export const calendarRoutes = new Hono<AppEnv>()
     const { from, to } = c.req.valid("query");
     const busy = await calendarStub(c.env, c.get("user").id).freeBusy(from, to);
     return c.json({ ok: true as const, busy });
-  });
+  })
+  .route("/booking", bookingHostRoutes);
 
 /** Public, token-authenticated, read-only feeds: `/ics/<token>.ics`. */
 export const calendarFeedRoutes = new Hono<AppEnv>().get("/:file", async (c) => {

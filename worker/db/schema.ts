@@ -828,5 +828,20 @@ export const calendarFeeds = sqliteTable(
   ],
 );
 
+/** Public booking page handle (`/book/<handle>`), one per user. */
+export const bookingHandles = sqliteTable(
+  "booking_handles",
+  {
+    userId: text("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    handle: text("handle").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [uniqueIndex("booking_handles_handle_unique").on(table.handle)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Mailbox = typeof mailboxes.$inferSelect;

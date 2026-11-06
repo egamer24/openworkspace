@@ -1,5 +1,12 @@
 import { z } from "zod";
 import {
+  BOOKING_SLUG_PATTERN,
+  isValidBookingHandle,
+  MAX_BOOKING_SLOT_RANGE_DAYS,
+} from "../../shared/booking";
+import { emailSchema } from "../auth/schemas";
+import {
+  weekdayCodes,
   calendarEditScopes,
   calendarEventStatuses,
   calendarTransparencies,
@@ -116,3 +123,70 @@ export const importSchema = z.object({
 });
 
 export const calendarModuleSchema = z.object({ enabled: z.boolean() });
+
+const timeRangeFields = {
+  start: z.number().int().min(0).max(1_439),
+  end: z.number().int().min(1).max(1_440),
+};
+const endsAfterStart = [
+  (range: { start: number; end: number }) => range.end > range.start,
+  "A range must end after it starts",
+] as const;
+
+const bookingTypeFieldsSchema = z.object({
+  slug: z.string().trim().toLowerCase().regex(BOOKING_SLUG_PATTERN, "Use lowercase letters, digits and dashes"),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().max(2_000),
+  location: z.string().max(500),
+  durationMinutes: z.number().int().min(5).max(720),
+  timeZone: z.string().max(100).refine(isValidTimeZone, "Unknown IANA time zone"),
+  weeklyHours: z.array(z.object({ day: z.enum(weekdayCodes), ...timeRangeFields })
+    .refine(...endsAfterStart)).max(70),
+  dateOverrides: z.array(z.object({
+    date: z.iso.date(),
+    ranges: z.array(z.object(timeRangeFields).refine(...endsAfterStart)).max(10),
+  })).max(400),
+  bufferBeforeMinutes: z.number().int().min(0).max(720),
+  bufferAfterMinutes: z.number().int().min(0).max(720),
+  minimumNoticeMinutes: z.number().int().min(0).max(30 * 24 * 60),
+  maxDaysAhead: z.number().int().min(1).max(365),
+  slotIntervalMinutes: z.number().int().min(5).max(720),
+  dailyCap: z.number().int().min(1).max(100).nullable(),
+  collectNotes: z.boolean(),
+  calendarId: z.string().min(1).max(100).nullable(),
+  senderMailboxId: z.string().min(1).max(100).nullable(),
+  enabled: z.boolean(),
+});
+
+/** Omitted fields take the column defaults; the interval defaults to the duration. */
+export const createBookingTypeSchema = bookingTypeFieldsSchema
+  .partial()
+  .required({ slug: true, name: true, durationMinutes: true, timeZone: true });
+
+export const bookingTypePatchSchema = bookingTypeFieldsSchema.partial();
+
+export const bookingSlotsQuerySchema = z.object({
+  from: queryInstantSchema,
+  to: queryInstantSchema,
+}).refine(
+  (value) => value.to > value.from && value.to - value.from <= MAX_BOOKING_SLOT_RANGE_DAYS * DAY_MS,
+  `The range must be positive and at most ${MAX_BOOKING_SLOT_RANGE_DAYS} days`,
+);
+
+export const bookingRequestSchema = z.object({
+  start: instantSchema,
+  name: z.string().trim().min(1).max(120),
+  email: emailSchema,
+  notes: z.string().trim().max(2_000).default(""),
+  timeZone: z.string().max(100).refine(isValidTimeZone, "Unknown IANA time zone"),
+  /** Honeypot: hidden from people, filled in by naive bots. */
+  website: z.string().max(500).default(""),
+  turnstileToken: z.string().max(2_048).default(""),
+});
+
+export const rescheduleRequestSchema = z.object({ start: instantSchema });
+
+export const bookingHandleSchema = z.object({
+  handle: z.string().trim().toLowerCase()
+    .refine(isValidBookingHandle, "Use 3–40 lowercase letters, digits and dashes"),
+});

@@ -3,6 +3,7 @@ import { accountApi } from "./account-api";
 import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
+import { publicBookingRoutes } from "./calendar/booking-routes";
 import { calendarFeedRoutes } from "./calendar/routes";
 import { createDb } from "./db/client";
 import { domains, mailboxes } from "./db/schema";
@@ -45,6 +46,7 @@ const app = new Hono<AppEnv>()
   .route("/api/oidc/logout", oidcLogoutRoutes)
   .route("/api/saml/login", samlLoginRoutes)
   .route("/api/downloads", mailDownloadRoutes)
+  .route("/api/public/booking", publicBookingRoutes)
   .route("/api", accountApi)
   .route("/api/notifications", pushNotificationRoutes)
   .route("/mcp", mcpRoutes)
