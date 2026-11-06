@@ -29,6 +29,7 @@ import {
   type AdminSection,
   MobileAdminMenu,
 } from "./admin-navigation";
+import { DriveSettings } from "./drive-settings";
 import { GlobalAiProcessing } from "./global-ai-processing";
 import { MailboxAccessEditor } from "./mailbox-access-editor";
 import type {
@@ -53,6 +54,7 @@ type AdminView =
   | "saml-applications"
   | "groups"
   | "webhooks"
+  | "drive"
   | "invite"
   | "new-mailbox"
   | "user"
@@ -71,6 +73,7 @@ const viewCopy: Record<AdminView, { title: string; description: string }> = {
   "saml-applications": { title: "SAML applications", description: "Service providers, assertions, assignments, and attributes." },
   groups: { title: "Identity groups", description: "Reusable memberships exposed to approved identity applications." },
   webhooks: { title: "Webhooks", description: "Signed account events delivered to external systems." },
+  drive: { title: "Drive", description: "Optional file storage module and per-person quotas." },
   invite: { title: "Invite person", description: "Create a personal mailbox and a one-time registration link." },
   "new-mailbox": { title: "New mailbox", description: "Personal or shared address." },
   user: { title: "Person", description: "Profile details and passkey recovery." },
@@ -367,6 +370,11 @@ export function AdminPage() {
                 selectedId={selectedId}
                 onSelect={(id) => go("webhooks", id)}
               />
+            )}
+            {view === "drive" && (
+              <div className="max-w-3xl">
+                <DriveSettings />
+              </div>
             )}
             {view === "invite" && (
               <div className="max-w-3xl">

@@ -19,6 +19,9 @@ const AccessLinkScreen = lazy(() =>
 const AdminPage = lazy(() =>
   import("@/admin/admin-page").then((module) => ({ default: module.AdminPage })),
 );
+const DrivePage = lazy(() =>
+  import("@/drive/drive-page").then((module) => ({ default: module.DrivePage })),
+);
 const MailShell = lazy(() =>
   import("@/mail/mail-shell").then((module) => ({ default: module.MailShell })),
 );
@@ -104,6 +107,7 @@ export function App() {
           <Route path="/oidc/logout" element={auth.authenticated ? <OidcLogoutScreen /> : <Navigate to="/" replace />} />
           <Route path="/saml/login/:requestId" element={<SamlLoginScreen />} />
           <Route path="/admin" element={auth.authenticated && auth.user?.role === "admin" ? <AdminPage /> : <Navigate to="/" replace />} />
+          <Route path="/drive" element={auth.authenticated ? <DrivePage /> : <Navigate to="/" replace />} />
           <Route path="/settings" element={settings}>
             <Route index element={<Navigate to="/settings/profile" replace />} />
             <Route path="profile" element={<SettingsProfilePage />} />

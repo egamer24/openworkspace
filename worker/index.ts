@@ -6,6 +6,7 @@ import { authRoutes } from "./auth/routes";
 import { createDb } from "./db/client";
 import { domains, mailboxes } from "./db/schema";
 import { mailboxAddressPredicate } from "./db/mailboxes";
+import { drivePublicRoutes } from "./drive/public-routes";
 import type { AppEnv } from "./env";
 import { mailDownloadRoutes } from "./mail/downloads";
 import { consumeDeliveryEvents } from "./mail/delivery-events";
@@ -46,6 +47,7 @@ const app = new Hono<AppEnv>()
   .route("/api", accountApi)
   .route("/api/notifications", pushNotificationRoutes)
   .route("/mcp", mcpRoutes)
+  .route("/d", drivePublicRoutes)
   .route("/.well-known", wellKnownRoutes)
   .route("/oauth", oidcRoutes)
   .route("/saml", samlRoutes)

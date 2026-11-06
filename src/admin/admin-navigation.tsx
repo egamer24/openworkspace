@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   FileKey2,
   Globe2,
+  HardDrive,
   KeyRound,
   Menu,
   Settings2,
@@ -32,7 +33,8 @@ export type AdminSection =
   | "sso-applications"
   | "saml-applications"
   | "groups"
-  | "webhooks";
+  | "webhooks"
+  | "drive";
 
 const adminSections: Array<{
   id: AdminSection;
@@ -44,6 +46,7 @@ const adminSections: Array<{
   { id: "mailboxes", label: "Mailboxes", Icon: Settings2 },
   { id: "domains", label: "Domains", Icon: Globe2 },
   { id: "webhooks", label: "Webhooks", Icon: Webhook },
+  { id: "drive", label: "Drive", Icon: HardDrive },
   { id: "sso-applications", label: "OIDC applications", Icon: KeyRound, separatorBefore: true },
   { id: "saml-applications", label: "SAML applications", Icon: FileKey2 },
   { id: "groups", label: "Identity groups", Icon: UsersRound },

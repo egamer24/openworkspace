@@ -8,15 +8,16 @@ import { browserLanguage, COMMON_LANGUAGES } from "./translation-language";
 import "pdfjs-dist/web/pdf_viewer.css";
 import "./pdf-preview.css";
 
+/** Translation is offered only for mail attachments, through the message's mailbox. */
 export default function PdfPreview({ url, filename, messageId, mailboxId }: {
   url: string;
   filename: string;
-  messageId: string;
-  mailboxId: string;
+  messageId?: string;
+  mailboxId?: string;
 }) {
   const pdf = usePdfViewer(url);
   const { visible, setVisible, language, setLanguage, translation } = usePdfTranslation({
-    document: pdf.document, page: pdf.page, url, messageId, mailboxId,
+    document: pdf.document, page: pdf.page, url, messageId: messageId ?? "", mailboxId: mailboxId ?? "",
   });
   const overlayError = usePdfTranslationOverlay({
     viewer: pdf.viewerRef.current, document: pdf.document, page: pdf.page,
@@ -28,7 +29,7 @@ export default function PdfPreview({ url, filename, messageId, mailboxId }: {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PdfPreviewToolbar pdf={{ ...pdf, find: (...args) => { setVisible(false); pdf.find(...args); } }} />
-      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5">
+      {messageId && <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5">
         <Button size="xs" variant="ghost" disabled={!pdf.ready || Boolean(pdf.error)} onClick={() => setVisible(!visible)}>
           {visible && translation.isFetching ? <LoaderCircle className="animate-spin" /> : <Languages />}
           {visible ? "Show original" : "Translate"}
@@ -47,7 +48,7 @@ export default function PdfPreview({ url, filename, messageId, mailboxId }: {
           </div>
         )}
         {visible && translation.data === null && <span role="status" className="text-xs text-muted-foreground">No selectable text on this page</span>}
-      </div>
+      </div>}
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <div className="relative min-h-0 min-w-0 flex-1 bg-surface-sunken">
           <div ref={pdf.containerRef} className="attachment-pdf-container absolute inset-0 overflow-auto" role="region" aria-label={`PDF: ${filename}`} tabIndex={0}>

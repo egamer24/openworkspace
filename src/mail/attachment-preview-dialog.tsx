@@ -5,7 +5,6 @@ import { DialogContent, DialogDescription, DialogTitle } from "@/components/ui/d
 import type { attachmentPreview } from "../../shared/attachment-preview";
 import type { PdfPreviewStatus } from "../../shared/office-preview";
 import { formatBytes } from "./format-bytes";
-import type { MessageAttachment } from "./types";
 
 const PdfPreview = lazy(() => import("./pdf-preview"));
 
@@ -17,12 +16,12 @@ export function AttachmentPreviewDialog({
   messageId,
   mailboxId,
 }: {
-  attachment: MessageAttachment;
+  attachment: { filename: string; size: number; pdfPreviewStatus?: PdfPreviewStatus | null };
   preview: NonNullable<ReturnType<typeof attachmentPreview>>;
   previewUrl: string;
   downloadUrl: string;
-  messageId: string;
-  mailboxId: string;
+  messageId?: string;
+  mailboxId?: string;
 }) {
   return (
     <DialogContent className="flex h-[90dvh] max-w-[calc(100%-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-7xl">
@@ -60,8 +59,8 @@ function AttachmentPreviewContent({ filename, kind, url, status, messageId, mail
   kind: "pdf" | "image" | "text";
   url: string;
   status?: PdfPreviewStatus | null;
-  messageId: string;
-  mailboxId: string;
+  messageId?: string;
+  mailboxId?: string;
 }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);

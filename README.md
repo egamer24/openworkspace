@@ -13,6 +13,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Attachment previews** — PDF, images, text, and background PDF conversion for Office documents
 - **Realtime and push** — mailbox-scoped WebSockets plus optional PWA notifications
 - **Signed webhooks** — account-wide email and administration events with retry history
+- **Drive (optional)** — file storage with folders, trash, sharing and public links; off by default
 - **Runs on Cloudflare** — Workers, D1, Durable Objects, R2, Images, Email Service, and Queues
 
 ## Deploy to Cloudflare
@@ -90,7 +91,7 @@ For every domain used by a mailbox, configure Cloudflare manually:
 4. **Delivery events** — Open **Queues → openworkspace-delivery-events → Subscriptions**, subscribe to **Email Sending** for the domain, and select all six `message.*` events.
 5. **First admin** — Open the app. With an empty database, the first-run screen creates your personal mailbox and registers you as administrator with a passkey.
 6. **Profile photos** — Enable **Images** for the account if prompted. Create a public delivery variant named `public` (or `avatar`). Uploaded avatars use custom ids `avatars/<userId>` and are served from `https://imagedelivery.net/<account_hash>/avatars/<userId>/public` (not your Worker domain). Optional later: a custom Images delivery hostname in the dashboard.
-7. **Attachment upload cleanup** — Run `bun run r2:lifecycle:setup` once to expire abandoned composer uploads after seven days. If the provisioned bucket is not named `openworkspace`, run `R2_BUCKET_NAME=<bucket> bun run r2:lifecycle:setup`.
+7. **Attachment upload cleanup** — Run `bun run r2:lifecycle:setup` once to expire abandoned composer and Drive uploads after seven days. If the provisioned bucket is not named `openworkspace`, run `R2_BUCKET_NAME=<bucket> bun run r2:lifecycle:setup`.
 8. **Direct attachment transfers** — Optional for the browser and required for MCP attachment transfers. Create an R2 API token (Object Read & Write) for the mail bucket and set `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and `R2_ACCOUNT_ID`. In the R2 bucket **Settings → CORS**, allow your app origin with methods `GET`, `PUT`, and `HEAD` and headers `Content-Type`. Without these secrets, browser uploads still work through the Worker, but MCP attachment upload and download links are unavailable.
 9. **Show original authentication** — Optional.
    1. Open [Cloudflare User API Tokens](https://dash.cloudflare.com/profile/api-tokens) (**My Profile → API Tokens**, not **Account API Tokens**) and choose **Create Token → Custom token**.
@@ -225,6 +226,16 @@ Authorization: Bearer mcp_…
 The token acts as its owner: mailbox access, send permission, account status, and role are checked on every operation. Mail tools can read raw messages in bounded chunks and issue 15-minute private R2 attachment links. To attach a file, call `create_attachment_upload`, PUT the exact declared bytes to the returned URL using the returned headers, then call `complete_attachment_upload` and pass its upload id to the send, reply, or forward tool. Administrator tokens additionally expose domains, mailbox ownership, user roles, destructive mailbox cleanup, Workers AI, group, and OIDC administration tools. Revoke a token from the same settings page to stop it immediately.
 
 The endpoint supports both current MCP requests and stateless clients using the 2024–2025 protocol revisions.
+
+### Drive
+
+Drive is an optional module and is **off by default**. An administrator turns it on under **Administration → Drive**; while it is off, `/api/drive/*`, public `/d/<token>` links, the navigation entry and the Drive MCP tools all behave as if they did not exist, and any stored files are kept.
+
+- **Storage** — files live in the existing R2 bucket under `drive/` (metadata in D1). Each person has a quota (5 GB by default, adjustable per person by an administrator); pending uploads and trash count toward it, and it is checked before an upload URL is issued. Single uploads are limited to 100 MB. Uploads go straight to R2 when the R2 S3 secrets from step 8 are set, otherwise through the Worker.
+- **Files** — folders, upload, download, rename, move, trash with restore, permanent delete (removes the R2 objects), search by name, and sorting by name, date or size. PDFs, images and text files open in the existing attachment previewer.
+- **Sharing** — share a file or folder with another person by their primary address as viewer or editor; folder shares cover everything inside, and editors' uploads count against the owner's quota. Owners can create public links with optional expiry and password (stored as a salted PBKDF2 hash), choose view or download, see the access count, and revoke them.
+- **Safety** — user files are never rendered as active content on the app origin: only PDFs, raster images and plain text may be shown inline, everything else (including HTML, SVG and scripts) is sent as an attachment, and every response carries `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`.
+- **Mail and MCP** — **Save to Drive** appears next to message attachments. MCP tokens get `list_drive_items`, `get_drive_item` and `create_drive_share_link` while Drive is on.
 
 ### Configure outgoing webhooks
 

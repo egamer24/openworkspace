@@ -17,7 +17,7 @@
     "db:seed:local": "wrangler d1 execute DB --local --file=./seed/local.sql",
     "db:setup:local": "bun run db:migrate:local && bun run db:seed:local",
     "db:setup:e2e": "wrangler d1 migrations apply DB --local --persist-to=\"${E2E_PERSIST_PATH:-.wrangler/e2e-state-v2}\" && wrangler d1 execute DB --local --persist-to=\"${E2E_PERSIST_PATH:-.wrangler/e2e-state-v2}\" --file=./seed/local.sql",
-    "r2:lifecycle:setup": "wrangler r2 bucket lifecycle add \"${R2_BUCKET_NAME:-openworkspace}\" openworkspace-composer-uploads composer-uploads/ --expire-days 7 --force",
+    "r2:lifecycle:setup": "wrangler r2 bucket lifecycle add \"${R2_BUCKET_NAME:-openworkspace}\" openworkspace-composer-uploads composer-uploads/ --expire-days 7 --force && wrangler r2 bucket lifecycle add \"${R2_BUCKET_NAME:-openworkspace}\" openworkspace-drive-staging drive/staging/ --expire-days 7 --force",
     "oidc:keygen": "bun scripts/generate-oidc-key.ts",
     "saml:keygen": "bun scripts/generate-saml-keys.ts",
     "push:keygen": "bun scripts/generate-vapid-keys.ts",

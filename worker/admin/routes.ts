@@ -12,6 +12,7 @@ import { Hono } from "hono";
 import type { AccessLinkKind } from "../../shared/auth";
 import { requireAdmin, requireAuth } from "../auth/middleware";
 import { createDb } from "../db/client";
+import { driveAdminRoutes } from "../drive/admin-routes";
 import {
   accessLinks,
   accountApiTokens,
@@ -353,6 +354,7 @@ export const adminRoutes = new Hono<AppEnv>()
     },
   )
   .route("/", mailboxAdminRoutes)
+  .route("/", driveAdminRoutes)
   .post(
     "/invitations",
     zValidator("json", createInvitationSchema),
