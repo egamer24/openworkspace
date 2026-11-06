@@ -4,6 +4,7 @@ import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
 import type { AppEnv } from "./env";
+import { jmapRoutes } from "./jmap/routes";
 import { mailDownloadRoutes } from "./mail/downloads";
 import { consumeDeliveryEvents } from "./mail/delivery-events";
 import { inboundDeliveryId } from "./mail/inbound-delivery";
@@ -45,6 +46,7 @@ const app = new Hono<AppEnv>()
   .route("/api", accountApi)
   .route("/api/notifications", pushNotificationRoutes)
   .route("/mcp", mcpRoutes)
+  .route("/", jmapRoutes)
   .route("/.well-known", wellKnownRoutes)
   .route("/oauth", oidcRoutes)
   .route("/saml", samlRoutes)

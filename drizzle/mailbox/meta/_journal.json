@@ -78,6 +78,13 @@
       "when": 1793981982797,
       "tag": "0010_spam_filter",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793982015679,
+      "tag": "0011_jmap_change_log",
+      "breakpoints": true
     }
   ]
 }

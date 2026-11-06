@@ -61,6 +61,7 @@ import {
 } from "../mail/participants";
 import { listActiveMailboxSessions } from "../mail/mailbox-directory";
 import { buildEmailSearchQuery } from "../mail/search";
+import { compileEmailFilter, type EmailFilter } from "../jmap/email-query";
 import {
   AUTO_REPLY_HOURLY_CAP,
   autoReplyRecipient,
@@ -187,6 +188,9 @@ function retryDelay(attempts: number) {
 function stringListJson(values: string[]) {
   return JSON.stringify([...new Set(values)]);
 }
+
+export type JmapChangeType = "Email" | "Thread" | "Mailbox";
+type JmapChangeKind = "created" | "updated" | "destroyed";
 
 export type ConversationUpdate = {
   mailboxState?: MailboxState;
@@ -2152,7 +2156,8 @@ export class MailboxDO extends DurableObject<Env> {
   private insertClassifiedInboundEmail(
     email: NewEmail,
     classification: EmailAiClassification | null,
-    spam: SpamAssessment,
+    /** Null for client imports, which are not scored. */
+    spam: SpamAssessment | null,
   ) {
     email = prepareOfficePreviews(email);
     const stored = this.db.transaction((tx) => {
@@ -2171,9 +2176,9 @@ export class MailboxDO extends DurableObject<Env> {
         .values({
           ...email,
           aiClassificationJson: normalizedClassification,
-          spamScore: spam.score,
-          spamVerdict: spam.verdict,
-          spamReasonsJson: spam.reasons,
+          spamScore: spam?.score ?? null,
+          spamVerdict: spam?.verdict ?? null,
+          spamReasonsJson: spam?.reasons ?? null,
         })
         .onConflictDoNothing()
         .returning()
@@ -2183,8 +2188,8 @@ export class MailboxDO extends DurableObject<Env> {
 
       // The local verdict already reflects the lists. AI may add a spam
       // decision, but never for an allowed sender.
-      const isSpam = spam.verdict === "spam"
-        || (spam.senderList !== "allow" && Boolean(normalizedClassification?.spam));
+      const isSpam = spam?.verdict === "spam"
+        || (spam?.senderList !== "allow" && Boolean(normalizedClassification?.spam));
       if (isSpam) {
         tx.update(conversations)
           .set({ mailboxState: "spam", folderId: null })
@@ -2211,6 +2216,48 @@ export class MailboxDO extends DurableObject<Env> {
     });
     this.recentParticipantSources = null;
     return stored;
+  }
+
+  /**
+   * Stores a client-imported message (JMAP Email/import) through the inbound
+   * parser, without AI classification, webhooks, or push notifications. The
+   * caller derives `id` from the content hash, so re-imports are deduplicated.
+   * Returns null when the raw message cannot be parsed.
+   */
+  async importJmapEmail(input: { id: string; rawObjectKey: string; envelopeTo: string; receivedAt: number }) {
+    const messageId = inboundMessageId(input.id);
+    const existing = this.getEmail(messageId);
+    if (existing) return { email: existing, created: false };
+    const receivedAt = new Date(input.receivedAt);
+    const job: PendingInbound = {
+      id: input.id,
+      rawObjectKey: input.rawObjectKey,
+      envelopeFrom: "",
+      envelopeTo: input.envelopeTo,
+      receivedAt,
+      attempts: 0,
+      aiAttempts: 0,
+      nextAttemptAt: receivedAt,
+    };
+    let email: NewEmail;
+    try {
+      ({ email } = await prepareInboundEmail({
+        env: this.bindings,
+        mailboxId: this.state.id.name ?? "unknown-mailbox",
+        job,
+        rawMime: await readInboundRawMime(this.bindings, job),
+        resolveParent: (inReplyTo, references) => this.resolveParent(inReplyTo, references),
+      }));
+    } catch (error) {
+      if (error instanceof UnprocessableInboundEmailError) return null;
+      throw error;
+    }
+    const stored = this.insertClassifiedInboundEmail(email, null, null);
+    // Office previews of imported attachments run on the alarm.
+    await this.scheduleRemainingWork();
+    if (!stored) return { email: this.getEmail(messageId)!, created: false };
+    this.publishUpdate();
+    return { email: stored, created: true };
   }
 
   setEmailAuthenticationResults(
@@ -2950,6 +2997,176 @@ export class MailboxDO extends DurableObject<Env> {
   private async scheduleAlarm(at: number) {
     const current = await this.state.storage.getAlarm();
     if (current === null || current > at) await this.state.storage.setAlarm(at);
+  }
+
+  /** Current JMAP modification sequence and the oldest one still computable. */
+  jmapSequence() {
+    return this.state.storage.sql.exec<{ seq: number; floor: number }>(`
+      select
+        coalesce((select max(seq) from jmap_changes), 0) as seq,
+        coalesce((select floor from jmap_change_floor where id = 1), 0) as floor
+    `).one();
+  }
+
+  /**
+   * Folds the change log after `since` into created/updated/destroyed ids.
+   * Stops before the (maxChanges + 1)th distinct id and reports how far it
+   * got, so a client can continue from an intermediate sequence.
+   */
+  jmapChanges(type: JmapChangeType, since: number, maxChanges: number) {
+    const { seq: current, floor } = this.jmapSequence();
+    if (!Number.isSafeInteger(since) || since < floor || since > current) return null;
+    // ponytail: reads the whole retained window (<= 50k rows) per call; page it if that shows up in profiles.
+    const rows = this.state.storage.sql.exec<{ seq: number; object_id: string; kind: JmapChangeKind }>(
+      "select seq, object_id, kind from jmap_changes where type = ? and seq > ? order by seq",
+      type,
+      since,
+    ).toArray();
+    const objects = new Map<string, { first: JmapChangeKind | null; last: JmapChangeKind | null }>();
+    let reached = current;
+    let previous = since;
+    for (const row of rows) {
+      let entry = objects.get(row.object_id);
+      if (!entry) {
+        if (objects.size >= maxChanges) {
+          reached = previous;
+          break;
+        }
+        entry = { first: null, last: null };
+        objects.set(row.object_id, entry);
+      }
+      if (row.kind !== "updated") {
+        entry.first ??= row.kind;
+        entry.last = row.kind;
+      }
+      previous = row.seq;
+    }
+    const created: string[] = [];
+    const updated: string[] = [];
+    const destroyed: string[] = [];
+    for (const [id, entry] of objects) {
+      const existedBefore = entry.first !== "created";
+      const existsNow = entry.last !== "destroyed";
+      if (existedBefore && existsNow) updated.push(id);
+      else if (existsNow) created.push(id);
+      else if (existedBefore) destroyed.push(id);
+    }
+    const contentChanged = type === "Mailbox" && this.state.storage.sql.exec<{ changed: number }>(
+      "select exists (select 1 from jmap_changes where type <> 'Mailbox' and seq > ? and seq <= ?) as changed",
+      since,
+      reached,
+    ).one().changed === 1;
+    return { created, updated, destroyed, seq: reached, hasMoreChanges: reached < current, contentChanged };
+  }
+
+  /** Custom folders plus per-view counts, using the JMAP membership rules. */
+  jmapMailboxes(userId: string, withCounts: boolean) {
+    const customFolders = this.db.select().from(folders).all();
+    if (!withCounts) return { folders: customFolders, counts: [] };
+    const counts = this.state.storage.sql.exec<{
+      box: string;
+      total_emails: number;
+      unread_emails: number;
+      total_threads: number;
+      unread_threads: number;
+    }>(`
+      with m as (
+        select
+          e.id,
+          e.conversation_id as cid,
+          e.direction,
+          c.mailbox_state as state,
+          c.folder_id as fid,
+          c.has_incoming as hi,
+          (e.direction = 'incoming' and not exists (
+            select 1 from email_read_states r where r.user_id = ? and r.email_id = e.id
+          )) as unread
+        from emails e join conversations c on c.id = e.conversation_id
+      ),
+      membership(box, cid, unread) as (
+        select case when state = 'active' then case when hi then 'inbox' end else state end, cid, unread from m
+        union all
+        select 'f:' || fid, cid, unread from m where state = 'active' and hi and fid is not null
+        union all
+        select 'sent', cid, unread from m where direction = 'outgoing' and state <> 'trash'
+      )
+      select
+        box,
+        count(*) as total_emails,
+        sum(unread) as unread_emails,
+        count(distinct cid) as total_threads,
+        count(distinct case when unread then cid end) as unread_threads
+      from membership
+      where box is not null
+      group by box
+    `, userId).toArray();
+    return { folders: customFolders, counts };
+  }
+
+  jmapGetEmails(userId: string, ids: string[]) {
+    if (!ids.length) return [];
+    const idsJson = stringListJson(ids);
+    return this.db
+      .select({
+        email: emails,
+        mailboxState: conversations.mailboxState,
+        folderId: conversations.folderId,
+        hasIncoming: conversations.hasIncoming,
+        readAt: emailReadStates.readAt,
+      })
+      .from(emails)
+      .innerJoin(conversations, eq(conversations.id, emails.conversationId))
+      .leftJoin(emailReadStates, and(
+        eq(emailReadStates.emailId, emails.id),
+        eq(emailReadStates.userId, userId),
+      ))
+      .where(sql`${emails.id} in (select cast(value as text) from json_each(${idsJson}))`)
+      .all();
+  }
+
+  jmapThreadEmailIds(conversationIds: string[]) {
+    if (!conversationIds.length) return [];
+    return this.state.storage.sql.exec<{ id: string; conversation_id: string }>(`
+      select id, conversation_id from emails
+      where conversation_id in (select cast(value as text) from json_each(?))
+      order by timeline_at, id
+    `, stringListJson(conversationIds)).toArray();
+  }
+
+  jmapQueryEmails(input: {
+    userId: string;
+    filter: EmailFilter | null;
+    ascending: boolean;
+    collapseThreads: boolean;
+    limit: number;
+    calculateTotal: boolean;
+  }) {
+    const bindings: Array<string | number> = [];
+    const where = input.filter ? compileEmailFilter(input.filter, input.userId, bindings) : "1";
+    const direction = input.ascending ? "asc" : "desc";
+    const order = `e.timeline_at ${direction}, e.id ${direction}`;
+    const matches = input.collapseThreads
+      ? `select id, conversation_id, timeline_at from (
+          select e.id, e.conversation_id, e.timeline_at,
+            row_number() over (partition by e.conversation_id order by ${order}) as rank
+          from emails e join conversations c on c.id = e.conversation_id
+          where ${where}
+        ) e where rank = 1`
+      : `select e.id, e.conversation_id, e.timeline_at
+        from emails e join conversations c on c.id = e.conversation_id
+        where ${where}`;
+    const rows = this.state.storage.sql.exec<{ id: string; conversation_id: string; timeline_at: number }>(
+      `select * from (${matches}) order by ${order.replaceAll("e.", "")} limit ?`,
+      ...bindings,
+      input.limit,
+    ).toArray();
+    const total = input.calculateTotal
+      ? this.state.storage.sql.exec<{ total: number }>(
+          `select count(*) as total from (${matches})`,
+          ...bindings,
+        ).one().total
+      : null;
+    return { rows, total };
   }
 
   /**

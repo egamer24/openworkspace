@@ -401,3 +401,26 @@ export type NewPendingInbound = typeof pendingInbound.$inferInsert;
 export type ConversationRecord = typeof conversations.$inferSelect;
 export type FolderRecord = typeof folders.$inferSelect;
 export type NewFolder = typeof folders.$inferInsert;
+
+/**
+ * Append-only JMAP change log. SQLite triggers (see the jmap_change_log
+ * migration) write one row per created/updated/destroyed Email, Thread, or
+ * Mailbox (custom folder), so every mutation path is tracked without code in
+ * each caller. `seq` is the mailbox's monotonic modification sequence.
+ */
+export const jmapChanges = sqliteTable(
+  "jmap_changes",
+  {
+    seq: integer("seq").primaryKey({ autoIncrement: true }),
+    type: text("type", { enum: ["Email", "Thread", "Mailbox"] }).notNull(),
+    objectId: text("object_id").notNull(),
+    kind: text("kind", { enum: ["created", "updated", "destroyed"] }).notNull(),
+  },
+  (table) => [index("jmap_changes_type_seq_idx").on(table.type, table.seq)],
+);
+
+/** Single row: changes at or below `floor` were pruned from the log. */
+export const jmapChangeFloor = sqliteTable("jmap_change_floor", {
+  id: integer("id").primaryKey(),
+  floor: integer("floor").notNull(),
+});

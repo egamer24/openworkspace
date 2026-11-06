@@ -15,6 +15,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Realtime and push** — mailbox-scoped WebSockets plus optional PWA notifications
 - **Signed webhooks** — account-wide email and administration events with retry history
 - **Scheduled backups** — optional daily `.eml` + manifest snapshots in a separate R2 bucket with retention
+- **JMAP** — native mail clients over HTTPS with personal tokens, including change sync, push, sending with attachments, and import
 - **Runs on Cloudflare** — Workers, D1, Durable Objects, R2, Images, Email Service, and Queues
 
 ## Deploy to Cloudflare
@@ -314,6 +315,24 @@ curl https://mail.example.com/api/mail/messages \
 ```
 
 `requestId` is a UUID idempotency key: retrying with the same id and body returns the original message (`200`) instead of sending twice, and reusing it with a different body returns `409`. A new message returns `201` with `messageId` and `transportState`. The message is stored in the mailbox's Sent folder and emits the `email.sent` webhook like any other send. Errors return `400` (validation), `401` (missing or revoked token), or `403` (no send access, or a request outside the token's scope).
+
+### Connect a JMAP client
+
+OpenWorkspace speaks JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620) core, [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621) mail and submission) for native mail clients. Point the client at `https://mail.example.com/.well-known/jmap` and authenticate with a personal token from **Settings → MCP**, either as `Authorization: Bearer mcp_…` or as the password of HTTP Basic auth (the username is ignored). Tokens are checked on every request, so revoking one cuts the client off immediately.
+
+How OpenWorkspace maps onto JMAP:
+
+- **One account per user.** Every mailbox the user can access is a top-level Mailbox named by its address, with Inbox, Sent, Archive, Spam (`role: junk`), Trash, and custom folders as children. `maySubmit` reflects read-and-send membership; read-only members can still read, mark read, move, and manage folders, as in the app.
+- **Thread** = conversation, **Email** = message. Folder placement belongs to the conversation, so `mailboxIds` is derived: Inbox/Archive/Spam/Trash and custom folders from the conversation, Sent from the message direction, and a custom folder also implies Inbox. Setting `mailboxIds` on one message moves the whole conversation; every affected message appears in `Email/changes`. Combinations that cannot be stored (for example Archive and Trash, or a mailbox of another address) are rejected with `invalidProperties`.
+- **Keywords**: `$seen` is the caller's own read state (sent messages are always seen). Other keywords are accepted and ignored.
+- **Destroy** moves a conversation to Trash; destroying from Trash deletes the conversation permanently and needs send access, matching the app.
+- **Blobs**: the raw MIME of received mail, each attachment, and the text and HTML bodies download from `/jmap/download/…`, always as attachments with `nosniff`. `POST /jmap/upload/{accountId}` (with `Content-Length`, up to 50 MB) stores a blob for the uploading user under the `composer-uploads/` prefix, so the attachment cleanup rule (`bun run r2:lifecycle:setup`) expires unused uploads after seven days.
+- **Sending**: create the message with `Email/set` and submit it with `EmailSubmission/set` (`emailId: "#creationId"`) in the same request; drafts are not stored between requests. Uploaded blobs referenced from `attachments` or `bodyStructure` are sent through the composer's attachment path and limits (inline parts need a `cid` and an image type). Submission goes through the same send path and permission checks as the composer. `onSuccessDestroyEmail` and `onSuccessUpdateEmail` report the transient draft as destroyed.
+- **Import**: `Email/import` parses an uploaded RFC 5322 blob with the inbound parser into one mailbox's Inbox, Archive, Spam, Trash, or custom folder (`$seen` is honored). Imports skip AI classification, webhooks, and push notifications. The same bytes are imported only once per mailbox (`alreadyExists`).
+- **Push**: `GET /jmap/eventsource?types=…&closeafter=state|no&ping=N` streams `StateChange` events. The Worker subscribes to each mailbox's realtime updates, the same ones the web app uses, and sends an event when the account state changes; `ping` is clamped to 10–600 seconds. The stream holds one connection per mailbox while it is open, and a revoked token ends it at the next change. If the stream drops, clients reconnect and catch up with `*/changes`.
+- **Changes**: each mailbox Durable Object keeps a modification sequence and a change log written by SQLite triggers, so inbound delivery, sending, moves, read state, permanent deletes, and folder edits are all tracked. The state string lists one sequence per mailbox (`<mailbox>.<seq>.<r|w>,…`); the last 50,000 changes per mailbox are retained, and older states (or a changed set of mailboxes) return `cannotCalculateChanges`. `Email/queryChanges` reports every changed message as removed and re-adds the ones that still match.
+
+Limits are advertised in the session (32 calls and 10 MB per request, 500 objects per get/set, 600 requests per minute per token). Not supported yet: attaching blobs of stored messages (forwarding attachments), stored drafts, WebSocket push, `header:*` properties, `Email/copy`, `Email/parse`, `VacationResponse`, `Mailbox/queryChanges`, and CORS for browser-based clients.
 
 ### Configure outgoing webhooks
 
