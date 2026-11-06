@@ -7,7 +7,10 @@ import {
 import { emailSchema } from "../auth/schemas";
 import {
   weekdayCodes,
+  attendeeRoles,
   calendarEditScopes,
+  invitationResponses,
+  MAX_ATTENDEES,
   calendarEventStatuses,
   calendarTransparencies,
   formatRecurrenceRule,
@@ -64,6 +67,12 @@ const rruleSchema = z.string().max(500).transform((value, context) => {
   return formatRecurrenceRule(parsed.rule);
 });
 
+const attendeeInputSchema = z.object({
+  address: z.email().max(320),
+  name: z.string().trim().max(200).optional(),
+  role: z.enum(attendeeRoles).optional(),
+});
+
 const eventFieldsSchema = z.object({
   calendarId: z.string().min(1).max(100).optional(),
   title: z.string().trim().min(1).max(500),
@@ -80,6 +89,15 @@ const eventFieldsSchema = z.object({
     .max(MAX_REMINDERS_PER_EVENT)
     .transform((values) => [...new Set(values)].sort((a, b) => a - b))
     .optional(),
+  attendees: z.array(attendeeInputSchema).max(MAX_ATTENDEES).optional().describe(
+    "People to invite. Their answers are tracked per attendee.",
+  ),
+  mailboxId: z.string().min(1).max(100).nullable().optional().describe(
+    "Mailbox the invitations are sent from (needs send access); it becomes the organizer.",
+  ),
+  sendInvitations: z.boolean().optional().describe(
+    "Email invitations (iTIP REQUEST/CANCEL) to the attendees from mailboxId. Defaults to false.",
+  ),
 });
 
 export function checkTimes(
@@ -115,7 +133,10 @@ export const updateEventSchema = updateEventFieldsSchema.superRefine(checkTimes)
 export const deleteEventQuerySchema = z.object({
   scope: z.enum(calendarEditScopes).optional(),
   occurrenceStart: queryInstantSchema.optional(),
+  sendInvitations: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
 });
+
+export const invitationResponseSchema = z.object({ response: z.enum(invitationResponses) });
 
 export const importSchema = z.object({
   ics: z.string().min(1).max(2_000_000),

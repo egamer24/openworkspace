@@ -215,6 +215,7 @@ function toMessageDetail(
       disposition: file.disposition,
       pdfPreviewStatus: file.pdfPreviewStatus ?? null,
     })),
+    invitation: email.invitationJson ?? null,
     replyPlan: buildReplyPlan(ownAddress, email),
     ...readReceipt,
   };

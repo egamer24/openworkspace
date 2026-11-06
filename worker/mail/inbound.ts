@@ -1,5 +1,7 @@
 import PostalMime, { type Address, type Email as ParsedEmail } from "postal-mime";
 import { convert } from "html-to-text";
+import type { InvitationSummary } from "../../shared/calendar";
+import { invitationSummary } from "../calendar/ics";
 import { createId, normalizeMailboxAddress } from "../lib/ids";
 import type { MailAddress, StoredAttachment } from "../mailbox/model";
 import type { Email, NewEmail, PendingInbound } from "../mailbox/schema";
@@ -122,6 +124,8 @@ export async function prepareInboundEmail(input: {
   resolveParent: (inReplyTo: string[], references: string[]) => Email | null;
   /** Imports use the message's own Date header, falling back to job.receivedAt. */
   preferHeaderDate?: boolean;
+  /** Set while the calendar module is enabled. */
+  parseInvitations?: boolean;
 }): Promise<PreparedInboundEmail> {
   const { job } = input;
   const parsed = await parseMime(input.rawMime);
@@ -172,6 +176,7 @@ export async function prepareInboundEmail(input: {
   }
 
   const attachments: StoredAttachment[] = [];
+  let invitation: InvitationSummary | null = null;
   for (const [index, file] of parsed.attachments.entries()) {
     const id = `att_${messageId}_${index}`;
     const r2Key =
@@ -192,6 +197,18 @@ export async function prepareInboundEmail(input: {
       downloadTokenHash: null,
       downloadExpiresAt: null,
     });
+    if (
+      input.parseInvitations
+      && !invitation
+      && (/^(text\/calendar|application\/ics)$/iu.test(file.mimeType) || /\.ics$/iu.test(file.filename ?? ""))
+    ) {
+      invitation = invitationSummary(new TextDecoder().decode(bytes), id);
+      // The card is for invitations from others, not copies of our own.
+      if (invitation?.method === "REQUEST" && invitation.organizer
+        && normalizeMailboxAddress(invitation.organizer.address) === recipient) {
+        invitation = null;
+      }
+    }
   }
 
   const email: NewEmail = {
@@ -213,6 +230,7 @@ export async function prepareInboundEmail(input: {
     bodyHtmlR2Key,
     rawMimeR2Key: job.rawObjectKey,
     attachmentsJson: attachments,
+    invitationJson: invitation,
     listId: parsedListId,
     listPostAddress: parsedListPost,
     timelineAt: input.preferHeaderDate ? headerDate(parsed.date) ?? job.receivedAt : job.receivedAt,

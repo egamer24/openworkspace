@@ -66,7 +66,7 @@ export function registerCalendarTools(server: McpServer, api: AccountApiClient) 
     "create_calendar_event",
     {
       title: "Create calendar event",
-      description: "Create an event. startsAt/endsAt accept ISO 8601 or epoch ms; all-day events use UTC midnights with an exclusive end. rrule is an RFC 5545 RRULE without the prefix, e.g. FREQ=WEEKLY;BYDAY=MO,WE.",
+      description: "Create an event. startsAt/endsAt accept ISO 8601 or epoch ms; all-day events use UTC midnights with an exclusive end. rrule is an RFC 5545 RRULE without the prefix, e.g. FREQ=WEEKLY;BYDAY=MO,WE. Attendees are recorded; invitation emails are only sent with sendInvitations: true and a mailboxId.",
       inputSchema: createEventSchema,
       annotations: write,
     },
@@ -94,12 +94,17 @@ export function registerCalendarTools(server: McpServer, api: AccountApiClient) 
     {
       title: "Delete calendar event",
       description: "Delete an event, or for a recurring event one occurrence, this and following, or the whole series.",
-      inputSchema: z.object(occurrenceTarget),
+      inputSchema: z.object({
+        ...occurrenceTarget,
+        sendInvitations: z.boolean().optional().describe(
+          "Email the attendees a cancellation or update. Defaults to false.",
+        ),
+      }),
       annotations: { ...write, destructiveHint: true },
     },
-    ({ eventId, scope, occurrenceStart }) => runTool(() => api.json(apiPath(
+    ({ eventId, scope, occurrenceStart, sendInvitations }) => runTool(() => api.json(apiPath(
       `/calendar/events/${encodeURIComponent(eventId)}`,
-      { scope, occurrenceStart },
+      { scope, occurrenceStart, sendInvitations },
     ), { method: "DELETE" })),
   );
 

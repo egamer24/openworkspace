@@ -7,8 +7,12 @@ import { calendarFeeds, users } from "../db/schema";
 import type { AppEnv } from "../env";
 import { hashToken, randomToken } from "../lib/crypto";
 import { apiError } from "../lib/http";
+import { getMailboxAccess } from "../mail/access";
+import type { CalendarAttendee, CalendarOrganizer } from "../../shared/calendar";
 import { calendarStub, type CalendarResult } from ".";
 import { bookingHostRoutes } from "./booking-routes";
+import { sameAddress, sendSeriesInvitations } from "./itip";
+import type { CalendarEventRecord } from "./schema";
 import { calendarModuleEnabled, requireCalendarModule } from "./module";
 import {
   calendarInputSchema,
@@ -28,6 +32,74 @@ function result<T>(c: Context<AppEnv>, value: CalendarResult<T>) {
   return value.ok
     ? null
     : apiError(c, value.status, value.status === 404 ? "NOT_FOUND" : "BAD_REQUEST", value.message);
+}
+
+type AttendeeInput = { address: string; name?: string; role?: CalendarAttendee["role"] };
+
+/** Keeps the answers of attendees who stay invited; new ones need to respond. */
+function mergeAttendees(previous: CalendarAttendee[], input: AttendeeInput[] | undefined) {
+  if (!input) return undefined;
+  const merged: CalendarAttendee[] = [];
+  for (const attendee of input) {
+    if (merged.some((item) => sameAddress(item.address, attendee.address))) continue;
+    const known = previous.find((item) => sameAddress(item.address, attendee.address));
+    merged.push({
+      address: attendee.address,
+      name: attendee.name || known?.name || null,
+      role: attendee.role ?? known?.role ?? "REQ-PARTICIPANT",
+      partstat: known?.partstat ?? "NEEDS-ACTION",
+      rsvp: known?.rsvp ?? true,
+    });
+  }
+  return merged;
+}
+
+/** `undefined` keeps the organizer; a mailbox needs send access. */
+async function resolveOrganizer(c: Context<AppEnv>, mailboxId: string | null | undefined) {
+  if (mailboxId === undefined) return { ok: true as const, organizer: undefined };
+  if (mailboxId === null) return { ok: true as const, organizer: null };
+  const access = await getMailboxAccess(createDb(c.env.DB), c.get("user").id, mailboxId);
+  if (!access?.canSend) return { ok: false as const };
+  const organizer: CalendarOrganizer = {
+    address: access.address,
+    name: c.get("user").name || access.displayName || null,
+    mailboxId,
+  };
+  return { ok: true as const, organizer };
+}
+
+/**
+ * Emails attendees about each changed series this user organizes. Failures
+ * are logged: the calendar change itself already succeeded.
+ */
+async function notifyAttendees(
+  c: Context<AppEnv>,
+  previous: CalendarEventRecord[],
+  uids: string[],
+) {
+  const user = c.get("user");
+  const stub = calendarStub(c.env, user.id);
+  let sent = 0;
+  for (const uid of new Set(uids)) {
+    try {
+      const current = await stub.seriesRows(uid);
+      const before = previous.filter((row) => row.uid === uid);
+      const mailboxId = (current[0] ?? before[0])?.organizer?.mailboxId;
+      if (!mailboxId) continue;
+      const access = await getMailboxAccess(createDb(c.env.DB), user.id, mailboxId);
+      if (!access?.canSend) continue;
+      sent += await sendSeriesInvitations(c.env, {
+        from: { address: access.address, name: user.name || access.displayName || null },
+        mailboxId,
+        previous: before,
+        current,
+        defer: (task) => c.executionCtx.waitUntil(task),
+      });
+    } catch (error) {
+      console.error(`Could not send invitations for ${uid}`, error);
+    }
+  }
+  return sent;
 }
 
 async function revokeFeed(env: Env, userId: string, calendarId: string) {
@@ -125,9 +197,17 @@ export const calendarRoutes = new Hono<AppEnv>()
     return c.json({ ok: true as const, events: occurrences });
   })
   .post("/events", zValidator("json", createEventSchema), async (c) => {
-    const created = await calendarStub(c.env, c.get("user").id).createEvent(c.req.valid("json"));
+    const { attendees, mailboxId, sendInvitations, ...fields } = c.req.valid("json");
+    const organizer = await resolveOrganizer(c, mailboxId);
+    if (!organizer.ok) return apiError(c, 403, "FORBIDDEN", "You cannot send from this mailbox");
+    const created = await calendarStub(c.env, c.get("user").id).createEvent({
+      ...fields,
+      organizer: organizer.organizer ?? null,
+      attendees: mergeAttendees([], attendees) ?? [],
+    });
     if (!created.ok) return result(c, created)!;
-    return c.json({ ok: true as const, event: created.value });
+    const invitationsSent = sendInvitations ? await notifyAttendees(c, [], [created.value.uid]) : 0;
+    return c.json({ ok: true as const, event: created.value, invitationsSent });
   })
   .get("/events/:eventId", async (c) => {
     const event = await calendarStub(c.env, c.get("user").id).getEvent(c.req.param("eventId"));
@@ -135,16 +215,34 @@ export const calendarRoutes = new Hono<AppEnv>()
     return c.json({ ok: true as const, event });
   })
   .patch("/events/:eventId", zValidator("json", updateEventSchema), async (c) => {
-    const updated = await calendarStub(c.env, c.get("user").id)
-      .updateEvent(c.req.param("eventId"), c.req.valid("json"));
+    const { attendees, mailboxId, sendInvitations, ...fields } = c.req.valid("json");
+    const stub = calendarStub(c.env, c.get("user").id);
+    const row = await stub.getEvent(c.req.param("eventId"));
+    if (!row) return apiError(c, 404, "NOT_FOUND", "Event not found");
+    const previous = await stub.seriesRows(row.uid);
+    const organizer = await resolveOrganizer(c, mailboxId);
+    if (!organizer.ok) return apiError(c, 403, "FORBIDDEN", "You cannot send from this mailbox");
+    const updated = await stub.updateEvent(row.id, {
+      ...fields,
+      ...(organizer.organizer === undefined ? {} : { organizer: organizer.organizer }),
+      ...(attendees ? { attendees: mergeAttendees(previous[0]?.attendees ?? [], attendees) } : {}),
+    });
     if (!updated.ok) return result(c, updated)!;
-    return c.json({ ok: true as const, event: updated.value });
+    const invitationsSent = sendInvitations
+      ? await notifyAttendees(c, previous, [row.uid, updated.value.uid])
+      : 0;
+    return c.json({ ok: true as const, event: updated.value, invitationsSent });
   })
   .delete("/events/:eventId", zValidator("query", deleteEventQuerySchema), async (c) => {
-    const deleted = await calendarStub(c.env, c.get("user").id)
-      .deleteEvent(c.req.param("eventId"), c.req.valid("query"));
+    const { sendInvitations, ...query } = c.req.valid("query");
+    const stub = calendarStub(c.env, c.get("user").id);
+    const row = await stub.getEvent(c.req.param("eventId"));
+    if (!row) return apiError(c, 404, "NOT_FOUND", "Event not found");
+    const previous = await stub.seriesRows(row.uid);
+    const deleted = await stub.deleteEvent(row.id, query);
     if (!deleted.ok) return result(c, deleted)!;
-    return c.json({ ok: true as const });
+    const invitationsSent = sendInvitations ? await notifyAttendees(c, previous, [row.uid]) : 0;
+    return c.json({ ok: true as const, invitationsSent });
   })
   .get("/freebusy", zValidator("query", rangeQuerySchema), async (c) => {
     const { from, to } = c.req.valid("query");

@@ -29,6 +29,8 @@ function row(overrides: Partial<CalendarEventRecord>): CalendarEventRecord {
     rrule: null,
     exdates: [],
     reminders: [],
+    organizer: null,
+    attendees: [],
     createdAt: 0,
     updatedAt: 0,
     ...overrides,

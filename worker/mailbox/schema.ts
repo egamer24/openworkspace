@@ -6,6 +6,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { InvitationSummary } from "../../shared/calendar";
 import { replyActionModes, transportStates } from "../../shared/mail";
 import { autoReplyAudiences } from "../mail/auto-reply";
 import type { RuleAction, RuleCondition } from "../mail/rules";
@@ -152,6 +153,9 @@ export const emails = sqliteTable(
       .$type<StoredAttachment[]>()
       .notNull()
       .default([]),
+    /** Parsed iTIP (calendar invitation) part, when the calendar module is on. */
+    invitationJson: text("invitation_json", { mode: "json" })
+      .$type<InvitationSummary>(),
 
     listId: text("list_id"),
     listPostAddress: text("list_post_address"),

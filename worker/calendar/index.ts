@@ -8,7 +8,11 @@ import {
   MAX_CALENDAR_COUNT,
   MAX_REMINDER_MINUTES,
   parseRecurrenceRule,
+  type CalendarAttendee,
   type CalendarEditScope,
+  type CalendarOrganizer,
+  type InvitationResponse,
+  type ItipMethod,
   type CalendarEventStatus,
   type CalendarReminderPushJob,
   type CalendarTransparency,
@@ -17,7 +21,7 @@ import { computeSlots, MAX_BOOKING_TYPES } from "../../shared/booking";
 import { randomToken } from "../lib/crypto";
 import { createId } from "../lib/ids";
 import { signBookingToken, verifyBookingToken } from "./booking";
-import { parseIcs, serializeCalendar, type IcsSkip } from "./ics";
+import { parseIcs, serializeCalendar, type IcsSkip, type ParsedIcsEvent } from "./ics";
 import { calendarModuleEnabled } from "./module";
 import {
   countOccurrencesBefore,
@@ -61,6 +65,8 @@ export type CalendarEventFields = {
   transparency: CalendarTransparency;
   rrule: string | null;
   reminders: number[];
+  organizer: CalendarOrganizer | null;
+  attendees: CalendarAttendee[];
 };
 
 export type CreateCalendarEventInput = Partial<CalendarEventFields>
@@ -116,7 +122,11 @@ export type CalendarOccurrence = {
   transparency: CalendarTransparency;
   rrule: string | null;
   reminders: number[];
+  organizer: CalendarOrganizer | null;
+  attendees: CalendarAttendee[];
 };
+
+const sameAddress = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 function calendarView(calendar: CalendarRecord) {
   return {
@@ -279,13 +289,16 @@ export class CalendarDO extends DurableObject<Env> {
       transparency: row.transparency,
       rrule: master?.rrule ?? null,
       reminders: row.reminders,
+      organizer: row.organizer,
+      attendees: row.attendees,
     };
   }
 
   /** Busy intervals, merged, ignoring free and cancelled events. */
-  freeBusy(from: number, to: number, excludeEventId?: string) {
+  freeBusy(from: number, to: number, excludeEventId?: string, excludeUid?: string) {
     const busy = expandOccurrences(this.rowsOverlapping(from, to), from, to)
-      .filter(({ row }) => row.transparency === "busy" && row.status !== "cancelled" && row.id !== excludeEventId)
+      .filter(({ row }) => row.transparency === "busy" && row.status !== "cancelled"
+        && row.id !== excludeEventId && row.uid !== excludeUid)
       .map(({ startsAt, endsAt }) => ({ startsAt: Math.max(startsAt, from), endsAt: Math.min(endsAt, to) }))
       .filter((interval) => interval.endsAt > interval.startsAt);
     const merged: Array<{ startsAt: number; endsAt: number }> = [];
@@ -299,6 +312,150 @@ export class CalendarDO extends DurableObject<Env> {
 
   getEvent(eventId: string) {
     return this.db.select().from(events).where(eq(events.id, eventId)).get() ?? null;
+  }
+
+  /** The series master (or single event) first, then its overrides. */
+  seriesRows(uid: string) {
+    return this.db.select().from(events)
+      .where(eq(events.uid, uid))
+      .orderBy(sql`${events.recurrenceId} IS NOT NULL`, asc(events.recurrenceId))
+      .all();
+  }
+
+  /** The viewer's own answer to an invitation already on this calendar. */
+  invitationResponse(uid: string, address: string) {
+    const master = this.master(uid);
+    return master?.attendees.find((attendee) => sameAddress(attendee.address, address))?.partstat ?? null;
+  }
+
+  /**
+   * Answers an invitation organized by someone else: accepted and tentative
+   * events are added (or replaced by the newer copy), declined ones removed
+   * so they stop counting as busy. `parsed` holds the VEVENTs of one UID.
+   */
+  async respondToInvitation(input: {
+    parsed: ParsedIcsEvent[];
+    address: string;
+    name: string | null;
+    partstat: InvitationResponse;
+  }): Promise<CalendarResult<{ eventId: string | null }>> {
+    const uid = input.parsed[0]?.uid;
+    if (!uid) return badRequest("The invitation has no event");
+    const existing = this.master(uid);
+    if (existing?.organizer?.mailboxId) return badRequest("You organize this event");
+    const now = Date.now();
+    const withAnswer = (event: ParsedIcsEvent) => {
+      const own = event.attendees.some((attendee) => sameAddress(attendee.address, input.address));
+      const attendees = event.attendees.map((attendee) =>
+        sameAddress(attendee.address, input.address)
+          ? { ...attendee, partstat: input.partstat, rsvp: false }
+          : attendee);
+      return {
+        ...event,
+        // Invited through an alias or a list: record the answer anyway.
+        attendees: own ? attendees : [...attendees, {
+          address: input.address,
+          name: input.name,
+          role: "REQ-PARTICIPANT" as const,
+          partstat: input.partstat,
+          rsvp: false,
+        }],
+        status: input.partstat === "TENTATIVE" && event.status === "confirmed" ? "tentative" as const : event.status,
+      };
+    };
+    const hasMaster = input.parsed.some((event) => event.recurrenceId === null);
+    const declined = input.partstat === "DECLINED";
+    const calendarId = existing?.calendarId ?? this.listCalendars()[0]!.id;
+    const eventId = this.db.transaction((tx) => {
+      const insert = (event: ParsedIcsEvent, recurrenceId: number | null) => tx.insert(events).values({
+        ...withAnswer(event),
+        id: createId("evt"),
+        calendarId,
+        recurrenceId,
+        rrule: recurrenceId === null ? event.rrule : null,
+        createdAt: now,
+        updatedAt: now,
+      }).returning({ id: events.id }).get().id;
+      if (hasMaster) {
+        // A full REQUEST carries the series and every override: replace them.
+        tx.delete(events).where(eq(events.uid, uid)).run();
+        if (declined) return null;
+        const ordered = [...input.parsed].sort((a, b) =>
+          Number(a.recurrenceId !== null) - Number(b.recurrenceId !== null));
+        return ordered.map((event) => insert(event, event.recurrenceId))[0] ?? null;
+      }
+      // Only some occurrences were sent: update those of a known series, or
+      // keep a lone occurrence as a single event.
+      if (!existing?.rrule) {
+        tx.delete(events).where(eq(events.uid, uid)).run();
+        return declined ? null : insert(input.parsed[0]!, null);
+      }
+      let first: string | null = null;
+      for (const event of input.parsed) {
+        tx.delete(events).where(and(eq(events.uid, uid), eq(events.recurrenceId, event.recurrenceId!))).run();
+        if (!declined) first ??= insert(event, event.recurrenceId);
+      }
+      if (declined) {
+        tx.update(events).set({
+          exdates: [...new Set([...existing.exdates, ...input.parsed.map((event) => event.recurrenceId!)])],
+          updatedAt: now,
+        }).where(eq(events.id, existing.id)).run();
+      }
+      return first;
+    });
+    await this.scheduleReminders();
+    return { ok: true, value: { eventId } };
+  }
+
+  /**
+   * Applies an incoming REPLY or CANCEL. Strict: a REPLY must come from an
+   * invited attendee of an event this mailbox organizes, a CANCEL from the
+   * organizer of an event someone else organizes. Returns whether it applied.
+   */
+  async applyItip(input: {
+    method: Exclude<ItipMethod, "REQUEST">;
+    uid: string;
+    recurrenceId: number | null;
+    sender: string;
+    mailboxId: string;
+    attendees: CalendarAttendee[];
+  }) {
+    const master = this.master(input.uid);
+    if (!master?.organizer) return false;
+    const now = Date.now();
+    if (input.method === "REPLY") {
+      if (master.organizer.mailboxId !== input.mailboxId) return false;
+      const answer = input.attendees.find((attendee) => sameAddress(attendee.address, input.sender));
+      if (!answer || !master.attendees.some((attendee) => sameAddress(attendee.address, input.sender))) {
+        return false;
+      }
+      // ponytail: a reply for one occurrence updates the whole series; per-occurrence answers need override rows.
+      for (const row of this.seriesRows(input.uid)) {
+        this.db.update(events).set({
+          attendees: row.attendees.map((attendee) => sameAddress(attendee.address, input.sender)
+            ? { ...attendee, partstat: answer.partstat }
+            : attendee),
+          updatedAt: now,
+        }).where(eq(events.id, row.id)).run();
+      }
+      return true;
+    }
+    if (master.organizer.mailboxId !== null || !sameAddress(master.organizer.address, input.sender)) {
+      return false;
+    }
+    if (input.recurrenceId !== null && master.rrule) {
+      this.db.transaction((tx) => {
+        tx.delete(events).where(and(eq(events.uid, input.uid), eq(events.recurrenceId, input.recurrenceId!))).run();
+        tx.update(events).set({
+          exdates: [...new Set([...master.exdates, input.recurrenceId!])],
+          updatedAt: now,
+        }).where(eq(events.id, master.id)).run();
+      });
+    } else {
+      this.db.update(events).set({ status: "cancelled", updatedAt: now }).where(eq(events.uid, input.uid)).run();
+    }
+    await this.scheduleReminders();
+    return true;
   }
 
   private master(uid: string) {
@@ -329,6 +486,8 @@ export class CalendarDO extends DurableObject<Env> {
       transparency: "busy",
       rrule: null,
       reminders: [],
+      organizer: null,
+      attendees: [],
       ...input,
       id: createId("evt"),
       uid: `${crypto.randomUUID()}@openworkspace`,
