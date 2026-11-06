@@ -57,6 +57,7 @@ import {
   type SpamLabel,
 } from "../mail/spam-learning";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
+import { cloudflareDmarcPass } from "../mail/rfc";
 import {
   suggestParticipants,
   type ParticipantSource,
@@ -2264,13 +2265,18 @@ export class MailboxDO extends DurableObject<Env> {
 
   /**
    * Hands an incoming REPLY or CANCEL to the calendars of this mailbox's
-   * members; each calendar checks the sender against its stored event.
+   * members; each calendar checks the sender against its stored event, so
+   * the From address must have passed Cloudflare's DMARC check.
    * ponytail: best effort, a failure is logged and not retried.
    */
-  private async applyCalendarResponse(email: Email) {
+  private async applyCalendarResponse(email: Email, rawMime: ArrayBuffer) {
     const invitation = email.invitationJson;
     const sender = email.fromJson[0]?.address;
     if (!invitation || invitation.method === "REQUEST" || !sender) return;
+    if (!cloudflareDmarcPass(rawMime, sender)) {
+      console.debug(`Ignoring calendar ${invitation.method} from ${email.id}: DMARC did not pass for ${sender}`);
+      return;
+    }
     const mailboxId = this.state.id.name ?? "unknown-mailbox";
     try {
       const members = await createDb(this.bindings.DB)
@@ -2764,7 +2770,7 @@ export class MailboxDO extends DurableObject<Env> {
         }
         const isSpam = spam.verdict === "spam"
           || (spam.senderList !== "allow" && Boolean(classification?.spam));
-        if (!isSpam) await this.applyCalendarResponse(stored);
+        if (!isSpam) await this.applyCalendarResponse(stored, rawMime);
         try {
           await this.applyRules(job, stored, rawMime);
         } catch (error) {

@@ -3,6 +3,7 @@ import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { parseIcs } from "../worker/calendar/ics";
 import { inboundMessageId } from "../worker/mail/inbound";
+import { cloudflareDmarcPass } from "../worker/mail/rfc";
 import { mailboxStub } from "../worker/mailbox";
 import type { StoredAttachment } from "../worker/mailbox/model";
 import {
@@ -49,10 +50,17 @@ async function setModule(cookie: string, enabled: boolean) {
   expect((await call(cookie, "/api/admin/calendar", { method: "PUT", json: { enabled } })).status).toBe(200);
 }
 
+/** What Cloudflare Email Routing prepends; `domain` is the DMARC-aligned From domain. */
+function cloudflareAuth(domain: string, dmarc = "pass", authservId = "mx.cloudflare.net") {
+  return `Authentication-Results: ${authservId};\r\n\tdkim=pass header.d=${domain};\r\n\tspf=pass smtp.mailfrom=${domain};\r\n\tdmarc=${dmarc} header.from=${domain} policy.dmarc=none`;
+}
+
+/** Delivers as Cloudflare would, with a passing DMARC check unless `headers` says otherwise. */
 async function deliver(mailboxId: string, input: Parameters<typeof invitationMime>[0]) {
   const id = `delivery_${crypto.randomUUID()}`;
   const rawObjectKey = `test/${id}/raw.eml`;
-  await env.MAIL_STORAGE.put(rawObjectKey, invitationMime(input));
+  const domain = input.from.match(/@([^>\s]+)/u)![1]!;
+  await env.MAIL_STORAGE.put(rawObjectKey, invitationMime({ headers: [cloudflareAuth(domain)], ...input }));
   const mailbox = mailboxStub(env, mailboxId);
   await mailbox.enqueueInbound({
     id,
@@ -137,6 +145,28 @@ describe("iCalendar fixtures from other clients", () => {
       organizer: null,
       attendees: [{ address: "ada@contoso.example", partstat: "TENTATIVE" }],
     });
+  });
+});
+
+describe("cloudflareDmarcPass", () => {
+  const mime = (...headers: string[]) => [...headers, "From: alan@contoso.example", "", "Authentication-Results: mx.cloudflare.net; dmarc=pass header.from=contoso.example"].join("\r\n");
+
+  it("trusts only a passing, aligned first header from mx.cloudflare.net", () => {
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("contoso.example")), "alan@contoso.example")).toBe(true);
+    expect(cloudflareDmarcPass(mime("authentication-results: MX.Cloudflare.NET (comment); DMARC=Pass header.from=Contoso.Example"), "Alan@CONTOSO.example")).toBe(true);
+    expect(cloudflareDmarcPass(new TextEncoder().encode(mime(cloudflareAuth("contoso.example"))).buffer, "alan@contoso.example")).toBe(true);
+  });
+
+  it("rejects missing, failing, misaligned, foreign or later headers", () => {
+    const from = "alan@contoso.example";
+    expect(cloudflareDmarcPass(mime(), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("contoso.example", "fail")), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("contoso.example", "none")), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("evil.example")), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("mail.contoso.example")), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("contoso.example", "pass", "mx.cloudflare.net.evil.example")), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime(cloudflareAuth("contoso.example", "fail"), cloudflareAuth("contoso.example")), from)).toBe(false);
+    expect(cloudflareDmarcPass(mime("Authentication-Results: mx.cloudflare.net; spf=pass reason=\"dmarc=pass header.from=contoso.example\""), from)).toBe(false);
   });
 });
 
@@ -394,5 +424,102 @@ describe("calendar invitations", () => {
     const declined = await call(cookie, `${cardPath}/respond`, { method: "POST", json: { response: "DECLINED" } });
     expect(await declined.json()).toMatchObject({ response: "DECLINED", eventId: null });
     expect((await call(cookie, `/api/calendar/events/${eventId}`)).status).toBe(404);
+  });
+
+  it("applies a CANCEL or REPLY only when Cloudflare's DMARC check passes for the From domain", async () => {
+    const { cookie, mailboxId } = await signIn();
+    await setModule(cookie, true);
+    const uid = `spoof-${crypto.randomUUID()}`;
+    const invite = await deliver(mailboxId, {
+      from: "Alan Turing <alan@contoso.example>",
+      to: "admin@example.test",
+      subject: "Design review",
+      method: "REQUEST",
+      ics: outlookRequest.replaceAll(OUTLOOK_UID, uid),
+      style: "outlook",
+    });
+    const accepted = await call(cookie, `/api/mail/mailboxes/${mailboxId}/messages/${invite.id}/invitation/respond`, {
+      method: "POST",
+      json: { response: "ACCEPTED" },
+    });
+    const { eventId } = await accepted.json<{ eventId: string }>();
+    const status = async () => (await (await call(cookie, `/api/calendar/events/${eventId}`))
+      .json<{ event: { status: string } }>()).event.status;
+    const cancel = (headers: string[]) => deliver(mailboxId, {
+      from: "Alan Turing <alan@contoso.example>",
+      to: "admin@example.test",
+      subject: "Canceled: Design review",
+      method: "CANCEL",
+      ics: outlookCancel.replaceAll(OUTLOOK_UID, uid),
+      style: "outlook",
+      headers,
+    });
+    const forgeries = [
+      [],
+      [cloudflareAuth("contoso.example", "fail")],
+      [cloudflareAuth("evil.example")],
+      [cloudflareAuth("contoso.example", "pass", "mx.evil.example")],
+      [cloudflareAuth("contoso.example", "fail"), cloudflareAuth("contoso.example")],
+    ];
+    for (const headers of forgeries) {
+      expect((await cancel(headers)).invitationJson).toMatchObject({ method: "CANCEL" });
+      expect(await status()).toBe("confirmed");
+    }
+    await cancel([cloudflareAuth("CONTOSO.example")]);
+    expect(await status()).toBe("cancelled");
+
+    const created = await call(cookie, "/api/calendar/events", {
+      method: "POST",
+      json: {
+        title: "Budget",
+        startsAt: "2026-12-17T17:00:00Z",
+        endsAt: "2026-12-17T18:00:00Z",
+        timeZone: "UTC",
+        attendees: [{ address: "bob@external.example" }],
+        mailboxId,
+      },
+    });
+    const { event } = await created.json<{ event: { id: string; uid: string } }>();
+    const partstat = async () => (await (await call(cookie, `/api/calendar/events/${event.id}`))
+      .json<{ event: { attendees: Array<{ partstat: string }> } }>()).event.attendees[0]!.partstat;
+    const reply = (headers: string[]) => deliver(mailboxId, {
+      from: "Bob <bob@external.example>",
+      to: "admin@example.test",
+      subject: "Declined: Budget",
+      method: "REPLY",
+      ics: googleReply(event.uid, "bob@external.example", "DECLINED"),
+      style: "google",
+      headers,
+    });
+    await reply([cloudflareAuth("external.example", "fail")]);
+    await reply([]);
+    expect(await partstat()).toBe("NEEDS-ACTION");
+    await reply([cloudflareAuth("external.example")]);
+    expect(await partstat()).toBe("DECLINED");
+  });
+
+  it("keeps an accepted event when a REQUEST with its UID names another organizer", async () => {
+    const { cookie, mailboxId } = await signIn();
+    await setModule(cookie, true);
+    const uid = `hijack-${crypto.randomUUID()}`;
+    const respond = async (from: string, ics: string) => {
+      const invite = await deliver(mailboxId, {
+        from, to: "admin@example.test", subject: "Design review", method: "REQUEST", ics, style: "outlook",
+      });
+      return call(cookie, `/api/mail/mailboxes/${mailboxId}/messages/${invite.id}/invitation/respond`, {
+        method: "POST",
+        json: { response: "ACCEPTED" },
+      });
+    };
+    const request = outlookRequest.replaceAll(OUTLOOK_UID, uid);
+    const { eventId } = await (await respond("Alan Turing <alan@contoso.example>", request)).json<{ eventId: string }>();
+    const hijack = await respond(
+      "Mallory <mallory@evil.example>",
+      request.replace("mailto:alan@contoso.example", "mailto:mallory@evil.example").replace("SUMMARY;LANGUAGE=en-US:Design review", "SUMMARY:Moved"),
+    );
+    expect(hijack.status).toBe(400);
+    expect(await (await call(cookie, `/api/calendar/events/${eventId}`)).json()).toMatchObject({
+      event: { title: "Design review", organizer: { address: "alan@contoso.example" } },
+    });
   });
 });
