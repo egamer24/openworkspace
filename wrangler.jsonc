@@ -9,7 +9,7 @@
   },
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/.well-known/*", "/oauth/*", "!/saml/login/*", "/saml/*"]
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/jmap/*", "/.well-known/*", "/oauth/*", "!/saml/login/*", "/saml/*"]
   },
   "durable_objects": {
     "bindings": [

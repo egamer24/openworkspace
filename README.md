@@ -13,6 +13,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Attachment previews** — PDF, images, text, and background PDF conversion for Office documents
 - **Realtime and push** — mailbox-scoped WebSockets plus optional PWA notifications
 - **Signed webhooks** — account-wide email and administration events with retry history
+- **JMAP** — native mail clients over HTTPS with personal tokens, including change sync and sending
 - **Runs on Cloudflare** — Workers, D1, Durable Objects, R2, Images, Email Service, and Queues
 
 ## Deploy to Cloudflare
@@ -225,6 +226,22 @@ Authorization: Bearer mcp_…
 The token acts as its owner: mailbox access, send permission, account status, and role are checked on every operation. Mail tools can read raw messages in bounded chunks and issue 15-minute private R2 attachment links. To attach a file, call `create_attachment_upload`, PUT the exact declared bytes to the returned URL using the returned headers, then call `complete_attachment_upload` and pass its upload id to the send, reply, or forward tool. Administrator tokens additionally expose domains, mailbox ownership, user roles, destructive mailbox cleanup, Workers AI, group, and OIDC administration tools. Revoke a token from the same settings page to stop it immediately.
 
 The endpoint supports both current MCP requests and stateless clients using the 2024–2025 protocol revisions.
+
+### Connect a JMAP client
+
+OpenWorkspace speaks JMAP ([RFC 8620](https://www.rfc-editor.org/rfc/rfc8620) core, [RFC 8621](https://www.rfc-editor.org/rfc/rfc8621) mail and submission) for native mail clients. Point the client at `https://mail.example.com/.well-known/jmap` and authenticate with a personal token from **Settings → MCP**, either as `Authorization: Bearer mcp_…` or as the password of HTTP Basic auth (the username is ignored). Tokens are checked on every request, so revoking one cuts the client off immediately.
+
+How OpenWorkspace maps onto JMAP:
+
+- **One account per user.** Every mailbox the user can access is a top-level Mailbox named by its address, with Inbox, Sent, Archive, Spam (`role: junk`), Trash, and custom folders as children. `maySubmit` reflects read-and-send membership; read-only members can still read, mark read, move, and manage folders, as in the app.
+- **Thread** = conversation, **Email** = message. Folder placement belongs to the conversation, so `mailboxIds` is derived: Inbox/Archive/Spam/Trash and custom folders from the conversation, Sent from the message direction, and a custom folder also implies Inbox. Setting `mailboxIds` on one message moves the whole conversation; every affected message appears in `Email/changes`. Combinations that cannot be stored (for example Archive and Trash, or a mailbox of another address) are rejected with `invalidProperties`.
+- **Keywords**: `$seen` is the caller's own read state (sent messages are always seen). Other keywords are accepted and ignored.
+- **Destroy** moves a conversation to Trash; destroying from Trash deletes the conversation permanently and needs send access, matching the app.
+- **Blobs**: the raw MIME of received mail, each attachment, and the text and HTML bodies download from `/jmap/download/…`, always as attachments with `nosniff`.
+- **Sending**: create the message with `Email/set` and submit it with `EmailSubmission/set` (`emailId: "#creationId"`) in the same request; drafts are not stored between requests. Submission goes through the same send path and permission checks as the composer. `onSuccessDestroyEmail` and `onSuccessUpdateEmail` report the transient draft as destroyed.
+- **Changes**: each mailbox Durable Object keeps a modification sequence and a change log written by SQLite triggers, so inbound delivery, sending, moves, read state, permanent deletes, and folder edits are all tracked. The state string lists one sequence per mailbox (`<mailbox>.<seq>.<r|w>,…`); the last 50,000 changes per mailbox are retained, and older states (or a changed set of mailboxes) return `cannotCalculateChanges`. `Email/queryChanges` reports every changed message as removed and re-adds the ones that still match.
+
+Limits are advertised in the session (32 calls and 10 MB per request, 500 objects per get/set, 600 requests per minute per token). Not supported yet: blob upload (and therefore attachments on sent mail), stored drafts, push (EventSource and WebSocket), `header:*` properties, `Email/import`, `Email/copy`, `Email/parse`, `VacationResponse`, `Mailbox/queryChanges`, and CORS for browser-based clients.
 
 ### Configure outgoing webhooks
 
