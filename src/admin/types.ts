@@ -7,6 +7,9 @@ type AdminStateResponse = SuccessfulResponse<
 
 export type AdminMailbox = AdminStateResponse["mailboxes"][number];
 export type AdminDomain = AdminStateResponse["domains"][number];
+export type AdminRouting = SuccessfulResponse<
+  Awaited<ReturnType<typeof api.api.admin.routing.$get>>
+>;
 export type AdminUser = AdminStateResponse["users"][number];
 export type MailboxMemberPermission = AdminMailbox["members"][number];
 

@@ -201,3 +201,21 @@ export const groupInputSchema = z.object({
   description: z.string().trim().max(240).nullable(),
   memberIds: uniqueStrings(z.string().min(1), 100),
 });
+
+export const forwardingDestinationSchema = z.object({
+  // Cloudflare limits destination addresses to 90 characters.
+  email: emailSchema.refine((email) => email.length <= 90, "Address is too long"),
+});
+
+export const destinationVerifiedSchema = z.object({ verified: z.boolean() });
+
+export const routingAddressSchema = z.object({
+  address: emailSchema,
+  mailboxId: z.string().min(1).nullable().default(null),
+  destinationIds: uniqueStrings(z.string().min(1), 10).default([]),
+  keepCopy: z.boolean().default(true),
+});
+
+export const unknownRecipientSchema = z.object({
+  mailboxId: z.string().min(1).nullable(),
+});

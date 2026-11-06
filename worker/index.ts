@@ -3,13 +3,11 @@ import { accountApi } from "./account-api";
 import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
-import { createDb } from "./db/client";
-import { domains, mailboxes } from "./db/schema";
-import { mailboxAddressPredicate } from "./db/mailboxes";
 import type { AppEnv } from "./env";
 import { mailDownloadRoutes } from "./mail/downloads";
 import { consumeDeliveryEvents } from "./mail/delivery-events";
 import { inboundDeliveryId } from "./mail/inbound-delivery";
+import { forwardInbound, resolveInboundRoute } from "./mail/inbound-routing";
 import {
   consumePushNotifications,
   PUSH_NOTIFICATION_QUEUE,
@@ -73,13 +71,22 @@ export default {
   async email(message, env) {
     const receivedAt = Date.now();
     const recipient = normalizeMailboxAddress(message.to);
-    const [mailbox] = await createDb(env.DB)
-      .select({ id: mailboxes.id })
-      .from(mailboxes)
-      .innerJoin(domains, mailboxAddressPredicate(recipient))
-      .limit(1);
-    if (!mailbox) {
+    const route = await resolveInboundRoute(env.DB, recipient);
+    if (!route) {
       message.setReject(`Mailbox ${recipient} does not exist`);
+      return;
+    }
+    const { forwarded, failed } = await forwardInbound(message, route.forwards);
+    // Store when the address keeps a copy, and as a fallback when nothing was
+    // forwarded so a skipped or failed forward never loses the message.
+    const mailbox = route.mailboxId && (route.keepCopy || forwarded === 0)
+      ? { id: route.mailboxId }
+      : null;
+    if (!mailbox) {
+      if (forwarded > 0) return;
+      // A temporary failure lets the sending server retry later.
+      if (failed > 0) throw new Error(`Forwarding ${recipient} failed`);
+      message.setReject(`Address ${recipient} has no forwarding destination available`);
       return;
     }
 

@@ -6,8 +6,12 @@ import {
   createInvitationSchema,
   createMailboxSchema,
   createOidcClientSchema,
+  destinationVerifiedSchema,
+  forwardingDestinationSchema,
   globalAiProcessingSchema,
   groupInputSchema,
+  routingAddressSchema,
+  unknownRecipientSchema,
   updateMailboxSchema,
   updateDomainSchema,
   updateOidcClientSchema,
@@ -114,6 +118,118 @@ export function registerAdminTools(server: McpServer, api: AccountApiClient) {
       method: "POST",
       json: input,
     })),
+  );
+
+  server.registerTool(
+    "get_mail_routing",
+    {
+      title: "Get mail routing",
+      description: "List forwarding destinations with their verification status, aliases, forward-only and forwarding mailbox addresses, and each domain's unknown-recipient mailbox (null rejects).",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    () => runTool(() => api.json("/admin/routing")),
+  );
+
+  server.registerTool(
+    "add_forwarding_destination",
+    {
+      title: "Add forwarding destination",
+      description: "Register an Email Routing destination address. With CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID it is created in Cloudflare, which emails a verification link; otherwise the result explains the manual dashboard step. Only verified destinations receive forwards.",
+      inputSchema: forwardingDestinationSchema,
+      annotations: { ...adminWrite, openWorldHint: true },
+    },
+    (input) => runTool(() => api.json("/admin/routing/destinations", {
+      method: "POST",
+      json: input,
+    })),
+  );
+
+  server.registerTool(
+    "refresh_forwarding_destination",
+    {
+      title: "Refresh destination verification",
+      description: "Re-read a destination's verification status from Cloudflare. Requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.",
+      inputSchema: z.object({ destinationId: entityIdSchema }),
+      annotations: { ...adminWrite, idempotentHint: true, openWorldHint: true },
+    },
+    ({ destinationId }) => runTool(() => api.json(
+      `/admin/routing/destinations/${encodeURIComponent(destinationId)}/refresh`,
+      { method: "POST" },
+    )),
+  );
+
+  server.registerTool(
+    "set_forwarding_destination_verified",
+    {
+      title: "Mark destination verified",
+      description: "Without a Cloudflare API token, record that the administrator verified this destination in the Cloudflare dashboard.",
+      inputSchema: destinationVerifiedSchema.extend({ destinationId: entityIdSchema }),
+      annotations: { ...adminWrite, idempotentHint: true },
+    },
+    ({ destinationId, ...input }) => runTool(() => api.json(
+      `/admin/routing/destinations/${encodeURIComponent(destinationId)}`,
+      { method: "PATCH", json: input },
+    )),
+  );
+
+  server.registerTool(
+    "delete_forwarding_destination",
+    {
+      title: "Delete forwarding destination",
+      description: "Stop forwarding to a destination everywhere. The Cloudflare destination address itself is kept.",
+      inputSchema: z.object({ destinationId: entityIdSchema }),
+      annotations: { ...adminWrite, destructiveHint: true, idempotentHint: true },
+    },
+    ({ destinationId }) => runTool(() => api.json(
+      `/admin/routing/destinations/${encodeURIComponent(destinationId)}`,
+      { method: "DELETE" },
+    )),
+  );
+
+  server.registerTool(
+    "create_routing_address",
+    {
+      title: "Create alias or forwarding address",
+      description: "Route an address on a configured domain. With mailboxId and no mailbox at the address it is an alias; with no mailboxId it forwards only; on an existing mailbox's address it adds forwards. destinationIds must be verified. keepCopy=false stores nothing while a forward succeeds.",
+      inputSchema: routingAddressSchema,
+      annotations: adminWrite,
+    },
+    (input) => runTool(() => api.json("/admin/routing/addresses", {
+      method: "POST",
+      json: input,
+    })),
+  );
+
+  server.registerTool(
+    "delete_routing_address",
+    {
+      title: "Delete alias or forwarding address",
+      inputSchema: z.object({ addressId: entityIdSchema }),
+      annotations: { ...adminWrite, destructiveHint: true, idempotentHint: true },
+    },
+    ({ addressId }) => runTool(() => api.json(
+      `/admin/routing/addresses/${encodeURIComponent(addressId)}`,
+      { method: "DELETE" },
+    )),
+  );
+
+  server.registerTool(
+    "set_unknown_recipient_mailbox",
+    {
+      title: "Set unknown-recipient policy",
+      description: "Deliver mail for unknown addresses on a domain to a mailbox, or pass mailboxId null to reject them (the default).",
+      inputSchema: unknownRecipientSchema.extend({ domainId: entityIdSchema }),
+      annotations: { ...adminWrite, idempotentHint: true },
+    },
+    ({ domainId, ...input }) => runTool(() => api.json(
+      `/admin/routing/domains/${encodeURIComponent(domainId)}/unknown-recipients`,
+      { method: "PUT", json: input },
+    )),
   );
 
   server.registerTool(

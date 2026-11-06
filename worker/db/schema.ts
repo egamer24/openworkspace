@@ -16,6 +16,7 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 const timestamps = {
@@ -56,6 +57,9 @@ export const domains = sqliteTable(
     isPrimary: integer("is_primary", { mode: "boolean" })
       .notNull()
       .default(false),
+    // Unknown recipients are rejected unless this names a catch-all mailbox.
+    unknownRecipientMailboxId: text("unknown_recipient_mailbox_id")
+      .references((): AnySQLiteColumn => mailboxes.id, { onDelete: "set null" }),
     createdByUserId: text("created_by_user_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -126,6 +130,62 @@ export const mailboxes = sqliteTable(
       "mailboxes_primary_owner_check",
       sql`${table.isPrimary} = 0 OR ${table.ownerUserId} IS NOT NULL`,
     ),
+  ],
+);
+
+/** Email Routing destination addresses (account-level in Cloudflare). */
+export const forwardingDestinations = sqliteTable(
+  "forwarding_destinations",
+  {
+    id: text("id").primaryKey(),
+    email: text("email").notNull(),
+    cloudflareId: text("cloudflare_id"),
+    verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("forwarding_destinations_email_unique").on(table.email)],
+);
+
+/**
+ * Domain-level addresses resolved by the email() handler. mailboxId stores the
+ * message (an alias, or a mailbox's own address when it also forwards); a null
+ * mailboxId is a forward-only address.
+ */
+export const routingAddresses = sqliteTable(
+  "routing_addresses",
+  {
+    id: text("id").primaryKey(),
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    localPart: text("local_part").notNull(),
+    mailboxId: text("mailbox_id")
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    keepCopy: integer("keep_copy", { mode: "boolean" }).notNull().default(true),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("routing_addresses_address_unique").on(table.domainId, table.localPart),
+    index("routing_addresses_mailbox_idx").on(table.mailboxId),
+  ],
+);
+
+export const routingAddressDestinations = sqliteTable(
+  "routing_address_destinations",
+  {
+    addressId: text("address_id")
+      .notNull()
+      .references(() => routingAddresses.id, { onDelete: "cascade" }),
+    destinationId: text("destination_id")
+      .notNull()
+      .references(() => forwardingDestinations.id, { onDelete: "cascade" }),
+  },
+  (table) => [
+    primaryKey({ columns: [table.addressId, table.destinationId] }),
+    index("routing_address_destinations_destination_idx").on(table.destinationId),
   ],
 );
 

@@ -75,6 +75,7 @@ import {
 import { cloudflareAdminRoutes } from "./cloudflare-routes";
 import { domainAdminRoutes } from "./domain-routes";
 import { mailboxAdminRoutes } from "./mailbox-routes";
+import { routingAdminRoutes } from "./routing-routes";
 import {
   domainForAddress,
   hasKnownGroupIds,
@@ -352,6 +353,7 @@ export const adminRoutes = new Hono<AppEnv>()
   .route("/", userSessionAdminRoutes)
   .route("/", domainAdminRoutes)
   .route("/", cloudflareAdminRoutes)
+  .route("/", routingAdminRoutes)
   .route("/", samlApplicationAdminRoutes)
   .put(
     "/ai",

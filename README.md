@@ -89,6 +89,7 @@ Administration → Domains can configure steps 1 to 3 below through the Cloudfla
 1. Create a [User API token](https://dash.cloudflare.com/profile/api-tokens) (**Create Token → Custom token**) with:
    - **Zone → Zone → Read**, **Zone → DNS → Edit**, **Zone → Zone Settings → Edit**, and **Zone → Email Routing Rules → Edit**, scoped to the mail domains' zones.
    - **Account → Email Sending → Edit** for the account that owns them.
+   - Optional: **Account → Email Routing Addresses → Edit** to manage forwarding destinations from Administration → Addresses (this also needs `CLOUDFLARE_ACCOUNT_ID`).
 2. Store it, and optionally the account ID to limit the zone list to one account:
 
    ```bash
@@ -235,6 +236,7 @@ Outbound mail is logged locally instead of sent. To test push locally, add a key
 - **Recover access** — admin issues a one-hour recovery link; redeeming it replaces all passkeys and removes existing sessions and push registrations.
 - **Settings** — each person manages their avatar, appearance, current-device push subscription, and per-mailbox notification preferences.
 - **Mailboxes** — an admin can create multiple personal addresses for a user or shared addresses with read-only or read-and-send members. Each user has one primary personal mailbox for identity and recovery.
+- **Addresses** — under Administration → Addresses an admin can add aliases (extra addresses that deliver into an existing mailbox), forward-only addresses with no mailbox, and forwards on a mailbox's own address (optionally without keeping a copy), and choose per domain whether unknown recipients are rejected (default) or delivered to a catch-all mailbox. Forwarding uses Email Routing's unchanged forward, so it only goes to verified destination addresses. With `CLOUDFLARE_API_TOKEN` (plus **Account → Email Routing Addresses → Edit**) and `CLOUDFLARE_ACCOUNT_ID`, adding a destination creates it in Cloudflare, which emails a verification link, and **Refresh** reads its status. Without them, add the destination in the dashboard under **Email Routing → Destination addresses** and mark it verified once confirmed. Forwards add an `X-OpenWorkspace-Forwarded` hop count and are skipped after 3 hops or when the destination is the sender; if a forward is skipped, the mailbox keeps the message. Admin MCP tools: `get_mail_routing`, `add_forwarding_destination`, `refresh_forwarding_destination`, `set_forwarding_destination_verified`, `delete_forwarding_destination`, `create_routing_address`, `delete_routing_address`, `set_unknown_recipient_mailbox`.
 - **PWA notifications** — desktop and Android browsers can subscribe from Settings. On iPhone and iPad, first add OpenWorkspace to the Home Screen, then enable notifications from the installed app.
 
 ### Connect an MCP client

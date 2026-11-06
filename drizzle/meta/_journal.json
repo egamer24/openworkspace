@@ -78,6 +78,13 @@
       "when": 1793946640433,
       "tag": "0010_domain_onboarding_steps",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793947211795,
+      "tag": "0011_routing_addresses",
+      "breakpoints": true
     }
   ]
 }

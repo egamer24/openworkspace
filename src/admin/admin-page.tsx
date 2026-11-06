@@ -42,6 +42,7 @@ import { GroupsManager } from "./groups-manager";
 import { SsoApplications } from "./sso-applications";
 import { WebhooksManager } from "./webhooks-manager";
 import { DomainsManager } from "./domains-manager";
+import { MailRouting } from "./mail-routing";
 import { AdminUserSessions } from "./user-sessions";
 import { SamlApplications } from "./saml-applications";
 
@@ -49,6 +50,7 @@ type AdminView =
   | "people"
   | "mailboxes"
   | "domains"
+  | "addresses"
   | "sso-applications"
   | "saml-applications"
   | "groups"
@@ -67,6 +69,7 @@ const viewCopy: Record<AdminView, { title: string; description: string }> = {
   people: { title: "People", description: "Workspace members and their mailbox access." },
   mailboxes: { title: "Mailboxes", description: "Personal and shared addresses provisioned for this workspace." },
   domains: { title: "Domains", description: "Mail domains and Cloudflare zone IDs." },
+  addresses: { title: "Addresses", description: "Aliases, forwarding, and unknown-recipient handling." },
   "sso-applications": { title: "OIDC applications", description: "OIDC clients, callbacks, user assignments, and released claims." },
   "saml-applications": { title: "SAML applications", description: "Service providers, assertions, assignments, and attributes." },
   groups: { title: "Identity groups", description: "Reusable memberships exposed to approved identity applications." },
@@ -325,6 +328,11 @@ export function AdminPage() {
                   loading={state.isLoading}
                   cloudflareOnboarding={state.data?.cloudflareOnboarding ?? false}
                 />
+              </div>
+            )}
+            {view === "addresses" && (
+              <div className="max-w-3xl">
+                <MailRouting mailboxes={state.data?.mailboxes ?? []} />
               </div>
             )}
             {view === "sso-applications" && (

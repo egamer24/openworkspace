@@ -43,7 +43,8 @@
 # domains → Automatic"), then:
 #   wrangler secret put CLOUDFLARE_API_TOKEN
 #   wrangler secret put CLOUDFLARE_ACCOUNT_ID
-# CLOUDFLARE_ACCOUNT_ID only limits the zone list to one account.
+# CLOUDFLARE_ACCOUNT_ID limits the zone list to one account and is required to
+# manage forwarding destinations (Email Routing Addresses: Edit) from Addresses.
 # WORKER_NAME (a wrangler.jsonc var) must match this Worker's script name.
 # CLOUDFLARE_API_TOKEN=
 # CLOUDFLARE_ACCOUNT_ID=
