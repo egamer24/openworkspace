@@ -73,11 +73,9 @@ export async function sendItip(env: Env, input: {
   ].join("\n");
   const html = [
     `<p>${escapeHtml(input.intro)}</p>`,
-    `<h2 style="font-size:18px;margin:16px 0 8px">${escapeHtml(event.title)}</h2>`,
-    "<table style=\"border-collapse:collapse\">",
-    ...details.map(([label, value]) =>
-      `<tr><td style="padding:2px 12px 2px 0;color:#666">${escapeHtml(label!)}</td><td>${escapeHtml(value!)}</td></tr>`),
-    "</table>",
+    `<p><strong>${escapeHtml(event.title)}</strong>`,
+    ...details.map(([label, value]) => `<br>${escapeHtml(label!)}: ${escapeHtml(value!)}`),
+    "</p>",
     ...(event.description && input.method === "REQUEST"
       ? [`<p style="white-space:pre-wrap">${escapeHtml(event.description)}</p>`]
       : []),
