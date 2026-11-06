@@ -50,6 +50,13 @@
       "when": 1793946711250,
       "tag": "0006_local_spam_filter",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793947518378,
+      "tag": "0007_spam_learning",
+      "breakpoints": true
     }
   ]
 }

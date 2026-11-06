@@ -222,6 +222,33 @@ export function registerMailActionTools(server: McpServer, api: AccountApiClient
   );
 
   server.registerTool(
+    "get_spam_learning",
+    {
+      title: "Get spam learning stats",
+      description: "Read how many messages the mailbox's learned spam filter was trained on (from Report spam / Not spam moves) and whether it is active yet.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/spam/learning`,
+    )),
+  );
+
+  server.registerTool(
+    "reset_spam_learning",
+    {
+      title: "Reset spam learning",
+      description: "Forget everything the mailbox's learned spam filter was trained on. Lists and thresholds are kept. Requires send access.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ mailboxId }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/spam/learning`,
+      { method: "DELETE" },
+    )),
+  );
+
+  server.registerTool(
     "add_spam_sender",
     {
       title: "Allow or block a sender",

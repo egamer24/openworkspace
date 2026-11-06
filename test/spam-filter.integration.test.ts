@@ -212,6 +212,15 @@ describe("spam settings API", () => {
       settings: { spamThreshold: 70, suspiciousThreshold: 40, allow: [], block: [] },
     });
 
+    const emptyLearning = {
+      ok: true,
+      learning: { spamMessages: 0, hamMessages: 0, tokens: 0, minimum: 20, active: false },
+    };
+    const learning = await call(adminCookie, "/learning");
+    expect(await learning.json()).toEqual(emptyLearning);
+    const reset = await call(adminCookie, "/learning", "DELETE");
+    expect(await reset.json()).toEqual(emptyLearning);
+
     for (const invalid of [
       { spamThreshold: 50, suspiciousThreshold: 50, allow: [], block: [] },
       { spamThreshold: 70, suspiciousThreshold: 40, allow: ["not a domain"], block: [] },
@@ -318,7 +327,11 @@ describe("spam settings API", () => {
     const read = await readerCall("");
     expect(read.status).toBe(200);
     await read.json();
+    const readLearning = await readerCall("/learning");
+    expect(readLearning.status).toBe(200);
+    await readLearning.json();
     for (const response of [
+      await readerCall("/learning", "DELETE"),
       await readerCall("", "PUT", { spamThreshold: 70, suspiciousThreshold: 40, allow: [], block: [] }),
       await readerCall("/senders/spam.example", "PUT", { list: "block" }),
       await readerCall("/senders/spam.example", "DELETE"),

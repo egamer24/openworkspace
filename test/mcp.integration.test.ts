@@ -153,6 +153,8 @@ describe("account MCP", () => {
     expect(adminToolNames).toContain("get_spam_settings");
     expect(adminToolNames).toContain("add_spam_sender");
     expect(adminToolNames).toContain("remove_spam_sender");
+    expect(adminToolNames).toContain("get_spam_learning");
+    expect(adminToolNames).toContain("reset_spam_learning");
 
     const invitationResponse = await mcpRequest(
       adminToken.token,

@@ -5,6 +5,7 @@ import type {
   SpamVerdict,
   StoredAttachment,
 } from "../mailbox/model";
+import { learningReasons } from "./spam-learning";
 
 /**
  * Local spam scoring. Every signal is computed inside the Worker from the
@@ -339,6 +340,8 @@ export function assessSpam(
     html: string | null;
     hasTextPart: boolean;
     attachments: Array<Pick<StoredAttachment, "filename">>;
+    /** Null until the mailbox has enough Spam / Not spam training. */
+    learnedProbability?: number | null;
   },
   thresholds: SpamThresholds,
 ): SpamAssessment {
@@ -348,6 +351,7 @@ export function assessSpam(
     ...relationshipReasons(input.relationship, input.from.address, input.authentication),
     ...structureReasons(input),
     ...attachmentReasons(input.attachments),
+    ...learningReasons(input.learnedProbability ?? null),
   ];
   const score = Math.min(
     100,

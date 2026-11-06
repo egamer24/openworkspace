@@ -49,6 +49,22 @@ export const spamRoutes = new Hono<AppEnv>()
       });
     },
   )
+  .get("/spam/learning", requireAuth, async (c) => {
+    const denied = await mailboxPermission(c, "read");
+    if (denied) return denied;
+    return c.json({
+      ok: true as const,
+      learning: await mailboxStub(c.env, c.req.param("id")!).getSpamLearning(),
+    });
+  })
+  .delete("/spam/learning", requireAuth, async (c) => {
+    const denied = await mailboxPermission(c, "send");
+    if (denied) return denied;
+    return c.json({
+      ok: true as const,
+      learning: await mailboxStub(c.env, c.req.param("id")!).resetSpamLearning(),
+    });
+  })
   .put(
     "/spam/senders/:entry",
     requireAuth,

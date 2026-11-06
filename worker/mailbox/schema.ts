@@ -248,6 +248,31 @@ export const spamSenderRules = sqliteTable(
   },
 );
 
+/** Per-token document counts for the learned spam signal. */
+export const spamTokens = sqliteTable(
+  "spam_tokens",
+  {
+    token: text("token").primaryKey(),
+    spamCount: integer("spam_count").notNull().default(0),
+    hamCount: integer("ham_count").notNull().default(0),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+);
+
+/**
+ * What each incoming message was last trained as, with the tokens counted,
+ * so a reversed decision subtracts exactly what was added.
+ */
+export const spamTraining = sqliteTable(
+  "spam_training",
+  {
+    emailId: text("email_id").primaryKey(),
+    label: text("label", { enum: ["spam", "ham"] }).notNull(),
+    tokensJson: text("tokens_json", { mode: "json" }).$type<string[]>().notNull(),
+    trainedAt: integer("trained_at", { mode: "timestamp_ms" }).notNull(),
+  },
+);
+
 /**
  * Read state belongs to a person, not to the mailbox. This keeps shared
  * mailboxes independent: one teammate viewing a message cannot clear another

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LoaderCircle, Save, ShieldAlert } from "lucide-react";
+import { LoaderCircle, RotateCcw, Save, ShieldAlert } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import {
@@ -81,7 +81,58 @@ function MailboxSpamSettings({ mailbox }: { mailbox: Mailbox }) {
           <Skeleton className="h-40 w-full" />
         </AdminPanelBody>
       )}
+      <SpamLearning mailboxId={mailbox.id} />
     </div>
+  );
+}
+
+function SpamLearning({ mailboxId }: { mailboxId: string }) {
+  const client = useQueryClient();
+  const queryKey = ["mailbox-spam-learning", mailboxId];
+  const learning = useQuery({
+    queryKey,
+    queryFn: async () => responseJson(
+      await api.api.mail.mailboxes[":id"].spam.learning.$get({ param: { id: mailboxId } }),
+    ),
+  });
+  const reset = useMutation({
+    mutationFn: async () => responseJson(
+      await api.api.mail.mailboxes[":id"].spam.learning.$delete({ param: { id: mailboxId } }),
+    ),
+    onSuccess: (result) => {
+      client.setQueryData(queryKey, result);
+      toast.success("Spam learning reset");
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const stats = learning.data?.learning;
+  if (!stats) return null;
+  return (
+    <AdminPanelBody className="flex flex-wrap items-center justify-between gap-4 border-t border-border/70">
+      <div className="space-y-1">
+        <p className="text-sm font-medium">Learning</p>
+        <p className="text-xs text-muted-foreground">
+          Trained on {stats.spamMessages} spam and {stats.hamMessages} not-spam messages
+          from Report spam and Not spam.{" "}
+          {stats.active
+            ? "Similar messages now affect the score."
+            : `Starts scoring after ${stats.minimum} of each.`}
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={reset.isPending || (!stats.spamMessages && !stats.hamMessages)}
+        onClick={() => {
+          if (window.confirm("Forget everything this mailbox's spam filter has learned?")) {
+            reset.mutate();
+          }
+        }}
+      >
+        {reset.isPending ? <LoaderCircle className="animate-spin" /> : <RotateCcw />}
+        Reset learning
+      </Button>
+    </AdminPanelBody>
   );
 }
 
