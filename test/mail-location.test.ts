@@ -7,6 +7,7 @@ const mailboxes = [{
   displayName: "A",
   kind: "personal" as const,
   canSend: true,
+  signature: null,
   unreadCount: 0,
 }, {
   id: "mailbox-read-only",
@@ -14,6 +15,7 @@ const mailboxes = [{
   displayName: "Read only",
   kind: "shared" as const,
   canSend: false,
+  signature: null,
   unreadCount: 0,
 }];
 

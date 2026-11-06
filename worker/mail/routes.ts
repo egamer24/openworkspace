@@ -2,7 +2,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { attachmentPreview } from "../../shared/attachment-preview";
 import { officePreviewKey } from "../../shared/office-preview";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import {
   baseSubject,
@@ -10,7 +10,12 @@ import {
 } from "../../shared/mail";
 import { requireAuth } from "../auth/middleware";
 import { createDb } from "../db/client";
-import { domains, mailboxMembers, mailboxes } from "../db/schema";
+import {
+  domains,
+  mailboxMembers,
+  mailboxSignatures,
+  mailboxes,
+} from "../db/schema";
 import {
   mailboxAddressSql,
   mailboxKind,
@@ -69,8 +74,11 @@ import {
   remoteProxyQuerySchema,
   reorderFoldersSchema,
   replySchema,
+  signatureSchema,
   uploadIdSchema,
 } from "./schemas";
+import { signatureText, withSignature } from "./signatures";
+import { sanitizeHtml } from "../lib/sanitize-html";
 import {
   assertProxyableRemoteUrl,
   fetchProxiedRemoteMedia,
@@ -284,10 +292,18 @@ export const mailRoutes = new Hono<AppEnv>()
         ownerUserId: mailboxes.ownerUserId,
         isPrimary: mailboxes.isPrimary,
         canSend: mailboxMembers.canSend,
+        signatureHtml: mailboxSignatures.html,
+        signatureText: mailboxSignatures.text,
+        signatureUseOnNew: mailboxSignatures.useOnNew,
+        signatureUseOnReply: mailboxSignatures.useOnReply,
       })
       .from(mailboxMembers)
       .innerJoin(mailboxes, eq(mailboxMembers.mailboxId, mailboxes.id))
       .innerJoin(domains, eq(mailboxes.domainId, domains.id))
+      .leftJoin(mailboxSignatures, and(
+        eq(mailboxSignatures.mailboxId, mailboxMembers.mailboxId),
+        eq(mailboxSignatures.userId, mailboxMembers.userId),
+      ))
       .where(eq(mailboxMembers.userId, userId))
       .orderBy(
         mailboxKindOrderSql,
@@ -298,9 +314,25 @@ export const mailRoutes = new Hono<AppEnv>()
     const rowsWithUnreadCounts = await Promise.all(rows.map(async (mailbox) => {
       const inbox = await mailboxStub(c.env, mailbox.id)
         .getFolderCounts(userId, "inbox");
-      const { ownerUserId, isPrimary: _isPrimary, ...publicMailbox } = mailbox;
+      const {
+        ownerUserId,
+        isPrimary: _isPrimary,
+        signatureHtml,
+        signatureText,
+        signatureUseOnNew,
+        signatureUseOnReply,
+        ...publicMailbox
+      } = mailbox;
       return {
         ...publicMailbox,
+        signature: signatureHtml && signatureText
+          ? {
+              html: signatureHtml,
+              text: signatureText,
+              useOnNew: signatureUseOnNew ?? true,
+              useOnReply: signatureUseOnReply ?? true,
+            }
+          : null,
         kind: mailboxKind(ownerUserId),
         unreadCount: inbox?.unreadCount ?? 0,
       };
@@ -308,6 +340,38 @@ export const mailRoutes = new Hono<AppEnv>()
 
     return c.json({ ok: true as const, mailboxes: rowsWithUnreadCounts });
   })
+  .put(
+    "/mailboxes/:id/signature",
+    zValidator("json", signatureSchema),
+    async (c) => {
+      const userId = c.get("user").id;
+      const mailboxId = c.req.param("id");
+      const access = await accessibleMailbox(c.env, userId, mailboxId, "send");
+      if (!access) return apiError(c, 403, "FORBIDDEN", "Send access is required");
+      const { html: rawHtml, useOnNew, useOnReply } = c.req.valid("json");
+      const db = createDb(c.env.DB);
+      const key = and(
+        eq(mailboxSignatures.mailboxId, mailboxId),
+        eq(mailboxSignatures.userId, userId),
+      );
+      const html = await sanitizeHtml(rawHtml);
+      const text = signatureText(html);
+      if (!text) {
+        await db.delete(mailboxSignatures).where(key);
+        return c.json({ ok: true as const, signature: null });
+      }
+      const signature = { html, text, useOnNew, useOnReply };
+      const values = { ...signature, updatedAt: new Date() };
+      await db
+        .insert(mailboxSignatures)
+        .values({ mailboxId, userId, ...values })
+        .onConflictDoUpdate({
+          target: [mailboxSignatures.mailboxId, mailboxSignatures.userId],
+          set: values,
+        });
+      return c.json({ ok: true as const, signature });
+    },
+  )
   .get("/mailboxes/:id/realtime", async (c) => {
     if (c.get("authKind") !== "session") {
       return apiError(
@@ -1314,9 +1378,15 @@ export const mailRoutes = new Hono<AppEnv>()
     },
   )
   .post("/messages", zValidator("json", composeSchema), async (c) => {
-    const input = c.req.valid("json");
-    const access = await accessibleMailbox(c.env, c.get("user").id, input.mailboxId, "send");
+    const userId = c.get("user").id;
+    const access = await accessibleMailbox(c.env, userId, c.req.valid("json").mailboxId, "send");
     if (!access) return apiError(c, 403, "FORBIDDEN", "Send access is required");
+    const input = await withSignature(
+      c.env,
+      userId,
+      c.req.valid("json").mailboxId,
+      c.req.valid("json"),
+    );
     try {
       const submission = await submitOutgoing({
         env: c.env,
@@ -1345,7 +1415,7 @@ export const mailRoutes = new Hono<AppEnv>()
     "/messages/:id/replies",
     zValidator("json", replySchema),
     async (c) => {
-      const input = c.req.valid("json");
+      let input = c.req.valid("json");
       const access = await accessibleMailbox(
         c.env,
         c.get("user").id,
@@ -1355,6 +1425,7 @@ export const mailRoutes = new Hono<AppEnv>()
       if (!access) {
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
+      input = await withSignature(c.env, c.get("user").id, input.mailboxId, input);
       try {
         const context = await resolveReplyContext({
           env: c.env,
@@ -1401,7 +1472,7 @@ export const mailRoutes = new Hono<AppEnv>()
     "/messages/:id/forward",
     zValidator("json", forwardSchema),
     async (c) => {
-      const input = c.req.valid("json");
+      let input = c.req.valid("json");
       const access = await accessibleMailbox(
         c.env,
         c.get("user").id,
@@ -1411,6 +1482,7 @@ export const mailRoutes = new Hono<AppEnv>()
       if (!access) {
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
+      input = await withSignature(c.env, c.get("user").id, input.mailboxId, input);
       try {
         const context = await resolveForwardContext({
           env: c.env,

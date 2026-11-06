@@ -54,6 +54,8 @@ export const ComposerEditor = forwardRef<
     onSubmitShortcut: () => void;
     dragging: boolean;
     disabled: boolean;
+    /** HTML placed in the editor when it opens, e.g. a signature. */
+    initialHtml?: string;
   }
 >(function ComposerEditor({
   session,
@@ -65,6 +67,7 @@ export const ComposerEditor = forwardRef<
   onSubmitShortcut,
   dragging,
   disabled,
+  initialHtml,
 }, ref) {
   const callbacks = useRef({
     onChange,
@@ -106,7 +109,7 @@ export const ComposerEditor = forwardRef<
         },
       }),
     ],
-    content: "",
+    content: initialHtml ?? "",
     editorProps: {
       attributes: {
         class: [
@@ -244,3 +247,4 @@ export const ComposerEditor = forwardRef<
     </div>
   );
 });
+

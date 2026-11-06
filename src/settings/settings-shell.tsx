@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   Menu,
   Palette,
+  PenLine,
   ShieldCheck,
   UserRound,
   type LucideIcon,
@@ -25,7 +26,13 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-type SettingsSection = "profile" | "appearance" | "notifications" | "sessions" | "mcp";
+type SettingsSection =
+  | "profile"
+  | "appearance"
+  | "notifications"
+  | "signatures"
+  | "sessions"
+  | "mcp";
 
 const settingsSections: Array<{
   id: SettingsSection;
@@ -56,6 +63,13 @@ const settingsSections: Array<{
     path: "/settings/notifications",
   },
   {
+    id: "signatures",
+    label: "Signatures",
+    description: "Text added to messages you write from each mailbox.",
+    Icon: PenLine,
+    path: "/settings/signatures",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -74,6 +88,7 @@ const settingsSections: Array<{
 function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/mcp")) return "mcp";
   if (pathname.startsWith("/settings/notifications")) return "notifications";
+  if (pathname.startsWith("/settings/signatures")) return "signatures";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";

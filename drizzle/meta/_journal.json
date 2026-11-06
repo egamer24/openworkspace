@@ -78,6 +78,13 @@
       "when": 1793937048453,
       "tag": "0010_account_api_token_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793981720943,
+      "tag": "0011_mailbox_signatures",
+      "breakpoints": true
     }
   ]
 }

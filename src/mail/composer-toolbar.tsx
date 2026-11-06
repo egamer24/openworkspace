@@ -64,7 +64,8 @@ export function ComposerToolbar({
   disabled,
 }: {
   editor: Editor;
-  onChooseInlineImage: () => void;
+  /** Omit to hide the inline image button (e.g. signatures). */
+  onChooseInlineImage?: () => void;
   disabled: boolean;
 }) {
   const [linkOpen, setLinkOpen] = useState(false);
@@ -164,13 +165,15 @@ export function ComposerToolbar({
       >
         <Quote />
       </EditorButton>
-      <EditorButton
-        label="Insert inline image"
-        disabled={disabled}
-        onClick={onChooseInlineImage}
-      >
-        <ImagePlus />
-      </EditorButton>
+      {onChooseInlineImage ? (
+        <EditorButton
+          label="Insert inline image"
+          disabled={disabled}
+          onClick={onChooseInlineImage}
+        >
+          <ImagePlus />
+        </EditorButton>
+      ) : null}
       <span className="mx-1 h-4 w-px bg-border" />
       <EditorButton
         label="Undo"
