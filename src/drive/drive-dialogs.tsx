@@ -203,7 +203,7 @@ export function ShareDialog({ item }: { item: DriveEntry }) {
       </ul>
 
       {item.kind === "file" && (
-        <div className="grid gap-3 border-t pt-4">
+        <div className="grid min-w-0 grid-cols-1 gap-3 border-t pt-4">
           <p className="flex items-center gap-2 text-sm font-medium"><Link2 className="size-4" /> Public links</p>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="grid gap-1.5">
