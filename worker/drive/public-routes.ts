@@ -1,8 +1,8 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { html } from "hono/html";
 import { createDb } from "../db/client";
-import { driveItems, driveLinks } from "../db/schema";
+import { driveItems, driveLinks, users } from "../db/schema";
 import type { AppEnv } from "../env";
 import { hashToken, verifyPassword } from "../lib/crypto";
 import { checkRateLimit } from "../lib/rate-limit";
@@ -45,6 +45,8 @@ export const drivePublicRoutes = new Hono<AppEnv>()
       .select({ link: driveLinks, item: driveItems })
       .from(driveLinks)
       .innerJoin(driveItems, eq(driveItems.id, driveLinks.itemId))
+      // Disabling the owner suspends their links; re-enabling restores them.
+      .innerJoin(users, and(eq(users.id, driveItems.ownerUserId), eq(users.status, "active")))
       .where(eq(driveLinks.tokenHash, await hashToken(c.req.param("token"))))
       .limit(1);
     if (

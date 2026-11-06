@@ -89,6 +89,13 @@ async function writableParent(env: Bindings, userId: string, parentId: string | 
   return { ownerUserId: context.item.ownerUserId, parentId };
 }
 
+/** A pending upload stays usable only while its creator can still write where it lands. */
+async function canFinishUpload(env: Bindings, userId: string, item: DriveItem) {
+  if (item.createdByUserId !== userId) return false;
+  if (item.ownerUserId === userId) return true;
+  return (await writableParent(env, userId, item.parentId))?.ownerUserId === item.ownerUserId;
+}
+
 async function loadItem(db: ReturnType<typeof createDb>, itemId: string) {
   const [item] = await db.select().from(driveItems).where(eq(driveItems.id, itemId)).limit(1);
   return item ?? null;
@@ -305,7 +312,7 @@ export const driveRoutes = new Hono<AppEnv>()
   .put("/uploads/:id/content", async (c) => {
     const user = c.get("user");
     const item = await loadItem(createDb(c.env.DB), c.req.param("id"));
-    if (!item || item.status !== "pending" || item.createdByUserId !== user.id) {
+    if (!item || item.status !== "pending" || !await canFinishUpload(c.env, user.id, item)) {
       return apiError(c, 404, "NOT_FOUND", "Upload not found");
     }
     const body = c.req.raw.body;
@@ -339,7 +346,7 @@ export const driveRoutes = new Hono<AppEnv>()
     const user = c.get("user");
     const db = createDb(c.env.DB);
     const item = await loadItem(db, c.req.param("id"));
-    if (!item || item.createdByUserId !== user.id) {
+    if (!item || !await canFinishUpload(c.env, user.id, item)) {
       return apiError(c, 404, "NOT_FOUND", "Upload not found");
     }
     if (item.status === "ready") {
