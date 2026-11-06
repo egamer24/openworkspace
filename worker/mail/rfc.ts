@@ -71,3 +71,27 @@ export function listPostAddress(value: string | null | undefined) {
     return null;
   }
 }
+
+/**
+ * Whether Cloudflare Email Routing's DMARC check passed for `fromAddress`.
+ * Only the first Authentication-Results header is Cloudflare's (it
+ * prepends it); any later copy came from the sender and is ignored.
+ */
+export function cloudflareDmarcPass(rawMime: ArrayBuffer | string, fromAddress: string) {
+  const text = typeof rawMime === "string"
+    ? rawMime
+    : new TextDecoder().decode(rawMime.slice(0, 64 * 1024));
+  const head = text.split(/\r?\n\r?\n/u, 1)[0]!.replace(/\r?\n[ \t]+/gu, " ");
+  const header = head.split(/\r?\n/u).find((line) => /^authentication-results:/iu.test(line));
+  if (!header) return false;
+  const [authservId, ...results] = header
+    .slice(header.indexOf(":") + 1)
+    .replace(/\([^()]*\)/gu, " ")
+    .toLowerCase()
+    .split(";")
+    .map((part) => part.trim());
+  if (authservId !== "mx.cloudflare.net") return false;
+  const dmarc = results.find((result) => result.startsWith("dmarc="))?.split(/\s+/u);
+  const domain = fromAddress.slice(fromAddress.lastIndexOf("@") + 1).toLowerCase();
+  return dmarc?.[0] === "dmarc=pass" && dmarc.includes(`header.from=${domain}`);
+}

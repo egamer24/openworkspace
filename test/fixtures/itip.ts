@@ -217,9 +217,12 @@ export function invitationMime(input: {
   method: string;
   ics: string;
   style: "google" | "outlook";
+  /** Raw header lines put above From, e.g. Authentication-Results. */
+  headers?: string[];
 }) {
   const ics = input.ics;
   const lines = [
+    ...(input.headers ?? []),
     `From: ${input.from}`,
     `To: ${input.to}`,
     `Subject: ${input.subject}`,
