@@ -267,6 +267,27 @@ x-openworkspace-signature: sha256=…
 
 Verify the signature over `<timestamp>.<raw request body>`, reject stale timestamps, and deduplicate retries with `x-openworkspace-delivery`. Delivery runs asynchronously through Cloudflare Queues, retries up to five times, and retains the latest delivery status for 30 days. Administrator MCP tokens can also create, update, test, rotate, and delete webhook endpoints.
 
+### Import existing mail
+
+Administrators can import historical messages into any mailbox, one raw RFC 822 message per request, with an administrator API token:
+
+```bash
+curl "https://mail.example.com/api/admin/mailboxes/<mailbox id>/import?state=archive&seen=1" \
+  -H "Authorization: Bearer mcp_…" \
+  -H "Content-Type: message/rfc822" \
+  --data-binary @message.eml
+```
+
+| Parameter | Values | Default |
+| --- | --- | --- |
+| `state` | `active`, `archive`, `spam`, `trash` | `active` |
+| `direction` | `incoming`, `outgoing`, `auto` (outgoing when From is the mailbox address) | `auto` |
+| `seen` | `1` marks an incoming message read for every current mailbox member | `0` |
+| `folder` | Custom folder name; created if missing (only applies with `state=active`) | none |
+| `receivedAt` | ISO 8601 timestamp for the message's position in the timeline | the `Date` header, then now |
+
+Imported messages are threaded and indexed like live mail, but they never trigger AI classification, push notifications, webhooks, or Office previews, and outgoing messages are never sent. A thread lives where its newest message says, so the order you import in doesn't matter. Importing the same bytes again returns `{"status":"duplicate"}`, which makes interrupted or overlapping runs safe to repeat. Responses are `200` with `status` `imported` or `duplicate`, `400` for invalid parameters or an unreadable message, `404` for an unknown mailbox, `413` above 25 MiB, and `429` above 600 imports per minute per administrator.
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).

@@ -11,6 +11,7 @@ import {
   normalizeAllowedOidcOrigin,
 } from "../oidc/validation";
 import { samlNameIdFormats } from "../../shared/saml";
+import { mailboxStates } from "../mailbox/folder-model";
 import { isValidXmlCharacters } from "../saml/xml";
 
 const XML_CHARACTERS_ERROR = "Value contains characters that are not allowed in XML";
@@ -194,4 +195,12 @@ export const groupInputSchema = z.object({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u),
   description: z.string().trim().max(240).nullable(),
   memberIds: uniqueStrings(z.string().min(1), 100),
+});
+
+export const mailImportQuerySchema = z.object({
+  state: z.enum(mailboxStates).default("active"),
+  direction: z.enum(["incoming", "outgoing", "auto"]).default("auto"),
+  seen: z.enum(["0", "1"]).default("0").transform((value) => value === "1"),
+  folder: z.string().trim().min(1).max(80).optional(),
+  receivedAt: z.iso.datetime({ offset: true }).transform((value) => new Date(value)).optional(),
 });
