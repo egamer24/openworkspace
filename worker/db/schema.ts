@@ -807,5 +807,26 @@ export const rateLimitBuckets = sqliteTable(
   ],
 );
 
+/**
+ * Secret ICS feed URLs resolve here by token hash; the calendar itself lives
+ * in the owner's calendar Durable Object.
+ */
+export const calendarFeeds = sqliteTable(
+  "calendar_feeds",
+  {
+    tokenHash: text("token_hash").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    calendarId: text("calendar_id").notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    uniqueIndex("calendar_feeds_calendar_unique").on(table.userId, table.calendarId),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type Mailbox = typeof mailboxes.$inferSelect;

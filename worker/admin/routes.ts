@@ -42,6 +42,11 @@ import {
   globalAiProcessingEnabled,
   setGlobalAiProcessingEnabled,
 } from "../ai/configuration";
+import {
+  calendarModuleEnabled,
+  setCalendarModuleEnabled,
+} from "../calendar/module";
+import { calendarModuleSchema } from "../calendar/schemas";
 import { randomToken, hashToken } from "../lib/crypto";
 import { apiError } from "../lib/http";
 import { createId } from "../lib/ids";
@@ -162,6 +167,7 @@ export const adminRoutes = new Hono<AppEnv>()
     const db = createDb(c.env.DB);
     const [
       aiProcessingEnabled,
+      calendarEnabled,
       domainRows,
       userRows,
       mailboxRows,
@@ -176,6 +182,7 @@ export const adminRoutes = new Hono<AppEnv>()
       samlGroupClaims,
     ] = await Promise.all([
       globalAiProcessingEnabled(c.env.DB),
+      calendarModuleEnabled(c.env.DB),
       db
         .select({
           id: domains.id,
@@ -306,6 +313,7 @@ export const adminRoutes = new Hono<AppEnv>()
     return c.json({
       ok: true as const,
       aiProcessingEnabled,
+      calendarEnabled,
       domains: domainRows,
       users: userRows,
       mailboxes: mailboxRows.map((mailbox) => ({
@@ -350,6 +358,17 @@ export const adminRoutes = new Hono<AppEnv>()
         ok: true as const,
         enabled: setting.enabled,
       });
+    },
+  )
+  .put(
+    "/calendar",
+    zValidator("json", calendarModuleSchema),
+    async (c) => {
+      const setting = await setCalendarModuleEnabled(
+        c.env.DB,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ ok: true as const, enabled: setting.enabled });
     },
   )
   .route("/", mailboxAdminRoutes)

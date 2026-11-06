@@ -2,6 +2,7 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { AccessLinkKind } from "../../shared/auth";
+import { calendarModuleEnabled } from "../calendar/module";
 import { createDb } from "../db/client";
 import type { AppEnv } from "../env";
 import { apiError } from "../lib/http";
@@ -150,9 +151,10 @@ function accessLinkRoutes(kind: AccessLinkKind) {
 export const authRoutes = new Hono<AppEnv>()
   .get("/state", async (c) => {
     const db = createDb(c.env.DB);
-    const [installed, session] = await Promise.all([
+    const [installed, session, calendarEnabled] = await Promise.all([
       hasUsers(db),
       readSessionFromContext(c),
+      calendarModuleEnabled(c.env.DB),
     ]);
     return c.json({
       ok: true as const,
@@ -160,6 +162,7 @@ export const authRoutes = new Hono<AppEnv>()
       authenticated: Boolean(session),
       sessionVersion: session?.authTime.getTime() ?? null,
       user: session?.user ?? null,
+      modules: { calendar: Boolean(session) && calendarEnabled },
       mockAuthEnabled: c.env.ALLOW_MOCK_AUTH === "true",
     });
   })

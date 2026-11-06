@@ -271,6 +271,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionVersion: state.data?.sessionVersion ?? null,
     user: state.data?.user ?? null,
     mockAuthEnabled: state.data?.mockAuthEnabled ?? false,
+    modules: state.data?.modules ?? { calendar: false },
     // A failed initial check is unknown authentication, not a signed-out session.
     // Keep cached identity on background errors; only a successful response can revoke it.
     loading: state.isPending || accountChanging,

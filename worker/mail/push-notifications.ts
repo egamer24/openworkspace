@@ -11,6 +11,7 @@ import { zValidator } from "@hono/zod-validator";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
+import type { CalendarReminderPushJob } from "../../shared/calendar";
 import type { MailboxPushJob } from "../../shared/mail";
 import { requireSessionAuth } from "../auth/middleware";
 import { createDb } from "../db/client";
@@ -26,6 +27,7 @@ import { mailboxAddressSql, mailboxKindOrderSql } from "../db/mailboxes";
 import type { AppEnv, PushBindings } from "../env";
 import { apiError } from "../lib/http";
 import { createId } from "../lib/ids";
+import { calendarModuleEnabled } from "../calendar/module";
 import { mailboxStub } from "../mailbox";
 import { getMailboxAccess } from "./access";
 
@@ -78,6 +80,19 @@ const pushJobSchema = z.discriminatedUnion("type", [
     mailboxDisplayName: z.string().min(1).max(500),
   }),
 ]) satisfies z.ZodType<MailboxPushJob>;
+
+const calendarReminderJobSchema = z.object({
+  type: z.literal("calendar-reminder"),
+  userId: z.string().min(1),
+  eventId: z.string().min(1),
+  occurrenceStart: z.number().int(),
+  occurredAt: z.number().int().nonnegative(),
+  title: z.string().max(500),
+  body: z.string().max(1_000),
+  targetSubscriptionId: z.string().min(1).optional(),
+}) satisfies z.ZodType<CalendarReminderPushJob>;
+
+const queuedPushJobSchema = z.union([pushJobSchema, calendarReminderJobSchema]);
 
 const MAX_PUSH_JOB_AGE_MS = 15 * 60 * 1_000;
 const MAX_QUEUE_SEND_BATCH_SIZE = 100;
@@ -417,23 +432,41 @@ async function deliverPushJob(
   );
   if (suppressed) return;
 
+  await sendToSubscription(
+    env,
+    subscription,
+    {
+      title: `New email in ${job.mailboxDisplayName}`,
+      body: `${job.sender} · ${job.subject || "(no subject)"}`,
+      url: `/mail/${encodeURIComponent(job.mailboxId)}?folder=inbox&conversation=${encodeURIComponent(job.conversationId)}`,
+      tag: `message-${job.messageId}`,
+    },
+    `message:${job.messageId}`,
+    configuration,
+    ageMs,
+  );
+}
+
+async function sendToSubscription(
+  env: Env & PushBindings,
+  subscription: { id: string; endpoint: string; p256dh: string; auth: string },
+  payload: { title: string; body: string; url: string; tag: string },
+  topic: string,
+  configuration: PushConfiguration,
+  ageMs: number,
+) {
   try {
     const delivered = await sendPushNotification(
       {
         endpoint: subscription.endpoint,
         keys: { p256dh: subscription.p256dh, auth: subscription.auth },
       },
-      {
-        title: `New email in ${job.mailboxDisplayName}`,
-        body: `${job.sender} · ${job.subject || "(no subject)"}`,
-        url: `/mail/${encodeURIComponent(job.mailboxId)}?folder=inbox&conversation=${encodeURIComponent(job.conversationId)}`,
-        tag: `message-${job.messageId}`,
-      },
+      payload,
       configuration,
       {
         ttl: Math.max(1, Math.ceil((MAX_PUSH_JOB_AGE_MS - ageMs) / 1_000)),
         urgency: "high",
-        topic: await topicFromString(`message:${job.messageId}`),
+        topic: await topicFromString(topic),
       },
     );
     if (!delivered) await removeSubscription(env, subscription.id);
@@ -450,12 +483,67 @@ async function deliverPushJob(
   }
 }
 
-async function processPushJob(env: Env & PushBindings, job: MailboxPushJob) {
+/**
+ * Calendar reminders fan out to every device of the calendar's owner, one
+ * queue message per device, like mail notifications.
+ */
+async function processCalendarReminder(
+  env: Env & PushBindings,
+  job: CalendarReminderPushJob,
+  configuration: PushConfiguration,
+  ageMs: number,
+) {
+  const subscriptions = await createDb(env.DB).select({
+    id: pushSubscriptions.id,
+    endpoint: pushSubscriptions.endpoint,
+    p256dh: pushSubscriptions.p256dh,
+    auth: pushSubscriptions.auth,
+  })
+    .from(pushSubscriptions)
+    .innerJoin(users, eq(pushSubscriptions.userId, users.id))
+    .where(and(
+      eq(users.status, "active"),
+      eq(pushSubscriptions.userId, job.userId),
+      job.targetSubscriptionId
+        ? eq(pushSubscriptions.id, job.targetSubscriptionId)
+        : undefined,
+    ));
+  if (!job.targetSubscriptionId) {
+    if (!subscriptions.length || !await calendarModuleEnabled(env.DB)) return;
+    const requests = subscriptions.map((subscription) => ({
+      body: { ...job, targetSubscriptionId: subscription.id },
+    }));
+    for (let index = 0; index < requests.length; index += MAX_QUEUE_SEND_BATCH_SIZE) {
+      await env.PUSH_NOTIFICATIONS.sendBatch(
+        requests.slice(index, index + MAX_QUEUE_SEND_BATCH_SIZE),
+      );
+    }
+    return;
+  }
+  const subscription = subscriptions[0];
+  if (!subscription) return;
+  const tag = `calendar-${job.eventId}-${job.occurrenceStart}`;
+  await sendToSubscription(
+    env,
+    subscription,
+    { title: job.title, body: job.body, url: "/calendar", tag },
+    tag,
+    configuration,
+    ageMs,
+  );
+}
+
+async function processPushJob(
+  env: Env & PushBindings,
+  job: MailboxPushJob | CalendarReminderPushJob,
+) {
   const ageMs = Math.max(0, Date.now() - job.occurredAt);
   if (ageMs >= MAX_PUSH_JOB_AGE_MS) return;
   const configuration = (await pushConfiguration(env)).configuration;
   if (!configuration) return;
-  if (job.type === "dispatch") await dispatchPushJob(env, job);
+  if (job.type === "calendar-reminder") {
+    await processCalendarReminder(env, job, configuration, ageMs);
+  } else if (job.type === "dispatch") await dispatchPushJob(env, job);
   else await deliverPushJob(env, job, configuration, ageMs);
 }
 
@@ -464,7 +552,7 @@ export async function consumePushNotifications(
   env: Env & PushBindings,
 ) {
   await Promise.all(batch.messages.map(async (message) => {
-    const parsed = pushJobSchema.safeParse(message.body);
+    const parsed = queuedPushJobSchema.safeParse(message.body);
     if (!parsed.success) {
       console.error("Ignoring invalid push notification job", parsed.error);
       message.ack();

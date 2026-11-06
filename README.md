@@ -13,6 +13,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Attachment previews** — PDF, images, text, and background PDF conversion for Office documents
 - **Realtime and push** — mailbox-scoped WebSockets plus optional PWA notifications
 - **Signed webhooks** — account-wide email and administration events with retry history
+- **Optional calendar** — per-user calendars with recurrence, reminders, ICS feeds and import (off by default)
 - **Runs on Cloudflare** — Workers, D1, Durable Objects, R2, Images, Email Service, and Queues
 
 ## Deploy to Cloudflare
@@ -240,6 +241,17 @@ x-openworkspace-signature: sha256=…
 ```
 
 Verify the signature over `<timestamp>.<raw request body>`, reject stale timestamps, and deduplicate retries with `x-openworkspace-delivery`. Delivery runs asynchronously through Cloudflare Queues, retries up to five times, and retains the latest delivery status for 30 days. Administrator MCP tokens can also create, update, test, rotate, and delete webhook endpoints.
+
+### Calendar (optional module)
+
+The calendar is off by default. An administrator turns it on under **Administration → Mailboxes → Calendar**; while it is off, `/api/calendar/*`, `/ics/*` feeds, reminders, MCP calendar tools and the navigation entry are all unavailable, and stored events are kept.
+
+- Each person gets their own calendar Durable Object with any number of calendars (name, color, show/hide).
+- Month, week and agenda views; events can repeat daily, weekly, monthly or yearly with intervals, weekdays, an end date or a count. Recurrences expand in the event's time zone, so a 09:00 meeting stays at 09:00 across DST. Recurring events can be edited for one occurrence, this and following, or all.
+- Reminders use the same PWA push notifications as mail. They are best-effort: a reminder that could not be sent within 15 minutes is dropped.
+- **Copy ICS feed URL** creates a secret, read-only `https://mail.example.com/ics/<token>.ics` subscription link for phones and other calendar apps. **New feed URL** replaces it and **Revoke feed URL** disables it immediately.
+- `.ics` files can be imported into a calendar; events with rules outside the supported subset (for example `BYSETPOS`, `RDATE` or non-IANA time zones) are skipped and listed.
+- MCP tokens get `list_calendars`, `list_calendar_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` and `get_free_busy`.
 
 ## License
 

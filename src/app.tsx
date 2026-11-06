@@ -19,6 +19,9 @@ const AccessLinkScreen = lazy(() =>
 const AdminPage = lazy(() =>
   import("@/admin/admin-page").then((module) => ({ default: module.AdminPage })),
 );
+const CalendarPage = lazy(() =>
+  import("@/calendar/calendar-page").then((module) => ({ default: module.CalendarPage })),
+);
 const MailShell = lazy(() =>
   import("@/mail/mail-shell").then((module) => ({ default: module.MailShell })),
 );
@@ -104,6 +107,7 @@ export function App() {
           <Route path="/oidc/logout" element={auth.authenticated ? <OidcLogoutScreen /> : <Navigate to="/" replace />} />
           <Route path="/saml/login/:requestId" element={<SamlLoginScreen />} />
           <Route path="/admin" element={auth.authenticated && auth.user?.role === "admin" ? <AdminPage /> : <Navigate to="/" replace />} />
+          <Route path="/calendar" element={auth.authenticated && auth.modules.calendar ? <CalendarPage /> : <Navigate to="/" replace />} />
           <Route path="/settings" element={settings}>
             <Route index element={<Navigate to="/settings/profile" replace />} />
             <Route path="profile" element={<SettingsProfilePage />} />
