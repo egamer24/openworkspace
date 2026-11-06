@@ -6,6 +6,7 @@ import {
   Reply,
   ReplyAll,
   Send,
+  Trash2,
   Users,
 } from "lucide-react";
 import {
@@ -15,6 +16,7 @@ import {
   useState,
   type DragEvent,
 } from "react";
+import { toast } from "sonner";
 import { normalizeExternalEmailAddress } from "../../shared/mail";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -53,6 +55,12 @@ import type {
 } from "./types";
 import { useComposerSession } from "./composer-session";
 import { useComposerAttachmentPreflight } from "./use-composer-attachment-preflight";
+import {
+  draftAssets,
+  draftAttachments,
+  useDraftAutosave,
+  type SavedDraft,
+} from "./use-draft-autosave";
 
 export type { SentReply } from "./use-reply-submission";
 
@@ -84,23 +92,36 @@ export function ConversationReply({
   mode,
   onModeChange,
   onSent,
+  draft,
 }: {
   mailbox?: Mailbox;
   parent: MessageDetail;
   mode: ReplyActionMode;
   onModeChange: (mode: ReplyActionMode) => void;
   onSent: (result: SentReply) => void;
+  /** A saved reply draft for this parent message. */
+  draft?: SavedDraft;
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const initialAction = findAction(parent, mode);
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(draft?.editorBody ?? "");
   const [cc, setCc] = useState(
-    () => recipientField(initialAction?.cc ?? []),
+    () => recipientField(draft?.ccJson ?? initialAction?.cc ?? []),
   );
-  const [bcc, setBcc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [showCc, setShowCc] = useState(Boolean(initialAction?.cc.length));
-  const [showBcc, setShowBcc] = useState(false);
-  const { session, snapshot } = useComposerSession(mailbox?.id ?? "");
+  const [bcc, setBcc] = useState<RecipientFieldValue>(
+    () => draft ? recipientField(draft.bccJson) : EMPTY_RECIPIENT_FIELD,
+  );
+  const [showCc, setShowCc] = useState(
+    Boolean(draft ? draft.ccJson.length : initialAction?.cc.length),
+  );
+  const [showBcc, setShowBcc] = useState(Boolean(draft?.bccJson.length));
+  const { session, snapshot } = useComposerSession(
+    mailbox?.id ?? "",
+    undefined,
+    draft && mailbox ? draftAssets(mailbox.id, draft) : [],
+  );
+  // A restored draft keeps its own Cc; only later mode changes reset it.
+  const keepRestoredCc = useRef(Boolean(draft));
   const activeAssets = snapshot.assets;
   const uploadLimitError = session.limitError();
   const uploadsPending = activeAssets.some(
@@ -114,6 +135,10 @@ export function ConversationReply({
     [mode, parent],
   );
   useEffect(() => {
+    if (keepRestoredCc.current) {
+      keepRestoredCc.current = false;
+      return;
+    }
     const next = findAction(parent, mode);
     setCc(recipientField(next.cc));
     setShowCc(next.cc.length > 0);
@@ -137,6 +162,33 @@ export function ConversationReply({
     activeAssets,
     snapshot.phase === "editing" && Boolean(mailbox && action),
   );
+  const autosave = useDraftAutosave({
+    mailboxId: mailbox?.id ?? "",
+    session,
+    restored: draft,
+    enabled: snapshot.phase === "editing" && Boolean(mailbox?.canSend),
+    changeKey: JSON.stringify([
+      mode,
+      body,
+      recipientAddresses(cc),
+      recipientAddresses(bcc),
+      draftAttachments(activeAssets),
+    ]),
+    buildPayload: () => ({
+      kind: "reply",
+      replyMode: mode,
+      sourceMessageId: parent.id,
+      conversationId: parent.conversationId,
+      // Shown in the Drafts list; the server derives reply recipients itself.
+      to: action?.to ?? [],
+      cc: recipientAddresses(cc),
+      bcc: recipientAddresses(bcc),
+      subject: parent.subject,
+      editorBody: body,
+      bodyText: body,
+      attachments: draftAttachments(activeAssets),
+    }),
+  });
   const submission = useReplySubmission({
     session,
     phase: snapshot.phase,
@@ -148,13 +200,28 @@ export function ConversationReply({
     uploadLimitError,
     uploadsPending,
     uploadsFailed,
+    draftId: autosave.draftId,
     onSuccess: (result) => {
+      autosave.reset();
       setBody("");
       setBcc(EMPTY_RECIPIENT_FIELD);
       onSent(result);
     },
   });
   const busy = submission.busy;
+
+  async function discardReply() {
+    try {
+      await autosave.discard();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Draft could not be discarded");
+      return;
+    }
+    for (const asset of session.getSnapshot().assets) session.remove(asset.id);
+    autosave.reset();
+    setBody("");
+    setBcc(EMPTY_RECIPIENT_FIELD);
+  }
   const linkedIds = snapshot.linkedAssetIds;
   const toAddresses = new Set(
     (action?.to ?? []).map(normalizeExternalEmailAddress),
@@ -321,6 +388,16 @@ export function ConversationReply({
             >
               <Paperclip /><span className="sr-only">Add attachments</span>
             </InputGroupButton>
+            {body.trim() || activeAssets.length ? (
+              <InputGroupButton
+                size="icon-sm"
+                disabled={busy}
+                title="Discard draft"
+                onClick={() => void discardReply()}
+              >
+                <Trash2 /><span className="sr-only">Discard draft</span>
+              </InputGroupButton>
+            ) : null}
             <InputGroupText
               className={cn(
                 "min-w-0 flex-1 text-xs",

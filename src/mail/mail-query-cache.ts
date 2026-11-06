@@ -18,6 +18,7 @@ async function refreshMailboxQueries(
       client.invalidateQueries({ queryKey: ["folders", mailboxId] }),
       client.invalidateQueries({ queryKey: ["conversations", mailboxId] }),
       client.invalidateQueries({ queryKey: ["conversation", mailboxId] }),
+      client.invalidateQueries({ queryKey: ["drafts", mailboxId] }),
     ]),
   ]);
   const failures = results.flatMap((result) =>

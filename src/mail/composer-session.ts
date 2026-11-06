@@ -309,6 +309,17 @@ export class ComposerSession {
     this.disposed = true;
   }
 
+  /** Adds uploads that already exist on the server, e.g. from a saved draft. */
+  restoreAssets(assets: readonly ComposerAsset[]) {
+    if (!assets.length) return;
+    this.publish({ ...this.snapshot, assets: [...this.snapshot.assets, ...assets] });
+  }
+
+  /** Keeps every current upload when the composer closes; a saved draft owns them. */
+  retainAll() {
+    this.claimedAssetIds = new Set(this.snapshot.assets.map((asset) => asset.id));
+  }
+
   close = () => {
     if (this.disposed) return;
     this.disposed = true;
@@ -458,10 +469,13 @@ function setsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>) {
 export function useComposerSession(
   mailboxId: string,
   reservedAssets?: ReadonlyArray<{ size: number }>,
+  restoredAssets: readonly ComposerAsset[] = [],
 ) {
-  const [session] = useState(
-    () => new ComposerSession(mailboxId, reservedAssets),
-  );
+  const [session] = useState(() => {
+    const created = new ComposerSession(mailboxId, reservedAssets);
+    created.restoreAssets(restoredAssets);
+    return created;
+  });
   const snapshot = useSyncExternalStore(
     session.subscribe,
     session.getSnapshot,

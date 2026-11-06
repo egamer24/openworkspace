@@ -33,6 +33,24 @@ import {
   MinimizedComposer,
 } from "./compose-window-chrome";
 import { useComposeSubmission } from "./use-compose-submission";
+import {
+  draftAssets,
+  draftAttachments,
+  useDraftAutosave,
+  type SavedDraft,
+} from "./use-draft-autosave";
+import { recipientsWithPendingInput } from "./composer-recipients";
+
+function recipientField(addresses: readonly string[] = []): RecipientFieldValue {
+  return {
+    recipients: addresses.map((address) => ({ address, name: null })),
+    input: "",
+  };
+}
+
+function addresses(value: RecipientFieldValue) {
+  return recipientsWithPendingInput(value).map((recipient) => recipient.address);
+}
 
 const EMPTY_RECIPIENT_FIELD: RecipientFieldValue = {
   recipients: [],
@@ -49,25 +67,41 @@ const EMPTY_CONTENT: ComposerContent = {
 export function ComposeWindow({
   mailbox,
   forwardedMessage,
+  draft,
   onClose,
 }: {
   mailbox: Mailbox;
   forwardedMessage?: Pick<
     MessageDetail,
-    "id" | "subject" | "fromAddress" | "fromName" | "preview" | "attachments"
+    | "id"
+    | "conversationId"
+    | "subject"
+    | "fromAddress"
+    | "fromName"
+    | "preview"
+    | "attachments"
   >;
+  /** A saved draft to reopen. */
+  draft?: SavedDraft;
   onClose: () => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
   const editor = useRef<ComposerEditorHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const inlineFileInput = useRef<HTMLInputElement>(null);
-  const [to, setTo] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [cc, setCc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [bcc, setBcc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [replyTo, setReplyTo] = useState("");
+  const [to, setTo] = useState<RecipientFieldValue>(
+    () => draft ? recipientField(draft.toJson) : EMPTY_RECIPIENT_FIELD,
+  );
+  const [cc, setCc] = useState<RecipientFieldValue>(
+    () => draft ? recipientField(draft.ccJson) : EMPTY_RECIPIENT_FIELD,
+  );
+  const [bcc, setBcc] = useState<RecipientFieldValue>(
+    () => draft ? recipientField(draft.bccJson) : EMPTY_RECIPIENT_FIELD,
+  );
+  const [replyTo, setReplyTo] = useState(draft?.replyTo ?? "");
   const [subject, setSubject] = useState(
-    () => forwardedMessage ? forwardSubject(forwardedMessage.subject) : "",
+    () => draft?.subject
+      ?? (forwardedMessage ? forwardSubject(forwardedMessage.subject) : ""),
   );
   const [content, setContent] = useState<ComposerContent>(EMPTY_CONTENT);
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
@@ -76,6 +110,7 @@ export function ComposeWindow({
   const { session, snapshot } = useComposerSession(
     mailbox.id,
     forwardedMessage?.attachments,
+    draft ? draftAssets(mailbox.id, draft) : [],
   );
 
   const recipients = validateComposerRecipients({
@@ -121,6 +156,34 @@ export function ComposeWindow({
   const uploadsFailed = activeAssets.some(
     (asset) => asset.status === "error",
   );
+  const autosave = useDraftAutosave({
+    mailboxId: mailbox.id,
+    session,
+    restored: draft,
+    enabled: snapshot.phase === "editing" && mailbox.canSend,
+    changeKey: JSON.stringify([
+      addresses(to),
+      addresses(cc),
+      addresses(bcc),
+      replyTo,
+      subject,
+      content.bodyHtml,
+      draftAttachments(activeAssets),
+    ]),
+    buildPayload: () => ({
+      kind: forwardedMessage ? "forward" : "compose",
+      sourceMessageId: forwardedMessage?.id ?? null,
+      conversationId: forwardedMessage?.conversationId ?? null,
+      to: addresses(to),
+      cc: addresses(cc),
+      bcc: addresses(bcc),
+      replyTo: replyTo.trim() || null,
+      subject,
+      editorBody: editor.current?.html() ?? "",
+      bodyText: editor.current?.content().bodyText ?? content.bodyText,
+      attachments: draftAttachments(activeAssets),
+    }),
+  });
   const submission = useComposeSubmission({
     session,
     phase: snapshot.phase,
@@ -134,6 +197,7 @@ export function ComposeWindow({
     uploadLimitError: attachmentError,
     uploadsPending,
     uploadsFailed,
+    draftId: autosave.draftId,
     onClose,
   });
   const busy = submission.busy;
@@ -178,9 +242,26 @@ export function ComposeWindow({
     if (attachments.length) addAttachmentFiles(attachments);
   }
 
-  function closeComposer() {
+  async function closeComposer() {
     if (busy) {
       toast.error("Wait for the message to finish sending");
+      return;
+    }
+    // A saved draft keeps its uploads; closing must not discard them.
+    if (await autosave.flush()) session.retainAll();
+    session.close();
+    onClose();
+  }
+
+  async function discardComposer() {
+    if (busy) {
+      toast.error("Wait for the message to finish sending");
+      return;
+    }
+    try {
+      await autosave.discard();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Draft could not be discarded");
       return;
     }
     session.close();
@@ -192,7 +273,7 @@ export function ComposeWindow({
       <MinimizedComposer
         subject={subject}
         onRestore={() => setMinimized(false)}
-        onClose={closeComposer}
+        onClose={() => void closeComposer()}
       />
     );
   }
@@ -231,7 +312,8 @@ export function ComposeWindow({
         <ComposeWindowHeader
           from={mailbox.address}
           onMinimize={() => setMinimized(true)}
-          onClose={closeComposer}
+          onDiscard={() => void discardComposer()}
+          onClose={() => void closeComposer()}
         />
 
         <ComposerRecipientFields
@@ -269,6 +351,10 @@ export function ComposeWindow({
           onSubmitShortcut={() => form.current?.requestSubmit()}
           dragging={dragging}
           disabled={busy}
+          initialHtml={draft?.editorBody}
+          initialAttachments={draft
+            ? session.getSnapshot().assets.filter((asset) => asset.intent === "attachment")
+            : undefined}
         />
 
         <ComposerAttachmentList

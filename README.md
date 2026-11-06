@@ -211,6 +211,7 @@ Outbound mail is logged locally instead of sent. To test push locally, add a key
 - **Recover access** — admin issues a one-hour recovery link; redeeming it replaces all passkeys and removes existing sessions and push registrations.
 - **Settings** — each person manages their avatar, appearance, current-device push subscription, and per-mailbox notification preferences.
 - **Mailboxes** — an admin can create multiple personal addresses for a user or shared addresses with read-only or read-and-send members. Each user has one primary personal mailbox for identity and recovery.
+- **Drafts** — the composer and inline reply save to the server about two seconds after you stop typing, and when you close them. Drafts are private to their author, even in shared mailboxes, and listed under **Drafts** for each mailbox you can send from. Their attachments are kept outside the seven-day upload cleanup until the draft is sent or discarded. If the same draft is edited in two windows, the second save is rejected instead of overwriting the first.
 - **PWA notifications** — desktop and Android browsers can subscribe from Settings. On iPhone and iPad, first add OpenWorkspace to the Home Screen, then enable notifications from the installed app.
 
 ### Connect an MCP client

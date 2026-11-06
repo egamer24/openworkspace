@@ -54,12 +54,14 @@ import {
 } from "./folder-model";
 import {
   conversations,
+  drafts,
   emailReadStates,
   emails,
   folders,
   mailboxAiConfiguration,
   pendingInbound,
   pendingObjectDeletions,
+  type Draft,
   type Email,
   type FolderRecord,
   type NewEmail,
@@ -160,6 +162,15 @@ export type InboundDeliveryInput = {
   envelopeTo: string;
   receivedAt: number;
 };
+
+export type DraftInput = Omit<Draft, "userId" | "version" | "updatedAt">;
+
+export type SaveDraftResult =
+  | { status: "saved"; draft: Draft }
+  | { status: "conflict"; draft: Draft | null }
+  | { status: "limit" };
+
+const MAX_DRAFTS_PER_USER = 500;
 
 export type FolderListItem = {
   id: string;
@@ -587,6 +598,65 @@ export class MailboxDO extends DurableObject<Env> {
         ? { timelineAt: Number(last.timeline_at), emailId: last.email_id }
         : null,
     };
+  }
+
+  listDrafts(userId: string) {
+    return this.db
+      .select()
+      .from(drafts)
+      .where(eq(drafts.userId, userId))
+      .orderBy(desc(drafts.updatedAt))
+      .all();
+  }
+
+  getDraft(userId: string, id: string): Draft | null {
+    return this.db
+      .select()
+      .from(drafts)
+      .where(and(eq(drafts.id, id), eq(drafts.userId, userId)))
+      .all()[0] ?? null;
+  }
+
+  /** Optimistic concurrency: a write must name the version it was based on (0 for a new draft). */
+  saveDraft(userId: string, input: DraftInput, expectedVersion: number): SaveDraftResult {
+    const result = this.db.transaction((tx): SaveDraftResult => {
+      const existing = tx.select().from(drafts).where(eq(drafts.id, input.id)).all()[0];
+      if (existing && existing.userId !== userId) return { status: "conflict", draft: null };
+      if ((existing?.version ?? 0) !== expectedVersion) {
+        return { status: "conflict", draft: existing ?? null };
+      }
+      if (!existing) {
+        const [{ count }] = tx
+          .select({ count: sql<number>`count(*)` })
+          .from(drafts)
+          .where(eq(drafts.userId, userId))
+          .all() as [{ count: number }];
+        if (count >= MAX_DRAFTS_PER_USER) return { status: "limit" };
+      }
+      const draft: Draft = {
+        ...input,
+        userId,
+        version: expectedVersion + 1,
+        updatedAt: new Date(),
+      };
+      tx.insert(drafts)
+        .values(draft)
+        .onConflictDoUpdate({ target: drafts.id, set: draft })
+        .run();
+      return { status: "saved", draft };
+    });
+    if (result.status === "saved") this.publishUpdate();
+    return result;
+  }
+
+  deleteDraft(userId: string, id: string): Draft | null {
+    const deleted = this.db
+      .delete(drafts)
+      .where(and(eq(drafts.id, id), eq(drafts.userId, userId)))
+      .returning()
+      .all()[0] ?? null;
+    if (deleted) this.publishUpdate();
+    return deleted;
   }
 
   getFolder(id: string): MailFolder | null {

@@ -3,7 +3,7 @@ import { zValidator } from "@hono/zod-validator";
 import { attachmentPreview } from "../../shared/attachment-preview";
 import { officePreviewKey } from "../../shared/office-preview";
 import { desc, eq } from "drizzle-orm";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
   baseSubject,
   isComposerInlineImageContentType,
@@ -76,6 +76,7 @@ import {
   fetchProxiedRemoteMedia,
 } from "./remote-proxy";
 import { checkRateLimit } from "../lib/rate-limit";
+import { discardDraft } from "./drafts";
 import {
   createComposerUploadIntent,
   DirectUploadUnavailableError,
@@ -248,6 +249,20 @@ function outgoingResponse(email: Email, detached: boolean) {
       (file) => file.delivery === "download_link",
     ).length,
   };
+}
+
+function discardSentDraft(
+  c: Context<AppEnv>,
+  input: { mailboxId: string; draftId?: string },
+) {
+  const { draftId } = input;
+  if (!draftId) return;
+  c.executionCtx.waitUntil(
+    discardDraft(c.env, input.mailboxId, c.get("user").id, draftId).catch((error) => {
+      // The message is already accepted; a leftover draft is harmless.
+      console.error("Could not discard sent draft", error);
+    }),
+  );
 }
 
 function outgoingFailure(
@@ -499,20 +514,31 @@ export const mailRoutes = new Hono<AppEnv>()
     if (!access) {
       return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
     }
-    const storedFolders = await mailboxStub(c.env, mailboxId).listFolders(
-      c.get("user").id,
-    );
-    return c.json({
-      ok: true as const,
-      folders: storedFolders.map((folder) => ({
-        id: folder.id,
-        name: folder.name,
-        kind: folder.kind,
-        systemType: folder.systemType,
-        totalCount: folder.totalCount,
-        unreadCount: folder.unreadCount,
-      })),
-    });
+    const stub = mailboxStub(c.env, mailboxId);
+    const storedFolders = await stub.listFolders(c.get("user").id);
+    const folders = storedFolders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      kind: folder.kind,
+      systemType: folder.systemType as typeof folder.systemType | "drafts",
+      totalCount: folder.totalCount,
+      unreadCount: folder.unreadCount,
+    }));
+    if (access.canSend) {
+      // Drafts are per author and are not conversations, so they are listed
+      // by /drafts; this entry only places the view in folder navigation.
+      const draftCount = (await stub.listDrafts(c.get("user").id)).length;
+      const sentIndex = folders.findIndex((folder) => folder.systemType === "sent");
+      folders.splice(sentIndex < 0 ? folders.length : sentIndex, 0, {
+        id: "drafts",
+        name: "Drafts",
+        kind: "system",
+        systemType: "drafts",
+        totalCount: draftCount,
+        unreadCount: draftCount,
+      });
+    }
+    return c.json({ ok: true as const, folders });
   })
   .get("/mailboxes/:id/ai", async (c) => {
     const mailboxId = c.req.param("id");
@@ -1333,6 +1359,7 @@ export const mailRoutes = new Hono<AppEnv>()
         fromName: access.displayName,
         defer: (task) => c.executionCtx.waitUntil(task),
       });
+      discardSentDraft(c, input);
       return c.json(
         outgoingResponse(submission.email, false),
         submission.inserted ? 201 : 200,
@@ -1388,6 +1415,7 @@ export const mailRoutes = new Hono<AppEnv>()
           fromName: access.displayName,
           defer: (task) => c.executionCtx.waitUntil(task),
         });
+        discardSentDraft(c, input);
         return c.json(
           outgoingResponse(submission.email, context.detached),
           submission.inserted ? 201 : 200,
@@ -1433,6 +1461,7 @@ export const mailRoutes = new Hono<AppEnv>()
           fromName: access.displayName,
           defer: (task) => c.executionCtx.waitUntil(task),
         });
+        discardSentDraft(c, input);
         return c.json(
           outgoingResponse(submission.email, false),
           submission.inserted ? 201 : 200,

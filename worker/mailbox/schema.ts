@@ -6,10 +6,11 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { transportStates } from "../../shared/mail";
+import { replyActionModes, transportStates } from "../../shared/mail";
 import { mailboxStates } from "./folder-model";
 import type {
   EmailAiClassification,
+  DraftAttachment,
   EmailAuthenticationResults,
   MailAddress,
   RecipientDeliveryStatus,
@@ -242,8 +243,39 @@ export const emailReadStates = sqliteTable(
   ],
 );
 
+/** One composer's saved state. A draft belongs to its author, even in shared mailboxes. */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    kind: text("kind", { enum: ["compose", "reply", "forward"] }).notNull(),
+    replyMode: text("reply_mode", { enum: replyActionModes }),
+    sourceMessageId: text("source_message_id"),
+    conversationId: text("conversation_id"),
+    toJson: text("to_json", { mode: "json" }).$type<string[]>().notNull(),
+    ccJson: text("cc_json", { mode: "json" }).$type<string[]>().notNull(),
+    bccJson: text("bcc_json", { mode: "json" }).$type<string[]>().notNull(),
+    replyTo: text("reply_to"),
+    subject: text("subject").notNull(),
+    /** Editor HTML with `data-composer-asset` references, or plain text for replies. */
+    editorBody: text("editor_body").notNull(),
+    bodyText: text("body_text").notNull(),
+    attachmentsJson: text("attachments_json", { mode: "json" })
+      .$type<DraftAttachment[]>()
+      .notNull(),
+    version: integer("version").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    index("drafts_user_updated_idx").on(table.userId, table.updatedAt),
+  ],
+);
+
 export type Email = typeof emails.$inferSelect;
 export type NewEmail = typeof emails.$inferInsert;
+export type Draft = typeof drafts.$inferSelect;
+export type NewDraft = typeof drafts.$inferInsert;
 export type EmailReadState = typeof emailReadStates.$inferSelect;
 export type PendingInbound = typeof pendingInbound.$inferSelect;
 export type PendingObjectDeletion = typeof pendingObjectDeletions.$inferSelect;

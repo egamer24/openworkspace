@@ -155,6 +155,8 @@ export const outboundContentFields = {
 
 const outboundRequestFields = {
   requestId: z.uuid(),
+  /** Deleted with its stored attachments once the message is accepted. */
+  draftId: z.string().max(80).optional(),
   ...outboundContentFields,
 };
 

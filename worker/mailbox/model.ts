@@ -51,3 +51,14 @@ export type StoredAttachment = {
   downloadExpiresAt: number | null;
   pdfPreviewStatus?: import("../../shared/office-preview").PdfPreviewStatus;
 };
+
+export type DraftAttachment = {
+  /** The composer's asset id, referenced from the editor HTML. */
+  assetId: string;
+  uploadId: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  intent: "attachment" | "inline";
+  contentId: string | null;
+};

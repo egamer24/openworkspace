@@ -26,7 +26,9 @@ export function folderDisplayName(folder: Folder, folders?: MailFolder[]) {
 }
 
 export function folderShowsUnreadCount(folder: MailFolder | undefined) {
-  return folder?.kind === "custom" || folder?.systemType === "inbox";
+  return folder?.kind === "custom"
+    || folder?.systemType === "inbox"
+    || folder?.systemType === "drafts";
 }
 
 export function FolderTabBar({

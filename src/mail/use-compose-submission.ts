@@ -36,6 +36,7 @@ type ComposeSubmissionInput = {
   uploadLimitError: string | null;
   uploadsPending: boolean;
   uploadsFailed: boolean;
+  draftId: string;
   onClose: () => void;
 };
 
@@ -120,6 +121,7 @@ async function prepareComposeSubmission(
       ? content.bodyHtml
       : undefined,
     uploadedAttachments,
+    draftId: input.draftId,
   };
   const command: MailSendDraft = input.forwardedMessage
     ? {
