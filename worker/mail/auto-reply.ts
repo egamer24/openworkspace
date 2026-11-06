@@ -54,7 +54,7 @@ export function messageSkipReason(input: {
   headers: Map<string, string>;
   envelopeFrom: string;
   mailboxAddress: string;
-  email: Pick<Email, "toJson" | "ccJson" | "fromJson">;
+  email: Pick<Email, "toJson" | "ccJson" | "fromJson"> & Partial<Pick<Email, "attachmentsJson">>;
 }): string | null {
   const { headers } = input;
   const autoSubmitted = headers.get("auto-submitted")?.split(";", 1)[0]?.trim().toLowerCase();
@@ -70,6 +70,14 @@ export function messageSkipReason(input: {
   // iTIP responses carry no Auto-Submitted header but are machine generated.
   if (/method\s*=\s*"?(reply|cancel)/iu.test(headers.get("content-type") ?? "")) {
     return "calendar response";
+  }
+  // Google, Outlook and the calendar invitations proposal send iTIP as an
+  // .ics part inside multipart mail; never auto-answer calendar traffic.
+  if ((input.email.attachmentsJson ?? []).some((file) =>
+    /^(text\/calendar|application\/ics)\b/iu.test(file.contentType)
+    || /\.ics$/iu.test(file.filename)
+  )) {
+    return "calendar message";
   }
 
   const sender = input.envelopeFrom.trim().replace(/^<|>$/gu, "");

@@ -77,6 +77,26 @@ describe("auto-reply rules", () => {
     expect(skipReason([], envelopeFrom)).toBe(reason);
   });
 
+  it("skips calendar invitations and responses sent as .ics attachments", () => {
+    const withAttachment = (contentType: string, filename: string) => messageSkipReason({
+      headers: headersOf(["Content-Type: multipart/mixed; boundary=x"]),
+      envelopeFrom: "alice@example.net",
+      mailboxAddress: own,
+      email: {
+        fromJson: [{ address: "alice@example.net", name: null }],
+        toJson: [{ address: own, name: null }],
+        ccJson: [],
+        attachmentsJson: [{
+          id: "att", r2Key: "k", filename, contentType, size: 10, contentId: null,
+          disposition: "attachment", delivery: "attached", downloadTokenHash: null, downloadExpiresAt: null,
+        }],
+      },
+    });
+    expect(withAttachment("text/calendar", "invite.ics")).toBe("calendar message");
+    expect(withAttachment("application/octet-stream", "Reply.ICS")).toBe("calendar message");
+    expect(withAttachment("application/pdf", "invoice.pdf")).toBeNull();
+  });
+
   it("skips mail that does not address the mailbox directly", () => {
     expect(skipReason([], "alice@example.net", "someone-else@example.test"))
       .toBe("not addressed directly");
