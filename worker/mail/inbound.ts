@@ -113,6 +113,8 @@ export async function prepareInboundEmail(input: {
   job: PendingInbound;
   rawMime: ArrayBuffer;
   resolveParent: (inReplyTo: string[], references: string[]) => Email | null;
+  /** Imports use the message's own Date header, falling back to job.receivedAt. */
+  preferHeaderDate?: boolean;
 }): Promise<NewEmail> {
   const { job } = input;
   const parsed = await parseMime(input.rawMime);
@@ -206,8 +208,13 @@ export async function prepareInboundEmail(input: {
     attachmentsJson: attachments,
     listId: parsedListId,
     listPostAddress: parsedListPost,
-    timelineAt: job.receivedAt,
+    timelineAt: input.preferHeaderDate ? headerDate(parsed.date) ?? job.receivedAt : job.receivedAt,
     transportState: "received",
     deliveryStatusJson: [],
   };
+}
+
+function headerDate(value: string | undefined) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
 }

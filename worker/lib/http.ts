@@ -11,11 +11,12 @@ export type ApiErrorCode =
   | "RATE_LIMITED"
   | "BAD_GATEWAY"
   | "UPGRADE_REQUIRED"
-  | "UNAVAILABLE";
+  | "UNAVAILABLE"
+  | "PAYLOAD_TOO_LARGE";
 
 export function apiError(
   c: Context,
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 426 | 429 | 502 | 503,
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 422 | 426 | 429 | 502 | 503,
   code: ApiErrorCode,
   message: string,
 ) {

@@ -39,6 +39,7 @@ import {
 } from "../mail/participants";
 import { listActiveMailboxSessions } from "../mail/mailbox-directory";
 import { buildEmailSearchQuery } from "../mail/search";
+import { createId } from "../lib/ids";
 import {
   deferWebhookTask,
   emailWebhookEventId,
@@ -160,6 +161,24 @@ export type InboundDeliveryInput = {
   envelopeTo: string;
   receivedAt: number;
 };
+
+export type MailImportInput = {
+  deliveryId: string;
+  rawObjectKey: string;
+  raw: ArrayBuffer;
+  mailboxAddress: string;
+  direction: "incoming" | "outgoing" | "auto";
+  state: MailboxState;
+  folder: string | null;
+  seen: boolean;
+  readerUserIds: string[];
+  /** Epoch ms; null uses the message's Date header, then now. */
+  receivedAt: number | null;
+};
+
+export type MailImportResult =
+  | { status: "imported" | "duplicate"; messageId: string }
+  | { status: "unparseable" | "invalid_folder"; message: string };
 
 export type FolderListItem = {
   id: string;
@@ -1185,6 +1204,117 @@ export class MailboxDO extends DurableObject<Env> {
     });
     this.recentParticipantSources = null;
     return this.getEmail(email.id);
+  }
+
+  /**
+   * Stores a historical message without the live-delivery side effects: no AI
+   * classification, webhook, push notification, Office preview job, and never
+   * the outbound send path.
+   */
+  async importEmail(input: MailImportInput): Promise<MailImportResult> {
+    const messageId = inboundMessageId(input.deliveryId);
+    if (this.getEmail(messageId)) return { status: "duplicate", messageId };
+
+    const now = new Date();
+    const job: PendingInbound = {
+      id: input.deliveryId,
+      rawObjectKey: input.rawObjectKey,
+      envelopeFrom: "",
+      envelopeTo: input.mailboxAddress,
+      receivedAt: input.receivedAt === null ? now : new Date(input.receivedAt),
+      attempts: 0,
+      aiAttempts: 0,
+      nextAttemptAt: now,
+    };
+    let email: NewEmail;
+    try {
+      email = await prepareInboundEmail({
+      env: this.bindings,
+      mailboxId: this.state.id.name ?? "unknown-mailbox",
+      job,
+      rawMime: input.raw,
+      resolveParent: (inReplyTo, references) =>
+        this.resolveParent(inReplyTo, references),
+      preferHeaderDate: input.receivedAt === null,
+      });
+    } catch (error) {
+      if (!(error instanceof UnprocessableInboundEmailError)) throw error;
+      return { status: "unparseable", message: error.message };
+    }
+    const outgoing = input.direction === "auto"
+      ? email.fromJson[0]?.address.toLowerCase() === input.mailboxAddress.toLowerCase()
+      : input.direction === "outgoing";
+    if (outgoing) {
+      email = { ...email, direction: "outgoing", transportState: "submitted" };
+    }
+
+    const folderId = input.folder ? this.importFolderId(input.folder) : null;
+    if (folderId && typeof folderId !== "string") return folderId;
+    const stored = this.db.transaction((tx) => {
+      const previous = tx
+        .select({ mailboxState: conversations.mailboxState })
+        .from(conversations)
+        .where(eq(conversations.id, email.conversationId))
+        .all()[0];
+      const inserted = tx.insert(emails).values(email)
+        .onConflictDoNothing()
+        .returning({ id: emails.id })
+        .all();
+      if (!inserted.length) return false;
+
+      const conversation = tx
+        .select({ latestEmailId: conversations.latestEmailId })
+        .from(conversations)
+        .where(eq(conversations.id, email.conversationId))
+        .all()[0];
+      // The insert trigger reactivates archived/trashed threads. The newest
+      // message decides where the thread lives, regardless of import order.
+      if (conversation?.latestEmailId === email.id) {
+        tx.update(conversations)
+          .set({
+            mailboxState: input.state,
+            folderId: input.state === "active" ? folderId : null,
+          })
+          .where(eq(conversations.id, email.conversationId))
+          .run();
+      } else if (previous) {
+        tx.update(conversations)
+          .set({ mailboxState: previous.mailboxState })
+          .where(eq(conversations.id, email.conversationId))
+          .run();
+      }
+      if (input.seen && !outgoing && input.readerUserIds.length) {
+        tx.insert(emailReadStates)
+          .values(input.readerUserIds.map((userId) => ({
+            userId,
+            emailId: email.id,
+            readAt: now,
+          })))
+          .onConflictDoNothing()
+          .run();
+      }
+      return true;
+    });
+    if (!stored) return { status: "duplicate", messageId };
+    this.recentParticipantSources = null;
+    this.publishUpdate();
+    return { status: "imported", messageId };
+  }
+
+  private importFolderId(name: string) {
+    const normalized = name.trim().toLocaleLowerCase("en-US");
+    const existing = this.db
+      .select({ id: folders.id, name: folders.name })
+      .from(folders)
+      .all()
+      .find((folder) => folder.name.toLocaleLowerCase("en-US") === normalized);
+    if (existing) return existing.id;
+    const created = this.createFolder(createId("fld"), name);
+    if (created.status === "ok") return created.folder.id;
+    return {
+      status: "invalid_folder" as const,
+      message: `Folder "${name}" could not be created (${created.status})`,
+    };
   }
 
   private async classifyInbound(rawMime: ArrayBuffer) {
