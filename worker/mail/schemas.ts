@@ -117,8 +117,18 @@ export const outboundAttachmentSchema = z.object({
   }
 });
 
+export const MAX_SIGNATURE_LENGTH = 2_000;
+
+export const signatureSchema = z.object({
+  text: z.string().max(MAX_SIGNATURE_LENGTH).transform((value) => value.trim()),
+  useOnNew: z.boolean().default(true),
+  useOnReply: z.boolean().default(true),
+});
+
 export const outboundMessageContentFields = {
   bodyText: z.string().max(500_000).default(""),
+  /** API and MCP callers opt in; the web composer inserts signatures itself. */
+  includeSignature: z.boolean().optional(),
   bodyHtml: z.string().max(1_000_000).optional(),
   attachments: z
     .array(outboundAttachmentSchema)

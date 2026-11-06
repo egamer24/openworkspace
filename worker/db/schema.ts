@@ -127,6 +127,28 @@ export const mailboxMembers = sqliteTable(
   ],
 );
 
+export const mailboxSignatures = sqliteTable(
+  "mailbox_signatures",
+  {
+    mailboxId: text("mailbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    text: text("text").notNull(),
+    useOnNew: integer("use_on_new", { mode: "boolean" }).notNull().default(true),
+    useOnReply: integer("use_on_reply", { mode: "boolean" }).notNull().default(true),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.mailboxId, table.userId] }),
+    index("mailbox_signatures_user_idx").on(table.userId),
+  ],
+);
+
 export const mailboxNotificationPreferences = sqliteTable(
   "mailbox_notification_preferences",
   {

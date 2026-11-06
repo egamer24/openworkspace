@@ -211,6 +211,7 @@ Outbound mail is logged locally instead of sent. To test push locally, add a key
 - **Recover access** — admin issues a one-hour recovery link; redeeming it replaces all passkeys and removes existing sessions and push registrations.
 - **Settings** — each person manages their avatar, appearance, current-device push subscription, and per-mailbox notification preferences.
 - **Mailboxes** — an admin can create multiple personal addresses for a user or shared addresses with read-only or read-and-send members. Each user has one primary personal mailbox for identity and recovery.
+- **Signatures** — under **Settings → Signatures**, each person sets a plain-text signature per mailbox they can send from, and chooses whether it's added to new messages, replies and forwards. API and MCP sends add it only when the request sets `"includeSignature": true`, so automated mail is unchanged by default.
 - **PWA notifications** — desktop and Android browsers can subscribe from Settings. On iPhone and iPad, first add OpenWorkspace to the Home Screen, then enable notifications from the installed app.
 
 ### Connect an MCP client

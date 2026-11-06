@@ -269,6 +269,12 @@ export function ComposeWindow({
           onSubmitShortcut={() => form.current?.requestSubmit()}
           dragging={dragging}
           disabled={busy}
+          initialText={
+            mailbox.signature
+            && (forwardedMessage ? mailbox.signature.useOnReply : mailbox.signature.useOnNew)
+              ? mailbox.signature.text
+              : undefined
+          }
         />
 
         <ComposerAttachmentList

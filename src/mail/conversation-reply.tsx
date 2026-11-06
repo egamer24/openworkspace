@@ -93,7 +93,9 @@ export function ConversationReply({
 }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const initialAction = findAction(parent, mode);
-  const [body, setBody] = useState("");
+  const signature = mailbox?.signature?.useOnReply ? mailbox.signature.text : "";
+  const initialBody = signature ? `\n\n${signature}` : "";
+  const [body, setBody] = useState(initialBody);
   const [cc, setCc] = useState(
     () => recipientField(initialAction?.cc ?? []),
   );
@@ -149,7 +151,7 @@ export function ConversationReply({
     uploadsPending,
     uploadsFailed,
     onSuccess: (result) => {
-      setBody("");
+      setBody(initialBody);
       setBcc(EMPTY_RECIPIENT_FIELD);
       onSent(result);
     },
