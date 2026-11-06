@@ -11,8 +11,14 @@ import {
   accountApiTokens,
   domains,
   mailboxes,
+  oidcAccessTokens,
+  oidcAuthorizationCodes,
+  oidcAuthorizationRequests,
+  oidcGrants,
+  oidcRefreshTokens,
   passkeyCredentials,
   pushSubscriptions,
+  samlAuthnRequests,
   sessions,
   users,
 } from "../db/schema";
@@ -28,6 +34,23 @@ import {
 } from "./webauthn";
 import { provisionBootstrapAccount } from "./personal-account";
 import { AuthRequestError, authConflict } from "./errors";
+
+// Everything a relying party can still use on the user's behalf: pending
+// OIDC/SAML requests, issued tokens, and remembered consent.
+export function federatedAccessRevocations(db: Database, userId: string) {
+  return [
+    db
+      .delete(oidcAuthorizationRequests)
+      .where(eq(oidcAuthorizationRequests.userId, userId)),
+    db
+      .delete(oidcAuthorizationCodes)
+      .where(eq(oidcAuthorizationCodes.userId, userId)),
+    db.delete(oidcAccessTokens).where(eq(oidcAccessTokens.userId, userId)),
+    db.delete(oidcRefreshTokens).where(eq(oidcRefreshTokens.userId, userId)),
+    db.delete(oidcGrants).where(eq(oidcGrants.userId, userId)),
+    db.delete(samlAuthnRequests).where(eq(samlAuthnRequests.userId, userId)),
+  ] as const;
+}
 
 export async function hasUsers(db: Database) {
   const [user] = await db
@@ -278,6 +301,7 @@ export async function finishAccessLinkRegistration(
       db
         .delete(accountApiTokens)
         .where(eq(accountApiTokens.userId, challenge.userId)),
+      ...federatedAccessRevocations(db, challenge.userId),
       insertCredential,
       consumeLink,
     ] as const);

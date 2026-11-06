@@ -35,7 +35,6 @@ import {
   samlApplicationAssignments,
   samlApplicationGroupClaims,
   samlApplications,
-  samlAuthnRequests,
   sessions,
   users,
   bookingHandles,
@@ -58,6 +57,7 @@ import {
   RECOVERY_TTL_MS,
 } from "../auth/constants";
 import { personalAccountRecords } from "../auth/personal-account";
+import { federatedAccessRevocations } from "../auth/service";
 import {
   createInvitationSchema,
   createOidcClientSchema,
@@ -607,22 +607,7 @@ export const adminRoutes = new Hono<AppEnv>()
                 isNull(accessLinks.consumedAt),
               ),
             ),
-          db
-            .delete(oidcAuthorizationRequests)
-            .where(eq(oidcAuthorizationRequests.userId, userId)),
-          db
-            .delete(oidcAuthorizationCodes)
-            .where(eq(oidcAuthorizationCodes.userId, userId)),
-          db
-            .delete(oidcAccessTokens)
-            .where(eq(oidcAccessTokens.userId, userId)),
-          db
-            .delete(oidcRefreshTokens)
-            .where(eq(oidcRefreshTokens.userId, userId)),
-          db.delete(oidcGrants).where(eq(oidcGrants.userId, userId)),
-          db
-            .delete(samlAuthnRequests)
-            .where(eq(samlAuthnRequests.userId, userId)),
+          ...federatedAccessRevocations(db, userId),
         ] as const;
         if (personalMailboxUpdate) {
           await db.batch([userUpdate, personalMailboxUpdate, ...revocations]);
