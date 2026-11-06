@@ -117,10 +117,11 @@ export const outboundAttachmentSchema = z.object({
   }
 });
 
-export const MAX_SIGNATURE_LENGTH = 2_000;
+export const MAX_SIGNATURE_HTML_LENGTH = 20_000;
 
 export const signatureSchema = z.object({
-  text: z.string().max(MAX_SIGNATURE_LENGTH).transform((value) => value.trim()),
+  /** Sanitized on save; see worker/lib/sanitize-html.ts. */
+  html: z.string().max(MAX_SIGNATURE_HTML_LENGTH),
   useOnNew: z.boolean().default(true),
   useOnReply: z.boolean().default(true),
 });

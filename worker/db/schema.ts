@@ -136,6 +136,9 @@ export const mailboxSignatures = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** Sanitized HTML, as shown in the composer and sent in HTML bodies. */
+    html: text("html").notNull(),
+    /** Plain-text rendering of `html`, for text bodies and the reply box. */
     text: text("text").notNull(),
     useOnNew: integer("use_on_new", { mode: "boolean" }).notNull().default(true),
     useOnReply: integer("use_on_reply", { mode: "boolean" }).notNull().default(true),

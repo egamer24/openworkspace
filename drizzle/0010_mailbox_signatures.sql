@@ -1,6 +1,7 @@
 CREATE TABLE `mailbox_signatures` (
 	`mailbox_id` text NOT NULL,
 	`user_id` text NOT NULL,
+	`html` text NOT NULL,
 	`text` text NOT NULL,
 	`use_on_new` integer DEFAULT true NOT NULL,
 	`use_on_reply` integer DEFAULT true NOT NULL,

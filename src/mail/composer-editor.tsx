@@ -54,8 +54,8 @@ export const ComposerEditor = forwardRef<
     onSubmitShortcut: () => void;
     dragging: boolean;
     disabled: boolean;
-    /** Plain text placed below an empty first line, e.g. a signature. */
-    initialText?: string;
+    /** HTML placed in the editor when it opens, e.g. a signature. */
+    initialHtml?: string;
   }
 >(function ComposerEditor({
   session,
@@ -67,7 +67,7 @@ export const ComposerEditor = forwardRef<
   onSubmitShortcut,
   dragging,
   disabled,
-  initialText,
+  initialHtml,
 }, ref) {
   const callbacks = useRef({
     onChange,
@@ -109,7 +109,7 @@ export const ComposerEditor = forwardRef<
         },
       }),
     ],
-    content: initialText ? `<p></p>${plainTextParagraphs(initialText)}` : "",
+    content: initialHtml ?? "",
     editorProps: {
       attributes: {
         class: [
@@ -248,13 +248,3 @@ export const ComposerEditor = forwardRef<
   );
 });
 
-function plainTextParagraphs(text: string) {
-  const escape = (value: string) => value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-  return text
-    .split(/\n{2,}/u)
-    .map((paragraph) => `<p>${paragraph.split("\n").map(escape).join("<br>")}</p>`)
-    .join("");
-}

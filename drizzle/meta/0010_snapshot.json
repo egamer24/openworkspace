@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f8aa3d38-6e8e-4689-9839-f8e85f0c212a",
+  "id": "5043329f-9b08-4dc3-ba48-943a7ed68d5e",
   "prevId": "94b53e35-9c50-4b5d-92ef-d1bd5d51cc95",
   "tables": {
     "access_link_claims": {
@@ -834,6 +834,13 @@
         },
         "user_id": {
           "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "html": {
+          "name": "html",
           "type": "text",
           "primaryKey": false,
           "notNull": true,

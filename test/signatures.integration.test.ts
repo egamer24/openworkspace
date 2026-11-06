@@ -31,16 +31,23 @@ describe("mailbox signatures", () => {
       `${origin}/api/mail/mailboxes/${mailboxId}/signature`,
       { method: "PUT", headers: json, body: JSON.stringify(body) },
     ));
-    const saved = await save({ text: "  Admin\nExample Co  ", useOnReply: false });
+    const saved = await save({
+      html: '<p><strong>Admin</strong><script>alert(1)</script><br>'
+        + '<a href="https://example.co" onclick="x()">Example Co</a> '
+        + '<a href="javascript:alert(1)">trap</a><img src=x onerror=alert(1)></p>',
+      useOnReply: false,
+    });
     expect(saved.status).toBe(200);
     await saved.json();
     expect((await listMailboxes())[0]!.signature).toEqual({
-      text: "Admin\nExample Co",
+      html: '<p><strong>Admin</strong><br>'
+        + '<a href="https://example.co" rel="noopener noreferrer" target="_blank">Example Co</a> trap</p>',
+      text: "Admin\nExample Co [https://example.co] trap",
       useOnNew: true,
       useOnReply: false,
     });
 
-    const forbidden = await save({ text: "x" }, "mbx_missing");
+    const forbidden = await save({ html: "x" }, "mbx_missing");
     expect(forbidden.status).toBe(403);
     await forbidden.json();
 
@@ -63,9 +70,13 @@ describe("mailbox signatures", () => {
       return (await mailboxStub(env, mailbox!.id).getEmail(messageId))!;
     };
     expect((await send(undefined)).bodyText).toBe("Body");
-    expect((await send(true)).bodyText).toBe("Body\n\nAdmin\nExample Co");
+    const signed = await send(true);
+    expect(signed.bodyText).toBe("Body\n\nAdmin\nExample Co [https://example.co] trap");
+    const signedHtml = await (await env.MAIL_STORAGE.get(signed.bodyHtmlR2Key!))!.text();
+    expect(signedHtml).toContain("<div data-signature><p><strong>Admin</strong><br>");
+    expect(signedHtml).not.toMatch(/script|onclick|javascript:|onerror/u);
 
-    const cleared = await save({ text: "   " });
+    const cleared = await save({ html: "<p></p><p>  </p>" });
     expect(await cleared.json()).toMatchObject({ signature: null });
     expect((await listMailboxes())[0]!.signature).toBeNull();
     expect((await send(true)).bodyText).toBe("Body");

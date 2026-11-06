@@ -77,7 +77,8 @@ import {
   signatureSchema,
   uploadIdSchema,
 } from "./schemas";
-import { withSignature } from "./signatures";
+import { signatureText, withSignature } from "./signatures";
+import { sanitizeHtml } from "../lib/sanitize-html";
 import {
   assertProxyableRemoteUrl,
   fetchProxiedRemoteMedia,
@@ -291,6 +292,7 @@ export const mailRoutes = new Hono<AppEnv>()
         ownerUserId: mailboxes.ownerUserId,
         isPrimary: mailboxes.isPrimary,
         canSend: mailboxMembers.canSend,
+        signatureHtml: mailboxSignatures.html,
         signatureText: mailboxSignatures.text,
         signatureUseOnNew: mailboxSignatures.useOnNew,
         signatureUseOnReply: mailboxSignatures.useOnReply,
@@ -315,6 +317,7 @@ export const mailRoutes = new Hono<AppEnv>()
       const {
         ownerUserId,
         isPrimary: _isPrimary,
+        signatureHtml,
         signatureText,
         signatureUseOnNew,
         signatureUseOnReply,
@@ -322,8 +325,9 @@ export const mailRoutes = new Hono<AppEnv>()
       } = mailbox;
       return {
         ...publicMailbox,
-        signature: signatureText
+        signature: signatureHtml && signatureText
           ? {
+              html: signatureHtml,
               text: signatureText,
               useOnNew: signatureUseOnNew ?? true,
               useOnReply: signatureUseOnReply ?? true,
@@ -344,17 +348,20 @@ export const mailRoutes = new Hono<AppEnv>()
       const mailboxId = c.req.param("id");
       const access = await accessibleMailbox(c.env, userId, mailboxId, "send");
       if (!access) return apiError(c, 403, "FORBIDDEN", "Send access is required");
-      const input = c.req.valid("json");
+      const { html: rawHtml, useOnNew, useOnReply } = c.req.valid("json");
       const db = createDb(c.env.DB);
       const key = and(
         eq(mailboxSignatures.mailboxId, mailboxId),
         eq(mailboxSignatures.userId, userId),
       );
-      if (!input.text) {
+      const html = await sanitizeHtml(rawHtml);
+      const text = signatureText(html);
+      if (!text) {
         await db.delete(mailboxSignatures).where(key);
         return c.json({ ok: true as const, signature: null });
       }
-      const values = { ...input, updatedAt: new Date() };
+      const signature = { html, text, useOnNew, useOnReply };
+      const values = { ...signature, updatedAt: new Date() };
       await db
         .insert(mailboxSignatures)
         .values({ mailboxId, userId, ...values })
@@ -362,7 +369,7 @@ export const mailRoutes = new Hono<AppEnv>()
           target: [mailboxSignatures.mailboxId, mailboxSignatures.userId],
           set: values,
         });
-      return c.json({ ok: true as const, signature: input });
+      return c.json({ ok: true as const, signature });
     },
   )
   .get("/mailboxes/:id/realtime", async (c) => {

@@ -269,10 +269,10 @@ export function ComposeWindow({
           onSubmitShortcut={() => form.current?.requestSubmit()}
           dragging={dragging}
           disabled={busy}
-          initialText={
+          initialHtml={
             mailbox.signature
             && (forwardedMessage ? mailbox.signature.useOnReply : mailbox.signature.useOnNew)
-              ? mailbox.signature.text
+              ? `<p></p>${mailbox.signature.html}`
               : undefined
           }
         />
