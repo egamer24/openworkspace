@@ -261,7 +261,7 @@ function MonthView({
     end: endOfWeek(endOfMonth(cursor), WEEK),
   });
   return (
-    <div className="grid min-h-full min-w-[42rem] grid-cols-7 auto-rows-[minmax(6.5rem,1fr)]">
+    <div className="grid min-h-full min-w-[42rem] grid-cols-7 grid-rows-[auto] auto-rows-[minmax(6.5rem,1fr)]">
       {days.slice(0, 7).map((day) => (
         <div key={`head-${day.getTime()}`} className="border-b border-border px-2 py-1.5 text-xs font-semibold text-muted-foreground">
           {format(day, "EEE")}
