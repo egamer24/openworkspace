@@ -12,7 +12,8 @@ export type ApiErrorCode =
   | "BAD_GATEWAY"
   | "UPGRADE_REQUIRED"
   | "UNAVAILABLE"
-  | "PAYLOAD_TOO_LARGE";
+  | "PAYLOAD_TOO_LARGE"
+  | "QUOTA_EXCEEDED";
 
 export function apiError(
   c: Context,

@@ -1,5 +1,8 @@
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, HardDrive } from "lucide-react";
+import { toast } from "sonner";
 import { Dialog, DialogTrigger } from "@/components/ui/dialog";
+import { useDriveStatus } from "@/drive/drive-status";
+import { api, responseJson } from "@/lib/api";
 import { attachmentPreview } from "../../shared/attachment-preview";
 import { AttachmentPreviewDialog } from "./attachment-preview-dialog";
 import { formatBytes } from "./format-bytes";
@@ -16,7 +19,19 @@ export function MessageAttachments({
   mailboxId?: string;
   attachments: MessageAttachment[];
 }) {
+  const drive = useDriveStatus();
   if (!attachments.length) return null;
+
+  async function saveToDrive(attachmentId: string) {
+    try {
+      const { item } = await responseJson(await api.api.drive.items["from-attachment"].$post({
+        json: { mailboxId: mailboxId ?? "", messageId, attachmentId },
+      }));
+      toast.success(`Saved ${item.name} to Drive`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save to Drive");
+    }
+  }
 
   return (
     <div className="mt-3 flex flex-wrap gap-2 border-t border-current/10 pt-3">
@@ -34,27 +49,45 @@ export function MessageAttachments({
           </>
         );
 
+        const save = drive.isSuccess && mailboxId ? (
+          <button
+            type="button"
+            className="rounded-md p-1 opacity-60 hover:bg-current/8 hover:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+            aria-label={`Save ${attachment.filename} to Drive`}
+            title="Save to Drive"
+            onClick={() => void saveToDrive(attachment.id)}
+          >
+            <HardDrive className="size-3.5" />
+          </button>
+        ) : null;
+
         if (!preview) {
           return (
-            <a key={attachment.id} className={attachmentClassName} href={downloadUrl}>
-              {label}
-            </a>
+            <span key={attachment.id} className="flex max-w-full items-center gap-0.5">
+              <a className={attachmentClassName} href={downloadUrl}>
+                {label}
+              </a>
+              {save}
+            </span>
           );
         }
         return (
-          <Dialog key={attachment.id}>
-            <DialogTrigger className={attachmentClassName} aria-label={`Preview ${attachment.filename}`}>
-              {label}
-            </DialogTrigger>
-            <AttachmentPreviewDialog
-              messageId={messageId}
-              mailboxId={mailboxId ?? ""}
-              attachment={attachment}
-              preview={preview}
-              previewUrl={`${baseUrl}/preview${query}`}
-              downloadUrl={downloadUrl}
-            />
-          </Dialog>
+          <span key={attachment.id} className="flex max-w-full items-center gap-0.5">
+            <Dialog>
+              <DialogTrigger className={attachmentClassName} aria-label={`Preview ${attachment.filename}`}>
+                {label}
+              </DialogTrigger>
+              <AttachmentPreviewDialog
+                messageId={messageId}
+                mailboxId={mailboxId ?? ""}
+                attachment={attachment}
+                preview={preview}
+                previewUrl={`${baseUrl}/preview${query}`}
+                downloadUrl={downloadUrl}
+              />
+            </Dialog>
+            {save}
+          </span>
         );
       })}
     </div>

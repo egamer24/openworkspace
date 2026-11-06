@@ -9,6 +9,7 @@ import {
   webhookEventTypes,
 } from "../../shared/webhooks";
 import {
+  type AnySQLiteColumn,
   check,
   index,
   integer,
@@ -16,7 +17,6 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
-  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 const timestamps = {
@@ -956,5 +956,103 @@ export const backupObjects = sqliteTable(
   (table) => [index("backup_objects_last_run_idx").on(table.lastRunId)],
 );
 
+export const driveItems = sqliteTable(
+  "drive_items",
+  {
+    id: text("id").primaryKey(),
+    // Items inside a shared folder stay owned (and quota-charged) by the
+    // folder owner, even when an editor creates them.
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    parentId: text("parent_id").references(
+      (): AnySQLiteColumn => driveItems.id,
+      { onDelete: "cascade" },
+    ),
+    name: text("name").notNull(),
+    kind: text("kind", { enum: ["file", "folder"] }).notNull(),
+    status: text("status", { enum: ["pending", "ready"] })
+      .notNull()
+      .default("ready"),
+    size: integer("size").notNull().default(0),
+    contentType: text("content_type"),
+    r2Key: text("r2_key"),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    trashedAt: integer("trashed_at", { mode: "timestamp_ms" }),
+    ...timestamps,
+  },
+  (table) => [
+    // Names are unique (case-insensitively) among live siblings; trashed
+    // items step aside so a restore can report the conflict instead.
+    uniqueIndex("drive_items_root_name_unique")
+      .on(table.ownerUserId, sql`lower(${table.name})`)
+      .where(sql`${table.parentId} IS NULL AND ${table.trashedAt} IS NULL`),
+    uniqueIndex("drive_items_child_name_unique")
+      .on(table.parentId, sql`lower(${table.name})`)
+      .where(sql`${table.parentId} IS NOT NULL AND ${table.trashedAt} IS NULL`),
+    index("drive_items_parent_idx").on(table.parentId),
+    index("drive_items_owner_idx").on(table.ownerUserId, table.trashedAt),
+  ],
+);
+
+export const driveShares = sqliteTable(
+  "drive_shares",
+  {
+    itemId: text("item_id")
+      .notNull()
+      .references(() => driveItems.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    role: text("role", { enum: ["viewer", "editor"] }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.itemId, table.userId] }),
+    index("drive_shares_user_idx").on(table.userId),
+  ],
+);
+
+export const driveLinks = sqliteTable(
+  "drive_links",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id")
+      .notNull()
+      .references(() => driveItems.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull(),
+    access: text("access", { enum: ["view", "download"] }).notNull(),
+    passwordHash: text("password_hash"),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    accessCount: integer("access_count").notNull().default(0),
+    lastAccessedAt: integer("last_accessed_at", { mode: "timestamp_ms" }),
+    createdByUserId: text("created_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: integer("created_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    uniqueIndex("drive_links_token_hash_unique").on(table.tokenHash),
+    index("drive_links_item_idx").on(table.itemId),
+  ],
+);
+
+export const driveQuotas = sqliteTable("drive_quotas", {
+  userId: text("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  quotaBytes: integer("quota_bytes").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .default(sql`(unixepoch() * 1000)`),
+});
+
 export type User = typeof users.$inferSelect;
 export type Mailbox = typeof mailboxes.$inferSelect;
+export type DriveItem = typeof driveItems.$inferSelect;

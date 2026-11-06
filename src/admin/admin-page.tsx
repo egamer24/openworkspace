@@ -29,6 +29,7 @@ import {
   type AdminSection,
   MobileAdminMenu,
 } from "./admin-navigation";
+import { DriveSettings } from "./drive-settings";
 import { GlobalAiProcessing } from "./global-ai-processing";
 import { MailboxAccessEditor } from "./mailbox-access-editor";
 import type {
@@ -59,6 +60,7 @@ type AdminView =
   | "groups"
   | "webhooks"
   | "backups"
+  | "drive"
   | "invite"
   | "new-mailbox"
   | "user"
@@ -80,6 +82,7 @@ const viewCopy: Record<AdminView, { title: string; description: string }> = {
   groups: { title: "Identity groups", description: "Reusable memberships exposed to approved identity applications." },
   webhooks: { title: "Webhooks", description: "Signed account events delivered to external systems." },
   backups: { title: "Backups", description: "Portable mail snapshots and retention." },
+  drive: { title: "Drive", description: "Optional file storage module and per-person quotas." },
   invite: { title: "Invite person", description: "Create a personal mailbox and a one-time registration link." },
   "new-mailbox": { title: "New mailbox", description: "Personal or shared address." },
   user: { title: "Person", description: "Profile details and passkey recovery." },
@@ -392,6 +395,11 @@ export function AdminPage() {
             {view === "backups" && (
               <div className="max-w-3xl">
                 <BackupsPanel />
+              </div>
+            )}
+            {view === "drive" && (
+              <div className="max-w-3xl">
+                <DriveSettings />
               </div>
             )}
             {view === "invite" && (

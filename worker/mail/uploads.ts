@@ -252,7 +252,7 @@ export async function storeComposerUploadContent(input: {
   }
 }
 
-function uploadBodyWithExactSize(
+export function uploadBodyWithExactSize(
   body: ReadableStream<Uint8Array> | ArrayBuffer | Blob,
   expectedSize: number,
   state: { mismatch: boolean },

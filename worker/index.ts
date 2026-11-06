@@ -3,6 +3,10 @@ import { accountApi } from "./account-api";
 import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
+import { createDb } from "./db/client";
+import { domains, mailboxes } from "./db/schema";
+import { mailboxAddressPredicate } from "./db/mailboxes";
+import { drivePublicRoutes } from "./drive/public-routes";
 import type { AppEnv } from "./env";
 import { jmapRoutes } from "./jmap/routes";
 import { mailDownloadRoutes } from "./mail/downloads";
@@ -47,6 +51,7 @@ const app = new Hono<AppEnv>()
   .route("/api/notifications", pushNotificationRoutes)
   .route("/mcp", mcpRoutes)
   .route("/", jmapRoutes)
+  .route("/d", drivePublicRoutes)
   .route("/.well-known", wellKnownRoutes)
   .route("/oauth", oidcRoutes)
   .route("/saml", samlRoutes)

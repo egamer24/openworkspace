@@ -5,6 +5,7 @@ import {
   AtSign,
   FileKey2,
   Globe2,
+  HardDrive,
   KeyRound,
   Menu,
   Plane,
@@ -38,7 +39,8 @@ export type AdminSection =
   | "saml-applications"
   | "groups"
   | "webhooks"
-  | "backups";
+  | "backups"
+  | "drive";
 
 const adminSections: Array<{
   id: AdminSection;
@@ -53,6 +55,7 @@ const adminSections: Array<{
   { id: "addresses", label: "Addresses", Icon: AtSign },
   { id: "webhooks", label: "Webhooks", Icon: Webhook },
   { id: "backups", label: "Backups", Icon: Archive },
+  { id: "drive", label: "Drive", Icon: HardDrive },
   { id: "sso-applications", label: "OIDC applications", Icon: KeyRound, separatorBefore: true },
   { id: "saml-applications", label: "SAML applications", Icon: FileKey2 },
   { id: "groups", label: "Identity groups", Icon: UsersRound },

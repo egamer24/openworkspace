@@ -1,6 +1,7 @@
 import {
   Check,
   ChevronsUpDown,
+  HardDrive,
   Inbox,
   Mail,
   PenLine,
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { useDriveStatus } from "@/drive/drive-status";
 import { cn } from "@/lib/utils";
 import type { Mailbox } from "./types";
 
@@ -49,6 +51,7 @@ export function MailHeader({
 }) {
   const auth = useAuth();
   const navigate = useNavigate();
+  const drive = useDriveStatus();
   let otherMailboxUnreadCount = 0;
   for (const item of mailboxes) {
     if (item.id !== mailbox?.id) {
@@ -173,6 +176,11 @@ export function MailHeader({
             </DropdownMenuGroup>
 
             <DropdownMenuSeparator />
+            {drive.isSuccess && (
+              <DropdownMenuItem onClick={() => navigate("/drive")}>
+                <HardDrive />Drive
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={() => navigate("/settings")}>
               <Settings />Settings
             </DropdownMenuItem>
