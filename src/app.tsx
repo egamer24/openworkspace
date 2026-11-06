@@ -57,6 +57,11 @@ const SettingsAutoRepliesPage = lazy(() =>
     default: module.AutoReplySettings,
   })),
 );
+const SettingsRulesPage = lazy(() =>
+  import("@/settings/rules-page").then((module) => ({
+    default: module.RuleSettings,
+  })),
+);
 const SettingsSessionsPage = lazy(() =>
   import("@/settings/sessions-page").then((module) => ({
     default: module.SessionsSettings,
@@ -121,6 +126,7 @@ export function App() {
             <Route path="notifications" element={<SettingsNotificationsPage />} />
             <Route path="signatures" element={<SettingsSignaturesPage />} />
             <Route path="auto-replies" element={<SettingsAutoRepliesPage />} />
+            <Route path="rules" element={<SettingsRulesPage />} />
             <Route path="sessions" element={<SettingsSessionsPage />} />
             <Route path="mcp" element={<SettingsMcpPage />} />
           </Route>

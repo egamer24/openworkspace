@@ -1,6 +1,7 @@
 import {
   ArrowLeft,
   Bell,
+  Filter,
   Inbox,
   KeyRound,
   LoaderCircle,
@@ -33,6 +34,7 @@ type SettingsSection =
   | "notifications"
   | "signatures"
   | "auto-replies"
+  | "rules"
   | "sessions"
   | "mcp";
 
@@ -79,6 +81,13 @@ const settingsSections: Array<{
     path: "/settings/auto-replies",
   },
   {
+    id: "rules",
+    label: "Rules",
+    description: "Sort, mark read or forward new mail automatically.",
+    Icon: Filter,
+    path: "/settings/rules",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -99,6 +108,7 @@ function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/notifications")) return "notifications";
   if (pathname.startsWith("/settings/signatures")) return "signatures";
   if (pathname.startsWith("/settings/auto-replies")) return "auto-replies";
+  if (pathname.startsWith("/settings/rules")) return "rules";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";

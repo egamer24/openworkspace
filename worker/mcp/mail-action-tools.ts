@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { AccountApiClient, apiPath } from "./account-client";
 import { runTool } from "./results";
+import { ruleInputSchema } from "../mail/rules";
 import {
   conversationIdsSchema,
   entityIdSchema,
@@ -167,6 +168,31 @@ export function registerMailActionTools(server: McpServer, api: AccountApiClient
   );
 
   server.registerTool(
+    "list_rules",
+    {
+      title: "List mailbox rules",
+      description: "List a mailbox's rules in the order they run on new mail. Requires send access.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId }) => runTool(() => api.json(`/mail/mailboxes/${encodeURIComponent(mailboxId)}/rules`)),
+  );
+
+  server.registerTool(
+    "test_rule",
+    {
+      title: "Test a mailbox rule",
+      description: "Count how many of the latest 500 incoming messages the conditions would match, without changing anything.",
+      inputSchema: ruleInputSchema.pick({ match: true, conditions: true }).extend({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId, ...rule }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/rules/test`,
+      { method: "POST", json: rule },
+    )),
+  );
+
+  server.registerTool(
     "set_retention",
     {
       title: "Set Trash and Spam retention",
@@ -181,6 +207,33 @@ export function registerMailActionTools(server: McpServer, api: AccountApiClient
     ({ mailboxId, ...retention }) => runTool(() => api.json(
       `/mail/mailboxes/${encodeURIComponent(mailboxId)}/retention`,
       { method: "PUT", json: retention },
+    )),
+  );
+
+  server.registerTool(
+    "create_rule",
+    {
+      title: "Create a mailbox rule",
+      description: "Add a rule that runs on new mail after spam classification. Conditions: from (contains/equals/domain), recipient, subject, listId, hasAttachment. Actions: moveToFolder, archive, trash, spam, notSpam, markRead, forward (resend from the mailbox with Reply-To set to the sender; keepCopy false moves the original to Trash).",
+      inputSchema: ruleInputSchema.extend({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, idempotentHint: false, openWorldHint: true },
+    },
+    ({ mailboxId, ...rule }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/rules`,
+      { method: "POST", json: rule },
+    )),
+  );
+
+  server.registerTool(
+    "delete_rule",
+    {
+      title: "Delete a mailbox rule",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema, ruleId: z.string().min(1).max(80) }),
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ mailboxId, ruleId }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/rules/${encodeURIComponent(ruleId)}`,
+      { method: "DELETE" },
     )),
   );
 
