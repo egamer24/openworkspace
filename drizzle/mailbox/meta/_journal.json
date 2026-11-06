@@ -57,6 +57,13 @@
       "when": 1793981794922,
       "tag": "0007_auto_replies",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793981833590,
+      "tag": "0008_trash_retention",
+      "breakpoints": true
     }
   ]
 }

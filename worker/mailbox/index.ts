@@ -72,6 +72,7 @@ import {
   conversations,
   drafts,
   emailReadStates,
+  retentionSettings,
   emails,
   folders,
   mailboxAiConfiguration,
@@ -81,6 +82,7 @@ import {
   type AutoReplySettings,
   type Email,
   type FolderRecord,
+  type RetentionSettings,
   type NewEmail,
   type NewFolder,
   type PendingInbound,
@@ -218,6 +220,8 @@ export type AutoReplyInput = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
+/** Bounds each emptying or retention pass so a huge Trash can't monopolize the object. */
+const RETENTION_BATCH_SIZE = 100;
 
 export type FolderListItem = {
   id: string;
@@ -1820,10 +1824,18 @@ export class MailboxDO extends DurableObject<Env> {
       returning id
     `, ...values, candidatesJson, ...membership.bindings).toArray();
     if (result.length) this.publishUpdate();
+    // A conversation moved into Trash or Spam may need a retention alarm.
+    if (result.length && (mailboxState === "trash" || mailboxState === "spam")) {
+      this.state.waitUntil(this.scheduleRemainingWork());
+    }
     return result.length;
   }
 
-  async permanentlyDeleteConversations(conversationIds: string[]) {
+  /** Deletes conversations that are all in `fromState` (Trash unless emptying Spam). */
+  async permanentlyDeleteConversations(
+    conversationIds: string[],
+    fromState: "trash" | "spam" = "trash",
+  ) {
     const candidates = [...new Set(conversationIds)];
     if (!candidates.length) {
       return { outcome: "not_found" as const, deletedCount: 0 };
@@ -1839,7 +1851,7 @@ export class MailboxDO extends DurableObject<Env> {
     if (storedConversations.length !== candidates.length) {
       return { outcome: "not_found" as const, deletedCount: 0 };
     }
-    if (storedConversations.some((conversation) => conversation.mailboxState !== "trash")) {
+    if (storedConversations.some((conversation) => conversation.mailboxState !== fromState)) {
       return { outcome: "not_in_trash" as const, deletedCount: 0 };
     }
 
@@ -2028,6 +2040,7 @@ export class MailboxDO extends DurableObject<Env> {
   async alarm() {
     const now = Date.now();
     await this.processInboundJobs(now);
+    await this.processRetention(now);
     await dispatchOfficePreviewJobs(this.state.storage.sql, this.bindings, this.state.id.name ?? "unknown-mailbox");
     await this.processObjectDeletionJobs(now);
     await this.scheduleRemainingWork();
@@ -2193,6 +2206,93 @@ export class MailboxDO extends DurableObject<Env> {
     }
   }
 
+  getRetention(): RetentionSettings | null {
+    return this.db.select().from(retentionSettings).all()[0] ?? null;
+  }
+
+  async setRetention(
+    input: { trashDays: number | null; spamDays: number | null },
+    userId: string,
+  ) {
+    const settings: RetentionSettings = {
+      id: 1,
+      ...input,
+      updatedBy: userId,
+      updatedAt: new Date(),
+    };
+    this.db.insert(retentionSettings)
+      .values(settings)
+      .onConflictDoUpdate({ target: retentionSettings.id, set: settings })
+      .run();
+    await this.scheduleRemainingWork();
+    this.publishUpdate();
+    return settings;
+  }
+
+  /** Permanently deletes one batch from Trash or Spam; callers repeat while `remaining > 0`. */
+  async emptyFolder(state: "trash" | "spam") {
+    const ids = this.db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.mailboxState, state))
+      .orderBy(asc(conversations.timelineAt))
+      .limit(RETENTION_BATCH_SIZE)
+      .all()
+      .map((row) => row.id);
+    const result = ids.length
+      ? await this.permanentlyDeleteConversations(ids, state)
+      : { deletedCount: 0 };
+    return { deleted: result.deletedCount, remaining: this.countInState(state) };
+  }
+
+  private countInState(state: "trash" | "spam") {
+    return this.db
+      .select({ count: sql<number>`count(*)` })
+      .from(conversations)
+      .where(eq(conversations.mailboxState, state))
+      .all()[0]?.count ?? 0;
+  }
+
+  private retentionRules(settings = this.getRetention()) {
+    return ([["trash", settings?.trashDays], ["spam", settings?.spamDays]] as const)
+      .flatMap(([state, days]) => days ? [{ state, ms: days * DAY_MS }] : []);
+  }
+
+  private async processRetention(now: number) {
+    for (const { state, ms } of this.retentionRules()) {
+      const expired = this.db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(and(
+          eq(conversations.mailboxState, state),
+          lte(conversations.stateChangedAt, new Date(now - ms)),
+        ))
+        .orderBy(asc(conversations.stateChangedAt))
+        .limit(RETENTION_BATCH_SIZE)
+        .all()
+        .map((row) => row.id);
+      if (expired.length) await this.permanentlyDeleteConversations(expired, state);
+    }
+  }
+
+  /** The earliest moment a Trash or Spam conversation reaches its retention limit. */
+  private nextRetentionAt() {
+    let next: number | null = null;
+    for (const { state, ms } of this.retentionRules()) {
+      const oldest = this.db
+        .select({ at: conversations.stateChangedAt })
+        .from(conversations)
+        .where(eq(conversations.mailboxState, state))
+        .orderBy(asc(conversations.stateChangedAt))
+        .limit(1)
+        .all()[0]?.at;
+      if (!oldest) continue;
+      const due = oldest.getTime() + ms;
+      next = next === null ? due : Math.min(next, due);
+    }
+    return next;
+  }
+
   private async scheduleRemainingWork() {
     const nextInbound = this.db
       .select({ nextAttemptAt: pendingInbound.nextAttemptAt })
@@ -2207,7 +2307,9 @@ export class MailboxDO extends DurableObject<Env> {
       .limit(1)
       .all()[0];
     const officePreviewAttempt = nextOfficePreviewAttempt(this.state.storage.sql);
+    const retentionAt = this.nextRetentionAt();
     const nextAttemptAt = [nextInbound, nextObjectDeletion,
+      ...(retentionAt === null ? [] : [{ nextAttemptAt: new Date(retentionAt) }]),
       ...(officePreviewAttempt === undefined ? [] : [{ nextAttemptAt: new Date(officePreviewAttempt) }]),
     ]
       .flatMap((job) => job ? [job.nextAttemptAt.getTime()] : [])

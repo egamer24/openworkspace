@@ -30,6 +30,7 @@ import {
 } from "./use-draft-autosave";
 import { api, responseJson } from "@/lib/api";
 import { AutoReplyBanner } from "./auto-reply-banner";
+import { FolderRetentionControls } from "./folder-retention-controls";
 import type {
   ConversationSummary,
   Folder,
@@ -388,7 +389,16 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
                   />
                 </TooltipProvider>
               ) : (
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {mailbox?.canSend
+                    && (activeFolder?.systemType === "trash" || activeFolder?.systemType === "spam") ? (
+                      <FolderRetentionControls
+                        mailboxId={mailbox.id}
+                        folder={activeFolder.systemType}
+                        folderName={folderName}
+                        conversationCount={activeFolder.totalCount}
+                      />
+                    ) : null}
                   <p className="text-xs text-muted-foreground tabular-nums">
                     {displayedConversationCount}{" "}
                     {displayedConversationCount === "1" ? "conversation" : "conversations"}

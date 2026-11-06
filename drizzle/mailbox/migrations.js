@@ -7,6 +7,7 @@ import m0004 from "./0004_harsh_rattler.sql";
 import m0005 from "./0005_office_previews.sql";
 import m0006 from "./0006_drafts.sql";
 import m0007 from "./0007_auto_replies.sql";
+import m0008 from "./0008_trash_retention.sql";
 
 export default {
   journal,
@@ -19,5 +20,6 @@ export default {
     m0005,
     m0006,
     m0007,
+    m0008,
   },
 };
