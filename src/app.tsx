@@ -52,6 +52,11 @@ const SettingsSignaturesPage = lazy(() =>
     default: module.SignatureSettings,
   })),
 );
+const SettingsAutoRepliesPage = lazy(() =>
+  import("@/settings/auto-replies-page").then((module) => ({
+    default: module.AutoReplySettings,
+  })),
+);
 const SettingsSessionsPage = lazy(() =>
   import("@/settings/sessions-page").then((module) => ({
     default: module.SessionsSettings,
@@ -115,6 +120,7 @@ export function App() {
             <Route path="appearance" element={<SettingsAppearancePage />} />
             <Route path="notifications" element={<SettingsNotificationsPage />} />
             <Route path="signatures" element={<SettingsSignaturesPage />} />
+            <Route path="auto-replies" element={<SettingsAutoRepliesPage />} />
             <Route path="sessions" element={<SettingsSessionsPage />} />
             <Route path="mcp" element={<SettingsMcpPage />} />
           </Route>

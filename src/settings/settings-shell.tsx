@@ -7,6 +7,7 @@ import {
   Menu,
   Palette,
   PenLine,
+  Plane,
   ShieldCheck,
   UserRound,
   type LucideIcon,
@@ -31,6 +32,7 @@ type SettingsSection =
   | "appearance"
   | "notifications"
   | "signatures"
+  | "auto-replies"
   | "sessions"
   | "mcp";
 
@@ -70,6 +72,13 @@ const settingsSections: Array<{
     path: "/settings/signatures",
   },
   {
+    id: "auto-replies",
+    label: "Auto-replies",
+    description: "Out-of-office replies for each mailbox.",
+    Icon: Plane,
+    path: "/settings/auto-replies",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -89,6 +98,7 @@ function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/mcp")) return "mcp";
   if (pathname.startsWith("/settings/notifications")) return "notifications";
   if (pathname.startsWith("/settings/signatures")) return "signatures";
+  if (pathname.startsWith("/settings/auto-replies")) return "auto-replies";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";

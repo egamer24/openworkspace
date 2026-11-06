@@ -29,6 +29,7 @@ import {
   type SavedDraft,
 } from "./use-draft-autosave";
 import { api, responseJson } from "@/lib/api";
+import { AutoReplyBanner } from "./auto-reply-banner";
 import type {
   ConversationSummary,
   Folder,
@@ -309,6 +310,7 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
         onCompose={openCompose}
         onAdministration={() => navigateRoute("/admin")}
       />
+      {mailbox ? <AutoReplyBanner mailbox={mailbox} /> : null}
       <FolderTabBar
         folder={folder}
         folders={folders}

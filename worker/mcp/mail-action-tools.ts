@@ -18,6 +18,47 @@ const write = {
 
 export function registerMailActionTools(server: McpServer, api: AccountApiClient) {
   server.registerTool(
+    "get_auto_reply",
+    {
+      title: "Get auto-reply",
+      description: "Read a mailbox's out-of-office auto-reply settings, its current status (off, scheduled, active, ended), and the senders answered recently. Requires send access, or an administrator account.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/auto-reply`,
+    )),
+  );
+
+  server.registerTool(
+    "set_auto_reply",
+    {
+      title: "Set auto-reply",
+      description: "Turn a mailbox's out-of-office auto-reply on or off and set its schedule and message. Replies follow RFC 3834: mailing lists, bounces, other auto-responders and spam are never answered, and each sender gets at most one reply per interval.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        enabled: z.boolean(),
+        startsAt: z.iso.datetime({ offset: true }).nullable().optional()
+          .describe("When replies start; omit or null to start now."),
+        endsAt: z.iso.datetime({ offset: true }).nullable().optional()
+          .describe("When replies stop; omit or null for no end."),
+        timeZone: z.string().max(64).nullable().optional(),
+        subject: z.string().max(998).nullable().optional()
+          .describe("Defaults to \"Auto: <original subject>\"."),
+        bodyText: z.string().max(10_000).optional().describe("Plain-text reply; required when enabled."),
+        audience: z.enum(["everyone", "knownSenders"]).optional(),
+        skipInternal: z.boolean().optional(),
+        replyIntervalDays: z.number().int().min(1).max(30).optional(),
+      }),
+      annotations: write,
+    },
+    ({ mailboxId, ...settings }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/auto-reply`,
+      { method: "PUT", json: settings },
+    )),
+  );
+
+  server.registerTool(
     "set_message_read",
     {
       title: "Mark message read or unread",

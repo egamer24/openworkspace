@@ -7,6 +7,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { replyActionModes, transportStates } from "../../shared/mail";
+import { autoReplyAudiences } from "../mail/auto-reply";
 import { mailboxStates } from "./folder-model";
 import type {
   EmailAiClassification,
@@ -272,10 +273,40 @@ export const drafts = sqliteTable(
   ],
 );
 
+/** A single row (id = 1) holding this mailbox's out-of-office settings. */
+export const autoReplySettings = sqliteTable("auto_reply_settings", {
+  id: integer("id").primaryKey(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull(),
+  startsAt: integer("starts_at", { mode: "timestamp_ms" }),
+  endsAt: integer("ends_at", { mode: "timestamp_ms" }),
+  /** IANA zone the schedule was entered in; for display only. */
+  timeZone: text("time_zone"),
+  subject: text("subject"),
+  bodyText: text("body_text").notNull(),
+  audience: text("audience", { enum: autoReplyAudiences }).notNull(),
+  skipInternal: integer("skip_internal", { mode: "boolean" }).notNull(),
+  replyIntervalDays: integer("reply_interval_days").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** One row per sender that received an auto-reply during the current absence. */
+export const autoReplyLog = sqliteTable(
+  "auto_reply_log",
+  {
+    senderAddress: text("sender_address").primaryKey(),
+    lastRepliedAt: integer("last_replied_at", { mode: "timestamp_ms" }).notNull(),
+    lastOriginalEmailId: text("last_original_email_id").notNull(),
+    lastOutboundMessageId: text("last_outbound_message_id"),
+  },
+  (table) => [index("auto_reply_log_replied_idx").on(table.lastRepliedAt)],
+);
+
 export type Email = typeof emails.$inferSelect;
 export type NewEmail = typeof emails.$inferInsert;
 export type Draft = typeof drafts.$inferSelect;
 export type NewDraft = typeof drafts.$inferInsert;
+export type AutoReplySettings = typeof autoReplySettings.$inferSelect;
 export type EmailReadState = typeof emailReadStates.$inferSelect;
 export type PendingInbound = typeof pendingInbound.$inferSelect;
 export type PendingObjectDeletion = typeof pendingObjectDeletions.$inferSelect;

@@ -5,6 +5,7 @@ import {
   Globe2,
   KeyRound,
   Menu,
+  Plane,
   Settings2,
   type LucideIcon,
   Users,
@@ -28,6 +29,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 export type AdminSection =
   | "people"
   | "mailboxes"
+  | "auto-replies"
   | "domains"
   | "sso-applications"
   | "saml-applications"
@@ -42,6 +44,7 @@ const adminSections: Array<{
 }> = [
   { id: "people", label: "People", Icon: Users },
   { id: "mailboxes", label: "Mailboxes", Icon: Settings2 },
+  { id: "auto-replies", label: "Auto-replies", Icon: Plane },
   { id: "domains", label: "Domains", Icon: Globe2 },
   { id: "webhooks", label: "Webhooks", Icon: Webhook },
   { id: "sso-applications", label: "OIDC applications", Icon: KeyRound, separatorBefore: true },

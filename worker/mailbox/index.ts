@@ -41,6 +41,19 @@ import { listActiveMailboxSessions } from "../mail/mailbox-directory";
 import { buildEmailSearchQuery } from "../mail/search";
 import { createId } from "../lib/ids";
 import {
+  AUTO_REPLY_HOURLY_CAP,
+  autoReplyRecipient,
+  autoReplyStatus,
+  buildAutoReply,
+  messageSkipReason,
+  parseHeaderBlock,
+  type AutoReplyAudience,
+} from "../mail/auto-reply";
+import { createDb } from "../db/client";
+import { domains, mailboxes } from "../db/schema";
+import { mailboxAddressPredicate } from "../db/mailboxes";
+import { normalizeMailboxAddress } from "../lib/ids";
+import {
   deferWebhookTask,
   emailWebhookEventId,
   queueWebhookEvent,
@@ -54,6 +67,8 @@ import {
   type SystemFolderType,
 } from "./folder-model";
 import {
+  autoReplyLog,
+  autoReplySettings,
   conversations,
   drafts,
   emailReadStates,
@@ -63,6 +78,7 @@ import {
   pendingInbound,
   pendingObjectDeletions,
   type Draft,
+  type AutoReplySettings,
   type Email,
   type FolderRecord,
   type NewEmail,
@@ -189,6 +205,19 @@ export type SaveDraftResult =
   | { status: "limit" };
 
 const MAX_DRAFTS_PER_USER = 500;
+export type AutoReplyInput = {
+  enabled: boolean;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  timeZone: string | null;
+  subject: string | null;
+  bodyText: string;
+  audience: AutoReplyAudience;
+  skipInternal: boolean;
+  replyIntervalDays: number;
+};
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export type FolderListItem = {
   id: string;
@@ -675,6 +704,158 @@ export class MailboxDO extends DurableObject<Env> {
       .all()[0] ?? null;
     if (deleted) this.publishUpdate();
     return deleted;
+  }
+
+  getAutoReply(): AutoReplySettings | null {
+    return this.db.select().from(autoReplySettings).all()[0] ?? null;
+  }
+
+  autoReplyState() {
+    return autoReplyStatus(this.getAutoReply(), new Date());
+  }
+
+  setAutoReply(input: AutoReplyInput, userId: string) {
+    const previous = this.getAutoReply();
+    const settings: AutoReplySettings = {
+      ...input,
+      id: 1,
+      updatedBy: userId,
+      updatedAt: new Date(),
+    };
+    // Each absence starts fresh: switching on or moving the window clears
+    // who has already been answered.
+    const newAbsence = input.enabled && (
+      !previous?.enabled
+      || previous.startsAt?.getTime() !== input.startsAt?.getTime()
+      || previous.endsAt?.getTime() !== input.endsAt?.getTime()
+    );
+    this.db.transaction((tx) => {
+      tx.insert(autoReplySettings)
+        .values(settings)
+        .onConflictDoUpdate({ target: autoReplySettings.id, set: settings })
+        .run();
+      if (newAbsence) tx.delete(autoReplyLog).run();
+    });
+    this.publishUpdate();
+    return settings;
+  }
+
+  recentAutoReplies(limit = 20) {
+    return this.db
+      .select()
+      .from(autoReplyLog)
+      .orderBy(desc(autoReplyLog.lastRepliedAt))
+      .limit(limit)
+      .all();
+  }
+
+  private hasSentTo(address: string) {
+    const needle = `"address":${JSON.stringify(address.toLowerCase())}`;
+    return this.db
+      .select({ id: emails.id })
+      .from(emails)
+      .where(and(
+        eq(emails.direction, "outgoing"),
+        or(
+          sql`instr(lower(${emails.toJson}), ${needle}) > 0`,
+          sql`instr(lower(${emails.ccJson}), ${needle}) > 0`,
+          sql`instr(lower(${emails.bccJson}), ${needle}) > 0`,
+        ),
+      ))
+      .limit(1)
+      .all().length > 0;
+  }
+
+  /**
+   * Out-of-office reply for a live delivery (never imports). It is sent
+   * through Email Sending but not stored as a message, and it never retries:
+   * a sender is logged before sending so a failure cannot cause a loop.
+   */
+  private async maybeAutoReply(job: PendingInbound, email: Email, rawMime: ArrayBuffer) {
+    const settings = this.getAutoReply();
+    const now = new Date();
+    if (!settings || autoReplyStatus(settings, now) !== "active") return;
+    const skip = (reason: string) => {
+      console.debug(`Auto-reply skipped for ${email.id}: ${reason}`);
+    };
+    const conversation = this.db
+      .select({ mailboxState: conversations.mailboxState })
+      .from(conversations)
+      .where(eq(conversations.id, email.conversationId))
+      .all()[0];
+    if (conversation?.mailboxState === "spam") return skip("spam");
+
+    const mailboxAddress = normalizeMailboxAddress(job.envelopeTo);
+    const reason = messageSkipReason({
+      headers: parseHeaderBlock(rawMime),
+      envelopeFrom: job.envelopeFrom,
+      mailboxAddress,
+      email,
+    });
+    if (reason) return skip(reason);
+    const recipient = autoReplyRecipient(job.envelopeFrom);
+
+    const db = createDb(this.bindings.DB);
+    if (settings.skipInternal) {
+      const [internal] = await db
+        .select({ id: mailboxes.id })
+        .from(mailboxes)
+        .innerJoin(domains, mailboxAddressPredicate(recipient))
+        .limit(1);
+      if (internal) return skip("internal sender");
+    }
+    if (settings.audience === "knownSenders" && !this.hasSentTo(recipient)) {
+      return skip("unknown sender");
+    }
+
+    const intervalMs = settings.replyIntervalDays * DAY_MS;
+    const reserved = this.db.transaction((tx) => {
+      tx.delete(autoReplyLog)
+        .where(lt(autoReplyLog.lastRepliedAt, new Date(now.getTime() - intervalMs)))
+        .run();
+      const previous = tx
+        .select()
+        .from(autoReplyLog)
+        .where(eq(autoReplyLog.senderAddress, recipient))
+        .all()[0];
+      if (previous) return "interval";
+      const [{ count }] = tx
+        .select({ count: sql<number>`count(*)` })
+        .from(autoReplyLog)
+        .where(lt(sql`${now.getTime() - 60 * 60 * 1_000}`, autoReplyLog.lastRepliedAt))
+        .all() as [{ count: number }];
+      if (count >= AUTO_REPLY_HOURLY_CAP) return "hourly cap";
+      tx.insert(autoReplyLog).values({
+        senderAddress: recipient,
+        lastRepliedAt: now,
+        lastOriginalEmailId: email.id,
+        lastOutboundMessageId: null,
+      }).run();
+      return null;
+    });
+    if (reserved) return skip(reserved);
+
+    const [mailbox] = await db
+      .select({ displayName: mailboxes.displayName })
+      .from(mailboxes)
+      .where(eq(mailboxes.id, this.state.id.name ?? ""))
+      .limit(1);
+    try {
+      const result = await this.bindings.EMAIL.send(buildAutoReply({
+        mailboxAddress,
+        mailboxName: mailbox?.displayName ?? "",
+        recipient,
+        original: email,
+        subject: settings.subject,
+        bodyText: settings.bodyText,
+      }));
+      this.db.update(autoReplyLog)
+        .set({ lastOutboundMessageId: result.messageId })
+        .where(eq(autoReplyLog.senderAddress, recipient))
+        .run();
+    } catch (error) {
+      console.error(`Auto-reply to ${recipient} failed`, error);
+    }
   }
 
   getFolder(id: string): MailFolder | null {
@@ -1910,6 +2091,10 @@ export class MailboxDO extends DurableObject<Env> {
         if (!stored) {
           throw new Error("Parsed inbound email was not persisted");
         }
+        // Never blocks or fails inbound processing.
+        this.state.waitUntil(this.maybeAutoReply(job, stored, rawMime).catch((error) => {
+          console.error(`Auto-reply evaluation failed for ${stored.id}`, error);
+        }));
         await this.finishStoredInbound(job, stored, now, true);
       } catch (error) {
         if (error instanceof UnprocessableInboundEmailError) {

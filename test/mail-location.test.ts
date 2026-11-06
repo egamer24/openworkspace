@@ -9,6 +9,7 @@ const mailboxes = [{
   canSend: true,
   signature: null,
   unreadCount: 0,
+  autoReply: null,
 }, {
   id: "mailbox-read-only",
   address: "readonly@example.test",
@@ -17,6 +18,7 @@ const mailboxes = [{
   canSend: false,
   signature: null,
   unreadCount: 0,
+  autoReply: null,
 }];
 
 const folders = [
