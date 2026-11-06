@@ -38,6 +38,16 @@
 # Cloudflare Email Routing analytics are retained for 31 days.
 # CLOUDFLARE_ANALYTICS_TOKEN=
 
+# Optional automatic domain onboarding in Administration → Domains. Create a
+# Cloudflare API token with the permissions listed in README ("Connect mail
+# domains → Automatic"), then:
+#   wrangler secret put CLOUDFLARE_API_TOKEN
+#   wrangler secret put CLOUDFLARE_ACCOUNT_ID
+# CLOUDFLARE_ACCOUNT_ID only limits the zone list to one account.
+# WORKER_NAME (a wrangler.jsonc var) must match this Worker's script name.
+# CLOUDFLARE_API_TOKEN=
+# CLOUDFLARE_ACCOUNT_ID=
+
 # Optional Web Push. Generate one persistent key pair with
 # `bun run push:keygen`, expose the public key as a regular Worker variable,
 # and keep the private key as a secret in production.

@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import {
+  cloudflareConnectSchema,
   createDomainSchema,
   createInvitationSchema,
   createMailboxSchema,
@@ -85,6 +86,34 @@ export function registerAdminTools(server: McpServer, api: AccountApiClient) {
       `/admin/domains/${encodeURIComponent(domainId)}`,
       { method: "DELETE" },
     )),
+  );
+
+  server.registerTool(
+    "check_domain_cloudflare",
+    {
+      title: "Check Cloudflare domain setup",
+      description: "Re-read Email Routing, the catch-all rule, and Email Sending for a domain from the Cloudflare API and report each step's status. Requires CLOUDFLARE_API_TOKEN.",
+      inputSchema: z.object({ domainId: entityIdSchema }),
+      annotations: { ...adminWrite, idempotentHint: true, openWorldHint: true },
+    },
+    ({ domainId }) => runTool(() => api.json(
+      `/admin/domains/${encodeURIComponent(domainId)}/cloudflare/check`,
+      { method: "POST" },
+    )),
+  );
+
+  server.registerTool(
+    "connect_domain_cloudflare",
+    {
+      title: "Connect or repair a domain through Cloudflare",
+      description: "Configure Email Routing, the catch-all Worker rule, and Email Sending for a domain, adding the domain if needed. Steps already in place are skipped, so this also repairs drift. Stops with outcome mx_conflict when the domain has MX records for another provider; only pass replaceMx after the administrator confirms replacing them. Changes made by a failed run are rolled back.",
+      inputSchema: cloudflareConnectSchema,
+      annotations: { ...adminWrite, idempotentHint: true, openWorldHint: true },
+    },
+    (input) => runTool(() => api.json("/admin/cloudflare/connect", {
+      method: "POST",
+      json: input,
+    })),
   );
 
   server.registerTool(

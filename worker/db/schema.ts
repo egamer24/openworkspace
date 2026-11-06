@@ -1,6 +1,10 @@
 import { sql } from "drizzle-orm";
 import { accessLinkKinds } from "../../shared/auth";
 import {
+  domainOnboardingStatuses,
+  domainOnboardingSteps as onboardingStepNames,
+} from "../../shared/domain-onboarding";
+import {
   webhookDeliveryStatuses,
   webhookEventTypes,
 } from "../../shared/webhooks";
@@ -62,6 +66,24 @@ export const domains = sqliteTable(
     uniqueIndex("domains_primary_unique")
       .on(table.isPrimary)
       .where(sql`${table.isPrimary} = 1`),
+  ],
+);
+
+export const domainOnboardingSteps = sqliteTable(
+  "domain_onboarding_steps",
+  {
+    domainId: text("domain_id")
+      .notNull()
+      .references(() => domains.id, { onDelete: "cascade" }),
+    step: text("step", { enum: onboardingStepNames }).notNull(),
+    status: text("status", { enum: domainOnboardingStatuses }).notNull(),
+    detail: text("detail"),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    primaryKey({ columns: [table.domainId, table.step] }),
   ],
 );
 

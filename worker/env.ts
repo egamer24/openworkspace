@@ -1,4 +1,5 @@
 import type { User } from "./db/schema";
+import type { CloudflareApiBindings } from "./admin/cloudflare-onboarding";
 import type { CloudflareEmailAnalyticsBindings } from "./mail/email-authentication";
 
 export type SessionUser = Pick<
@@ -39,6 +40,7 @@ export type AppEnv = {
   Bindings: Env
     & AuthBindings
     & CloudflareEmailAnalyticsBindings
+    & CloudflareApiBindings
     & OidcBindings
     & SamlBindings
     & R2S3Bindings

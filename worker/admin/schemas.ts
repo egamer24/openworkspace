@@ -51,6 +51,12 @@ export const createDomainSchema = z.object({
   cloudflareZoneId: cloudflareZoneIdSchema.default(null),
 });
 
+export const cloudflareDomainSchema = z.object({ name: domainNameSchema });
+
+export const cloudflareConnectSchema = cloudflareDomainSchema.extend({
+  replaceMx: z.boolean().default(false),
+});
+
 export const updateDomainSchema = z.object({
   cloudflareZoneId: cloudflareZoneIdSchema.optional(),
   isPrimary: z.literal(true).optional(),

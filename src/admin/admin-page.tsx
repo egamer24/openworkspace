@@ -323,6 +323,7 @@ export function AdminPage() {
                 <DomainsManager
                   domains={state.data?.domains ?? []}
                   loading={state.isLoading}
+                  cloudflareOnboarding={state.data?.cloudflareOnboarding ?? false}
                 />
               </div>
             )}

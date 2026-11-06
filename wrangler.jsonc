@@ -108,6 +108,7 @@
     ]
   },
   "vars": {
-    "SESSION_TTL_DAYS": "30"
+    "SESSION_TTL_DAYS": "30",
+    "WORKER_NAME": "openworkspace"
   }
 }

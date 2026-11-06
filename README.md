@@ -82,7 +82,31 @@ The script merges upstream (`main` or `master`) and keeps your Cloudflare-provis
 
 ### Connect mail domains
 
-For every domain used by a mailbox, configure Cloudflare manually:
+#### Automatic (recommended)
+
+Administration → Domains can configure steps 1 to 3 below through the Cloudflare API.
+
+1. Create a [User API token](https://dash.cloudflare.com/profile/api-tokens) (**Create Token → Custom token**) with:
+   - **Zone → Zone → Read**, **Zone → DNS → Edit**, **Zone → Zone Settings → Edit**, and **Zone → Email Routing Rules → Edit**, scoped to the mail domains' zones.
+   - **Account → Email Sending → Edit** for the account that owns them.
+2. Store it, and optionally the account ID to limit the zone list to one account:
+
+   ```bash
+   bunx wrangler secret put CLOUDFLARE_API_TOKEN
+   bunx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+   ```
+
+   If you renamed the Worker, set the `WORKER_NAME` var in `wrangler.jsonc` to its script name. This token is separate from `CLOUDFLARE_ANALYTICS_TOKEN`.
+3. Under **Connect via Cloudflare**, choose a zone and an optional subdomain, then **Preview**. The preview is read-only. If the hostname has MX records for another mail provider, they are listed and are only deleted after you tick **Replace these MX records**.
+4. **Connect** enables Email Routing, points the catch-all at this Worker, onboards the hostname for Email Sending, and saves the Zone ID (which also enables Show original authentication once `CLOUDFLARE_ANALYTICS_TOKEN` is set). Steps already in place are skipped. If a step fails, only the changes made by that run are undone, including restoring deleted MX records and the previous catch-all rule.
+
+Each domain then shows the status of every step. **Check** re-reads them from Cloudflare, and **Repair** re-runs the steps that failed or drifted. Admin MCP clients can call the same actions with `check_domain_cloudflare` and `connect_domain_cloudflare`.
+
+Step 4 (delivery events) remains manual: Cloudflare's API does not yet document an Email Sending source for queue event subscriptions.
+
+#### Manual
+
+Without `CLOUDFLARE_API_TOKEN`, configure steps 1 to 4 manually for every domain used by a mailbox. The remaining steps apply to both setups:
 
 1. **Email Routing** — In **Compute → Email Service → Email Routing**, enable Email Routing for the domain.
 2. **Catch-all** — Under **Routing Rules**, enable **Catch-all**, choose **Send to a Worker**, and select this Worker.
