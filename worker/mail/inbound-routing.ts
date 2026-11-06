@@ -27,11 +27,12 @@ export async function resolveInboundRoute(
         CASE WHEN r.id IS NULL THEN d.unknown_recipient_mailbox_id END) AS mailboxId,
       r.id AS routeId,
       coalesce(r.keep_copy, 1) AS keepCopy,
-      -- A throwaway stops working when it is turned off or its creator loses
-      -- send access to the mailbox it delivers into.
+      -- A throwaway stops working when it is turned off, its creator's account
+      -- is disabled, or its creator loses send access to its mailbox.
       CASE WHEN r.disabled_at IS NOT NULL THEN 1
         WHEN r.throwaway = 1 AND NOT EXISTS (
           SELECT 1 FROM mailbox_members mm
+          JOIN users u ON u.id = mm.user_id AND u.status = 'active'
           WHERE mm.mailbox_id = r.mailbox_id
             AND mm.user_id = r.created_by_user_id AND mm.can_send = 1
         ) THEN 1 ELSE 0 END AS disabled,
