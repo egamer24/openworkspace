@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createDb } from "../worker/db/client";
 import { domains, driveItems, driveLinks, mailboxMembers, mailboxes, users } from "../worker/db/schema";
+import { driveStagingKey } from "../worker/drive/service";
 import { mailboxStub } from "../worker/mailbox";
 
 const ORIGIN = "http://example.test";
@@ -416,5 +417,48 @@ describe("drive module", () => {
     expect(await toolNames()).toContain("create_drive_share_link");
     await call(admin, "/api/admin/drive", { method: "PUT", json: { enabled: false } });
     expect(await toolNames()).not.toContain("list_drive_items");
+  });
+
+  it("stops serving public links once the owner is disabled", async () => {
+    const { admin, owner, ownerId } = await setup();
+    const file = await upload(owner, "owned.txt", "owned bytes");
+    const created = await call(owner, `/api/drive/items/${file.id}/links`, { method: "POST", json: {} });
+    expect(created.status).toBe(201);
+    const path = new URL((await created.json<{ url: string }>()).url).pathname;
+    expect((await call(null, path)).status).toBe(200);
+
+    const disable = await call(admin, `/api/admin/users/${ownerId}`, { method: "PATCH", json: { status: "disabled" } });
+    expect(disable.status).toBe(200);
+    expect((await call(null, path)).status).toBe(404);
+  });
+
+  it("refuses to fill or finish an upload after the editor loses write access", async () => {
+    const { owner, editor } = await setup();
+    const shared = await folder(owner, "Revoked");
+    const share = await call(owner, `/api/drive/items/${shared.id}/shares`, {
+      method: "PUT",
+      json: { email: editor.email, role: "editor" },
+    });
+    expect(share.status).toBe(200);
+    const bytes = new TextEncoder().encode("late");
+    const intent = await call(editor.cookie, "/api/drive/uploads", {
+      method: "POST",
+      json: { name: "late.txt", size: bytes.byteLength, contentType: "text/plain", parentId: shared.id },
+    });
+    expect(intent.status).toBe(201);
+    const { item } = await intent.json<{ item: Item }>();
+
+    await call(owner, `/api/drive/items/${shared.id}/shares/${editor.id}`, { method: "DELETE" });
+    const put = await call(editor.cookie, `/api/drive/uploads/${item.id}/content`, {
+      method: "PUT",
+      headers: { "content-type": "text/plain" },
+      body: bytes,
+    });
+    expect(put.status).toBe(404);
+    // Even with bytes already staged, completion is refused.
+    await env.MAIL_STORAGE.put(driveStagingKey(item.id), bytes);
+    expect((await call(editor.cookie, `/api/drive/uploads/${item.id}/complete`, { method: "POST" })).status).toBe(404);
+    const [row] = await createDb(env.DB).select().from(driveItems).where(eq(driveItems.id, item.id));
+    expect(row!.status).toBe("pending");
   });
 });
