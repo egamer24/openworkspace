@@ -208,3 +208,58 @@ export function zonedToUtc(value: WallClock, timeZone: string) {
   // Repeated times take the first occurrence; skipped ones the later offset.
   return exact.length ? Math.min(...exact) : Math.max(...candidates);
 }
+
+export const attendeeRoles = ["REQ-PARTICIPANT", "OPT-PARTICIPANT", "CHAIR", "NON-PARTICIPANT"] as const;
+export type AttendeeRole = (typeof attendeeRoles)[number];
+
+export const participationStatuses = [
+  "NEEDS-ACTION",
+  "ACCEPTED",
+  "TENTATIVE",
+  "DECLINED",
+  "DELEGATED",
+] as const;
+export type ParticipationStatus = (typeof participationStatuses)[number];
+
+/** The statuses an invitee can answer with from an invite card. */
+export const invitationResponses = ["ACCEPTED", "TENTATIVE", "DECLINED"] as const;
+export type InvitationResponse = (typeof invitationResponses)[number];
+
+/** Invitations go to at most this many attendees (the send API's recipient cap). */
+export const MAX_ATTENDEES = 50;
+
+/**
+ * `mailboxId` is set when the user organizes the event from one of their
+ * mailboxes, and null for events organized by someone else.
+ */
+export type CalendarOrganizer = { address: string; name: string | null; mailboxId: string | null };
+
+export type CalendarAttendee = {
+  address: string;
+  name: string | null;
+  role: AttendeeRole;
+  partstat: ParticipationStatus;
+  rsvp: boolean;
+};
+
+export const itipMethods = ["REQUEST", "REPLY", "CANCEL"] as const;
+export type ItipMethod = (typeof itipMethods)[number];
+
+/** Parsed iTIP message stored on an incoming email for the invite card. */
+export type InvitationSummary = {
+  method: ItipMethod;
+  /** Attachment holding the full iCalendar object. */
+  attachmentId: string;
+  uid: string;
+  sequence: number;
+  recurrenceId: number | null;
+  title: string;
+  location: string;
+  startsAt: number;
+  endsAt: number;
+  allDay: boolean;
+  timeZone: string;
+  rrule: string | null;
+  organizer: { address: string; name: string | null } | null;
+  attendees: CalendarAttendee[];
+};

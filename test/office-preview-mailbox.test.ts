@@ -30,12 +30,16 @@ it("upgrades an existing mailbox once without rewriting its emails", async () =>
       ...migrations,
       journal: { entries: migrations.journal.entries.filter((entry) => entry.idx < 5) },
     });
-    const original = { ...emailFixture(), attachmentsJson: [] };
-    await instance.insertEmail(original);
-    const before = instance.getEmail(original.id);
+    // Raw SQL: the current schema has columns later migrations add.
+    state.storage.sql.exec(`insert into emails
+      (id, conversation_id, direction, from_json, subject, timeline_at, transport_state)
+      values ('msg_atomic_preview', 'conv_atomic_preview', 'incoming',
+        '[{"address":"sender@example.test","name":null}]', 'Office', 1, 'received')`);
+    const [before] = state.storage.sql.exec("select * from emails").toArray();
     await migrate(db, migrations);
     await migrate(db, migrations);
-    expect(instance.getEmail(original.id)).toEqual(before);
+    expect(state.storage.sql.exec("select * from emails").toArray()).toMatchObject([before!]);
+    expect(instance.getEmail("msg_atomic_preview")).toMatchObject({ subject: "Office", attachmentsJson: [] });
     expect(state.storage.sql.exec("select * from pending_office_previews").toArray()).toEqual([]);
     expect(state.storage.sql.exec("select * from __drizzle_migrations").toArray())
       .toHaveLength(migrations.journal.entries.length);

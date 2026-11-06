@@ -24,6 +24,10 @@ import {
   MAILBOX_AI_MODEL,
 } from "../mail/ai-classification";
 import { globalAiProcessingEnabled } from "../ai/configuration";
+import { calendarStub } from "../calendar";
+import { calendarModuleEnabled } from "../calendar/module";
+import { createDb } from "../db/client";
+import { mailboxMembers } from "../db/schema";
 import {
   inboundMessageId,
   MissingRawMimeError,
@@ -1278,6 +1282,36 @@ export class MailboxDO extends DurableObject<Env> {
     return stored;
   }
 
+  /**
+   * Hands an incoming REPLY or CANCEL to the calendars of this mailbox's
+   * members; each calendar checks the sender against its stored event.
+   * ponytail: best effort, a failure is logged and not retried.
+   */
+  private async applyCalendarResponse(email: Email) {
+    const invitation = email.invitationJson;
+    const sender = email.fromJson[0]?.address;
+    if (!invitation || invitation.method === "REQUEST" || !sender) return;
+    const mailboxId = this.state.id.name ?? "unknown-mailbox";
+    try {
+      const members = await createDb(this.bindings.DB)
+        .select({ userId: mailboxMembers.userId })
+        .from(mailboxMembers)
+        .where(eq(mailboxMembers.mailboxId, mailboxId));
+      for (const { userId } of members) {
+        await calendarStub(this.bindings, userId).applyItip({
+          method: invitation.method,
+          uid: invitation.uid,
+          recurrenceId: invitation.recurrenceId,
+          sender,
+          mailboxId,
+          attendees: invitation.attendees,
+        });
+      }
+    } catch (error) {
+      console.error(`Could not apply calendar ${invitation.method} from ${email.id}`, error);
+    }
+  }
+
   setEmailAuthenticationResults(
     emailId: string,
     results: EmailAuthenticationResults,
@@ -1680,6 +1714,7 @@ export class MailboxDO extends DurableObject<Env> {
           rawMime,
           resolveParent: (inReplyTo, references) =>
             this.resolveParent(inReplyTo, references),
+          parseInvitations: await calendarModuleEnabled(this.bindings.DB),
         });
         let classification: EmailAiClassification | null = null;
         try {
@@ -1711,6 +1746,7 @@ export class MailboxDO extends DurableObject<Env> {
         if (!stored) {
           throw new Error("Parsed inbound email was not persisted");
         }
+        if (!classification?.spam) await this.applyCalendarResponse(stored);
         await this.finishStoredInbound(job, stored, now, true);
       } catch (error) {
         if (error instanceof UnprocessableInboundEmailError) {

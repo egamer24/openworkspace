@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
+import { useAuth } from "@/auth/auth-context";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Bubble,
@@ -42,6 +43,7 @@ import {
 } from "./conversation-reply";
 import { ConversationLoadingSkeleton } from "./conversation-loading-skeleton";
 import { DeliveryIndicator } from "./delivery-indicator";
+import { InvitationCard } from "./invitation-card";
 import { MessageAttachments } from "./message-attachments";
 import { notifyOutboundResult } from "./outbound-notification";
 import { MessageTranslation } from "./message-translation";
@@ -333,6 +335,7 @@ function MessageBubble({
   const outgoing = message.direction === "outgoing";
   const sender = message.fromName || message.fromAddress;
   const [rendersHtml, setRendersHtml] = useState(false);
+  const calendarEnabled = useAuth().modules.calendar;
   const visibilityRef = useVisibleMessageRead({
     enabled: !message.isRead && (!outgoing || showViewedBy),
     messageId: message.id,
@@ -400,6 +403,10 @@ function MessageBubble({
                 {message.quotedText}
               </CollapsibleContent>
             </Collapsible>
+          )}
+
+          {calendarEnabled && mailboxId && message.invitation && !outgoing && (
+            <InvitationCard mailboxId={mailboxId} messageId={message.id} invitation={message.invitation} />
           )}
 
           <MessageAttachments

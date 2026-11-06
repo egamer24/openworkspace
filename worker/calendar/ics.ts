@@ -7,8 +7,18 @@ import {
   wallClock,
   zonedToUtc,
   zoneOffset,
+  attendeeRoles,
+  participationStatuses,
+  type AttendeeRole,
+  type CalendarAttendee,
   type CalendarEventStatus,
+  type CalendarOrganizer,
+  itipMethods,
+  type InvitationSummary,
+  type ItipMethod,
+  type ParticipationStatus,
 } from "../../shared/calendar";
+import { normalizeEmail } from "../lib/ids";
 import { formatIcsDate, formatIcsLocal, formatIcsUtc } from "./recurrence";
 import type { CalendarEventRecord } from "./schema";
 
@@ -97,6 +107,33 @@ export function vtimezoneLines(timeZone: string, fromYear: number, toYear: numbe
   ];
 }
 
+/** Parameter values are quoted; RFC 5545 forbids DQUOTE and controls inside. */
+function paramValue(value: string) {
+  return `"${value.replace(/["\p{Cc}]/gu, "")}"`;
+}
+
+function participantLines(event: Pick<CalendarEventRecord, "organizer" | "attendees">) {
+  const lines: string[] = [];
+  if (event.organizer) {
+    const name = event.organizer.name ? `;CN=${paramValue(event.organizer.name)}` : "";
+    lines.push(`ORGANIZER${name}:mailto:${event.organizer.address}`);
+  }
+  for (const attendee of event.attendees) {
+    lines.push([
+      "ATTENDEE",
+      ...(attendee.name ? [`CN=${paramValue(attendee.name)}`] : []),
+      `ROLE=${attendee.role}`,
+      `PARTSTAT=${attendee.partstat}`,
+      `RSVP=${attendee.rsvp ? "TRUE" : "FALSE"}`,
+    ].join(";") + `:mailto:${attendee.address}`);
+  }
+  return lines;
+}
+
+/** What serialization needs from a stored or parsed event. */
+export type IcsEvent = Omit<CalendarEventRecord, "id" | "calendarId" | "createdAt" | "updatedAt">
+  & { createdAt?: number; updatedAt?: number };
+
 const statusNames: Record<CalendarEventStatus, string> = {
   confirmed: "CONFIRMED",
   tentative: "TENTATIVE",
@@ -110,17 +147,20 @@ const statusNames: Record<CalendarEventStatus, string> = {
  * time zone definition. All-day events use `VALUE=DATE`.
  */
 export function serializeCalendar(input: {
-  name: string;
-  events: CalendarEventRecord[];
+  name?: string;
+  events: IcsEvent[];
   now?: number;
+  /** iTIP method (RFC 5546); feeds and exports are PUBLISH. */
+  method?: "PUBLISH" | ItipMethod;
 }) {
   const now = input.now ?? Date.now();
+  const method = input.method ?? "PUBLISH";
   const masters = new Map(
     input.events
       .filter((event) => event.recurrenceId === null)
       .map((event) => [event.uid, event]),
   );
-  const zoned = (event: CalendarEventRecord) =>
+  const zoned = (event: IcsEvent) =>
     Boolean(event.rrule) && !event.allDay && event.timeZone !== "UTC";
   const zoneYears = new Map<string, { from: number; to: number }>();
   for (const event of masters.values()) {
@@ -139,8 +179,8 @@ export function serializeCalendar(input: {
     "VERSION:2.0",
     "PRODID:-//OpenWorkspace//Calendar//EN",
     "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    `X-WR-CALNAME:${escapeIcsText(input.name)}`,
+    `METHOD:${method}`,
+    ...(input.name === undefined ? [] : [`X-WR-CALNAME:${escapeIcsText(input.name)}`]),
   ];
   for (const [timeZone, years] of zoneYears) {
     lines.push(...vtimezoneLines(timeZone, years.from, years.to));
@@ -149,7 +189,7 @@ export function serializeCalendar(input: {
   for (const event of input.events) {
     const master = event.recurrenceId === null ? event : masters.get(event.uid);
     if (!master) continue;
-    const date = (name: string, ms: number, style: CalendarEventRecord) => {
+    const date = (name: string, ms: number, style: IcsEvent) => {
       if (style.allDay) return `${name};VALUE=DATE:${formatIcsDate(wallClock(ms, "UTC"))}`;
       if (zoned(style)) {
         return `${name};TZID=${style.timeZone}:${formatIcsLocal(wallClock(ms, style.timeZone))}`;
@@ -160,10 +200,11 @@ export function serializeCalendar(input: {
       "BEGIN:VEVENT",
       `UID:${escapeIcsText(event.uid)}`,
       `DTSTAMP:${formatIcsUtc(now)}`,
-      `CREATED:${formatIcsUtc(event.createdAt)}`,
-      `LAST-MODIFIED:${formatIcsUtc(event.updatedAt)}`,
+      ...(event.createdAt === undefined ? [] : [`CREATED:${formatIcsUtc(event.createdAt)}`]),
+      ...(event.updatedAt === undefined ? [] : [`LAST-MODIFIED:${formatIcsUtc(event.updatedAt)}`]),
       `SEQUENCE:${event.sequence}`,
       `SUMMARY:${escapeIcsText(event.title)}`,
+      ...participantLines(event),
     );
     if (event.description) lines.push(`DESCRIPTION:${escapeIcsText(event.description)}`);
     if (event.location) lines.push(`LOCATION:${escapeIcsText(event.location)}`);
@@ -183,7 +224,8 @@ export function serializeCalendar(input: {
         lines.push(date("EXDATE", exdate, event));
       }
     }
-    for (const minutes of event.reminders) {
+    // Reminders are personal; iTIP messages leave them to each recipient.
+    for (const minutes of method === "PUBLISH" ? event.reminders : []) {
       lines.push(
         "BEGIN:VALARM",
         "ACTION:DISPLAY",
@@ -229,6 +271,51 @@ export function unescapeIcsText(value: string) {
 
 class UnsupportedEvent extends Error {}
 
+/**
+ * Outlook and Exchange name zones with Windows ids (and ship a VTIMEZONE).
+ * The common ones map to IANA names so their events keep DST rules.
+ */
+const windowsZones: Record<string, string> = {
+  "UTC": "UTC",
+  "Coordinated Universal Time": "UTC",
+  "Hawaiian Standard Time": "Pacific/Honolulu",
+  "Alaskan Standard Time": "America/Anchorage",
+  "Pacific Standard Time": "America/Los_Angeles",
+  "Mountain Standard Time": "America/Denver",
+  "US Mountain Standard Time": "America/Phoenix",
+  "Central Standard Time": "America/Chicago",
+  "Eastern Standard Time": "America/New_York",
+  "Atlantic Standard Time": "America/Halifax",
+  "SA Pacific Standard Time": "America/Bogota",
+  "E. South America Standard Time": "America/Sao_Paulo",
+  "GMT Standard Time": "Europe/London",
+  "Greenwich Standard Time": "Atlantic/Reykjavik",
+  "W. Europe Standard Time": "Europe/Berlin",
+  "Romance Standard Time": "Europe/Paris",
+  "Central Europe Standard Time": "Europe/Budapest",
+  "Central European Standard Time": "Europe/Warsaw",
+  "E. Europe Standard Time": "Europe/Chisinau",
+  "FLE Standard Time": "Europe/Kiev",
+  "GTB Standard Time": "Europe/Bucharest",
+  "Russian Standard Time": "Europe/Moscow",
+  "Israel Standard Time": "Asia/Jerusalem",
+  "South Africa Standard Time": "Africa/Johannesburg",
+  "Arabian Standard Time": "Asia/Dubai",
+  "India Standard Time": "Asia/Kolkata",
+  "SE Asia Standard Time": "Asia/Bangkok",
+  "China Standard Time": "Asia/Shanghai",
+  "Singapore Standard Time": "Asia/Singapore",
+  "Tokyo Standard Time": "Asia/Tokyo",
+  "Korea Standard Time": "Asia/Seoul",
+  "AUS Eastern Standard Time": "Australia/Sydney",
+  "New Zealand Standard Time": "Pacific/Auckland",
+};
+
+function ianaZone(tzid: string) {
+  if (isValidTimeZone(tzid)) return tzid;
+  return windowsZones[tzid] ?? null;
+}
+
 function parseIcsInstant(
   value: string,
   params: Record<string, string>,
@@ -249,11 +336,11 @@ function parseIcsInstant(
     return { ms: zonedToUtc(clock, "UTC"), allDay: true, timeZone: null, utc: false };
   }
   if (utc) return { ms: zonedToUtc(clock, "UTC"), allDay: false, timeZone: null, utc: true };
-  const timeZone = params.TZID ?? floatingZone;
-  if (!isValidTimeZone(timeZone)) {
-    throw new UnsupportedEvent(`Unsupported time zone "${timeZone}"`);
+  const timeZone = ianaZone(params.TZID ?? floatingZone);
+  if (!timeZone) {
+    throw new UnsupportedEvent(`Unsupported time zone "${params.TZID}"`);
   }
-  return { ms: zonedToUtc(clock, timeZone), allDay: false, timeZone: params.TZID ?? null, utc: false };
+  return { ms: zonedToUtc(clock, timeZone), allDay: false, timeZone: params.TZID ? timeZone : null, utc: false };
 }
 
 function parseDuration(value: string) {
@@ -286,12 +373,35 @@ export type ParsedIcsEvent = {
   rrule: string | null;
   exdates: number[];
   reminders: number[];
+  organizer: CalendarOrganizer | null;
+  attendees: CalendarAttendee[];
 };
 
 export type IcsSkip = { uid: string | null; title: string | null; reason: string };
 
 function unfold(text: string) {
   return text.replace(/\r\n|\r/gu, "\n").replace(/\n[ \t]/gu, "").split("\n");
+}
+
+function calAddress(value: string) {
+  const address = value.replace(/^mailto:/iu, "").trim();
+  return address.includes("@") ? normalizeEmail(address) : null;
+}
+
+function attendeeFromLine(line: ContentLine): CalendarAttendee | null {
+  const address = calAddress(line.value);
+  if (!address) return null;
+  const role = line.params.ROLE?.toUpperCase();
+  const partstat = line.params.PARTSTAT?.toUpperCase();
+  return {
+    address,
+    name: line.params.CN?.trim() || null,
+    role: attendeeRoles.includes(role as AttendeeRole) ? role as AttendeeRole : "REQ-PARTICIPANT",
+    partstat: participationStatuses.includes(partstat as ParticipationStatus)
+      ? partstat as ParticipationStatus
+      : "NEEDS-ACTION",
+    rsvp: line.params.RSVP?.toUpperCase() === "TRUE",
+  };
 }
 
 function eventFromLines(lines: ContentLine[], floatingZone: string): ParsedIcsEvent {
@@ -348,6 +458,10 @@ function eventFromLines(lines: ContentLine[], floatingZone: string): ParsedIcsEv
     .slice(0, MAX_REMINDERS_PER_EVENT);
   const status = single("STATUS")?.value.toUpperCase();
   const sequence = Number(single("SEQUENCE")?.value ?? 0);
+  const organizerLine = single("ORGANIZER");
+  const organizerAddress = organizerLine ? calAddress(organizerLine.value) : null;
+  // Video links from Google Meet and Teams stand in for a missing location.
+  const conference = single("X-GOOGLE-CONFERENCE") ?? single("X-MICROSOFT-SKYPETEAMSMEETINGURL");
   return {
     uid: unescapeIcsText(uid),
     recurrenceId: recurrenceLine
@@ -355,7 +469,7 @@ function eventFromLines(lines: ContentLine[], floatingZone: string): ParsedIcsEv
       : null,
     title: unescapeIcsText(single("SUMMARY")?.value ?? "").slice(0, 500) || "(no title)",
     description: unescapeIcsText(single("DESCRIPTION")?.value ?? "").slice(0, 10_000),
-    location: unescapeIcsText(single("LOCATION")?.value ?? "").slice(0, 500),
+    location: unescapeIcsText(single("LOCATION")?.value || conference?.value || "").slice(0, 500),
     startsAt: start.ms,
     endsAt,
     timeZone: start.timeZone ?? (start.utc && rrule ? "UTC" : floatingZone),
@@ -366,6 +480,14 @@ function eventFromLines(lines: ContentLine[], floatingZone: string): ParsedIcsEv
     rrule,
     exdates: [...new Set(exdates)],
     reminders: [...new Set(reminders)],
+    organizer: organizerAddress
+      ? { address: organizerAddress, name: organizerLine?.params.CN?.trim() || null, mailboxId: null }
+      : null,
+    attendees: lines
+      .filter((line) => line.name === "ATTENDEE")
+      .map(attendeeFromLine)
+      .filter((attendee): attendee is CalendarAttendee => attendee !== null)
+      .slice(0, 500),
   };
 }
 
@@ -378,6 +500,7 @@ export function parseIcs(text: string, floatingZone = "UTC") {
   const skipped: IcsSkip[] = [];
   let current: ContentLine[] | null = null;
   let depth = 0;
+  let method: string | null = null;
   for (const raw of unfold(text)) {
     if (!raw.trim()) continue;
     const line = parseContentLine(raw);
@@ -387,7 +510,10 @@ export function parseIcs(text: string, floatingZone = "UTC") {
       depth = 0;
       continue;
     }
-    if (!current) continue;
+    if (!current) {
+      if (line.name === "METHOD") method = line.value.trim().toUpperCase();
+      continue;
+    }
     if (line.name === "BEGIN") depth++;
     else if (line.name === "END" && depth > 0) depth--;
     else if (line.name === "END" && line.value.toUpperCase() === "VEVENT") {
@@ -408,5 +534,30 @@ export function parseIcs(text: string, floatingZone = "UTC") {
       current.push(line);
     }
   }
-  return { events, skipped };
+  return { events, skipped, method };
+}
+
+/** Summarizes an iTIP object for the invite card; null when it is not one. */
+export function invitationSummary(text: string, attachmentId: string): InvitationSummary | null {
+  const parsed = parseIcs(text);
+  const method = parsed.method as ItipMethod | null;
+  if (!method || !itipMethods.includes(method)) return null;
+  const event = parsed.events.find((item) => item.recurrenceId === null) ?? parsed.events[0];
+  if (!event) return null;
+  return {
+    method,
+    attachmentId,
+    uid: event.uid,
+    sequence: event.sequence,
+    recurrenceId: event.recurrenceId,
+    title: event.title,
+    location: event.location,
+    startsAt: event.startsAt,
+    endsAt: event.endsAt,
+    allDay: event.allDay,
+    timeZone: event.timeZone,
+    rrule: event.rrule,
+    organizer: event.organizer && { address: event.organizer.address, name: event.organizer.name },
+    attendees: event.attendees,
+  };
 }

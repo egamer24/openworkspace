@@ -1,0 +1,1 @@
+ALTER TABLE `emails` ADD `invitation_json` text;

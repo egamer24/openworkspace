@@ -33,6 +33,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api, responseJson } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useMailboxes } from "@/mail/use-mail-data";
+import { AttendeeList } from "./attendee-status";
 import type { CalendarItem, CalendarOccurrence } from "./types";
 
 const DAY = 86_400_000;
@@ -113,7 +115,14 @@ type Draft = {
   custom: CustomRule;
   reminder: string;
   transparency: "busy" | "free";
+  /** Comma- or line-separated addresses. */
+  attendees: string;
+  mailboxId: string;
 };
+
+function attendeeAddresses(value: string) {
+  return [...new Set(value.split(/[\s,;]+/u).map((item) => item.trim()).filter((item) => item.includes("@")))];
+}
 
 function weekdayOf(date: string): WeekdayCode {
   const { year, month, day } = parseDate(date);
@@ -169,6 +178,8 @@ function initialDraft(
     },
     reminder: occurrence ? String(occurrence.reminders[0] ?? "none") : "10",
     transparency: occurrence?.transparency ?? "busy",
+    attendees: occurrence?.attendees.map((attendee) => attendee.address).join(", ") ?? "",
+    mailboxId: occurrence?.organizer?.mailboxId ?? "",
   };
   return { ...draft, repeat: presetFor(occurrence?.rrule ?? null, draft) };
 }
@@ -260,6 +271,11 @@ function EventForm({
 }) {
   const client = useQueryClient();
   const [draft, setDraft] = useState(() => initialDraft(occurrence, start, calendars));
+  const sendableMailboxes = (useMailboxes().data?.mailboxes ?? []).filter((mailbox) => mailbox.canSend);
+  const mailboxId = draft.mailboxId || sendableMailboxes[0]?.id || "";
+  // Invitations someone else organizes are answered from the invite card.
+  const organizedElsewhere = Boolean(occurrence?.organizer && !occurrence.organizer.mailboxId);
+  const invited = Boolean(occurrence?.organizer?.mailboxId && occurrence.attendees.length);
   const recurring = Boolean(occurrence?.seriesId);
   const [scope, setScope] = useState<CalendarEditScope>("this");
   const [repeatTouched, setRepeatTouched] = useState(false);
@@ -288,15 +304,21 @@ function EventForm({
         transparency: draft.transparency,
         ...times,
       };
+      const attendees = attendeeAddresses(draft.attendees).map((address) => ({ address }));
+      const invitations = organizedElsewhere ? {} : {
+        attendees,
+        ...(attendees.length || invited ? { mailboxId: mailboxId || null, sendInvitations: Boolean(mailboxId) } : {}),
+      };
       if (!occurrence) {
         return responseJson(await api.api.calendar.events.$post({
-          json: { ...fields, calendarId: draft.calendarId, rrule, reminders },
+          json: { ...fields, ...invitations, calendarId: draft.calendarId, rrule, reminders },
         }));
       }
       return responseJson(await api.api.calendar.events[":eventId"].$patch({
         param: { eventId: occurrence.eventId },
         json: {
           ...fields,
+          ...invitations,
           ...(draft.calendarId !== occurrence.calendarId ? { calendarId: draft.calendarId } : {}),
           ...(ruleChanged ? { rrule } : {}),
           ...(reminders.join() !== occurrence.reminders.join() ? { reminders } : {}),
@@ -316,9 +338,12 @@ function EventForm({
   const remove = useMutation({
     mutationFn: async () => responseJson(await api.api.calendar.events[":eventId"].$delete({
       param: { eventId: occurrence!.eventId },
-      query: recurring
-        ? { scope, occurrenceStart: String(occurrence!.occurrenceStart ?? "") || undefined }
-        : {},
+      query: {
+        ...(recurring
+          ? { scope, occurrenceStart: String(occurrence!.occurrenceStart ?? "") || undefined }
+          : {}),
+        ...(invited ? { sendInvitations: "true" as const } : {}),
+      },
     })),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: ["calendar"] });
@@ -490,6 +515,44 @@ function EventForm({
         value={draft.location}
         onChange={(event) => update({ location: event.target.value })}
       />
+      {organizedElsewhere ? (
+        <div className="space-y-1.5">
+          <Label>Organized by {occurrence!.organizer!.name ?? occurrence!.organizer!.address}</Label>
+          <AttendeeList attendees={occurrence!.attendees} />
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <Label htmlFor="event-attendees">Guests</Label>
+          <Input
+            id="event-attendees"
+            placeholder="Add guests by email, separated by commas"
+            value={draft.attendees}
+            onChange={(event) => update({ attendees: event.target.value })}
+          />
+          {(attendeeAddresses(draft.attendees).length > 0 || invited) && (
+            sendableMailboxes.length ? (
+              <Select value={mailboxId} onValueChange={(value) => value && update({ mailboxId: value })}>
+                <SelectTrigger className="w-full" aria-label="Send invitations from">
+                  <SelectValue>
+                    Send invitations from {sendableMailboxes.find((mailbox) => mailbox.id === mailboxId)?.address}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent align="start" alignItemWithTrigger={false}>
+                  {sendableMailboxes.map((mailbox) => (
+                    <SelectItem key={mailbox.id} value={mailbox.id}>{mailbox.address}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Guests are saved, but you have no mailbox to send invitations from.
+              </p>
+            )
+          )}
+          {occurrence && <AttendeeList attendees={occurrence.attendees} />}
+        </div>
+      )}
+
       <Textarea
         aria-label="Description"
         maxLength={10_000}

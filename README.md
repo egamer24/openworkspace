@@ -253,6 +253,14 @@ The calendar is off by default. An administrator turns it on under **Administrat
 - `.ics` files can be imported into a calendar; events with rules outside the supported subset (for example `BYSETPOS`, `RDATE` or non-IANA time zones) are skipped and listed.
 - MCP tokens get `list_calendars`, `list_calendar_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` and `get_free_busy`.
 
+#### Invitations (iTIP over email)
+
+- Add guests to an event and pick a mailbox you can send from: saving sends a `METHOD:REQUEST` invitation (readable text and HTML plus an `invite.ics` attachment with `Content-Type: text/calendar; method=REQUEST`) through the normal outbound path, so it appears in Sent. Edits resend it with a higher `SEQUENCE`; removed guests and deleted events get `METHOD:CANCEL`. The event shows each guest's answer.
+- The API and MCP tools record attendees but only email them with `sendInvitations: true`.
+- Received invitations (Google Calendar, Outlook and other iTIP senders) show a card on the message with the time in your zone, the organizer, conflicts with your calendar, and Accept / Maybe / Decline. Answering sends `METHOD:REPLY` to the organizer from the receiving mailbox; accepted and tentative events are added to your first calendar, declined ones are removed.
+- Incoming `REPLY` messages update the guest's answer on your event, and `CANCEL` messages mark the event cancelled. Both are only applied when the sender is the invited guest or the event's organizer.
+- Auto-responders should skip iTIP replies and cancellations: they carry a `text/calendar` part or attachment whose Content-Type has `method=REPLY` or `method=CANCEL` (stored messages expose it as `invitation.method`).
+
 ## License
 
 Licensed under the [Apache License, Version 2.0](LICENSE).

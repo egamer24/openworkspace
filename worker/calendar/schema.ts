@@ -9,6 +9,8 @@ import {
 import {
   calendarEventStatuses,
   calendarTransparencies,
+  type CalendarAttendee,
+  type CalendarOrganizer,
 } from "../../shared/calendar";
 
 export const calendars = sqliteTable("calendars", {
@@ -60,6 +62,11 @@ export const events = sqliteTable(
       .default(sql`'[]'`),
     reminders: text("reminders", { mode: "json" })
       .$type<number[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    organizer: text("organizer", { mode: "json" }).$type<CalendarOrganizer>(),
+    attendees: text("attendees", { mode: "json" })
+      .$type<CalendarAttendee[]>()
       .notNull()
       .default(sql`'[]'`),
     createdAt: integer("created_at").notNull(),
