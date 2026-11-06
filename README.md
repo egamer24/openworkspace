@@ -211,6 +211,7 @@ Outbound mail is logged locally instead of sent. To test push locally, add a key
 - **Recover access** — admin issues a one-hour recovery link; redeeming it replaces all passkeys and removes existing sessions and push registrations.
 - **Settings** — each person manages their avatar, appearance, current-device push subscription, and per-mailbox notification preferences.
 - **Mailboxes** — an admin can create multiple personal addresses for a user or shared addresses with read-only or read-and-send members. Each user has one primary personal mailbox for identity and recovery.
+- **Trash and Spam** — members with send access can empty Trash or Spam from the folder header, and choose to delete conversations automatically after they have been there for 7, 30 or 90 days (any 1–365 through the API or MCP). Each mailbox remembers when a conversation entered its current folder, and cleanup runs on the mailbox's own alarm in batches of 100, so no cron job is needed. Conversations already in Trash or Spam when this was deployed count from the deploy time.
 - **PWA notifications** — desktop and Android browsers can subscribe from Settings. On iPhone and iPad, first add OpenWorkspace to the Home Screen, then enable notifications from the installed app.
 
 ### Connect an MCP client

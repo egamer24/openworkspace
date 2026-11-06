@@ -109,6 +109,41 @@ export function registerMailActionTools(server: McpServer, api: AccountApiClient
   );
 
   server.registerTool(
+    "empty_folder",
+    {
+      title: "Empty Trash or Spam",
+      description: "Permanently delete up to 100 of the oldest conversations in Trash or Spam. Returns { deleted, remaining }; call again while remaining is above 0. Requires send access.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        folder: z.enum(["trash", "spam"]),
+      }),
+      annotations: { ...write, destructiveHint: true, idempotentHint: false },
+    },
+    ({ mailboxId, folder }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/folders/${folder}/empty`,
+      { method: "POST" },
+    )),
+  );
+
+  server.registerTool(
+    "set_retention",
+    {
+      title: "Set Trash and Spam retention",
+      description: "Automatically delete conversations after they have been in Trash or Spam for a number of days (1 to 365), or null to keep them. Requires send access.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        trashDays: z.number().int().min(1).max(365).nullable(),
+        spamDays: z.number().int().min(1).max(365).nullable(),
+      }),
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ mailboxId, ...retention }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/retention`,
+      { method: "PUT", json: retention },
+    )),
+  );
+
+  server.registerTool(
     "create_folder",
     {
       title: "Create custom folder",
