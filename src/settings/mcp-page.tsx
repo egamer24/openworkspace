@@ -27,18 +27,32 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { api, responseJson } from "@/lib/api";
+import type { AccountApiTokenScope } from "../../shared/auth";
 import { McpConnectionGuide } from "./mcp-connection-guide";
 
 type CreatedToken = {
   id: string;
   name: string;
   token: string;
+  scope: AccountApiTokenScope;
+};
+
+const scopeLabels: Record<AccountApiTokenScope, string> = {
+  full: "Full access",
+  send: "Send only",
 };
 
 function formatDate(value: string | Date | null) {
@@ -57,6 +71,7 @@ async function copy(value: string, label: string) {
 export function McpSettings() {
   const client = useQueryClient();
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<AccountApiTokenScope>("full");
   const [isCreating, setIsCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<CreatedToken | null>(null);
   const endpoint = new URL("/mcp", window.location.origin).toString();
@@ -84,9 +99,10 @@ export function McpSettings() {
     setIsCreating(true);
     try {
       const result = await responseJson(
-        await api.api.auth["api-tokens"].$post({ json: { name: tokenName } }),
+        await api.api.auth["api-tokens"].$post({ json: { name: tokenName, scope } }),
       );
       setName("");
+      setScope("full");
       setCreatedToken(result.token);
       await client.invalidateQueries({ queryKey: ["account-api-tokens"] });
     } catch (error) {
@@ -148,6 +164,18 @@ export function McpSettings() {
                   placeholder="Codex on MacBook"
                   onChange={(event) => setName(event.target.value)}
                 />
+                <Select
+                  value={scope}
+                  onValueChange={(value) => setScope(value as AccountApiTokenScope)}
+                >
+                  <SelectTrigger className="sm:w-40" aria-label="Token access">
+                    <SelectValue>{scopeLabels[scope]}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="full">{scopeLabels.full}</SelectItem>
+                    <SelectItem value="send">{scopeLabels.send}</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button type="submit" disabled={!name.trim() || isCreating}>
                   {isCreating ? <LoaderCircle className="animate-spin" /> : <Plus />}
                   Create token
@@ -155,7 +183,9 @@ export function McpSettings() {
               </div>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              The secret is shown once. A token created by an administrator can use administrative tools.
+              The secret is shown once. A full-access token created by an administrator can use administrative tools.
+              A send-only token cannot use MCP; it can only list your mailboxes, upload attachments, and send new mail
+              through <code className="font-mono text-foreground/75">POST /api/mail/messages</code>, for apps such as invoicing tools.
             </p>
           </form>
 
@@ -186,7 +216,12 @@ export function McpSettings() {
                       <KeyRound className="size-4" />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{token.name}</p>
+                      <p className="flex items-center gap-2 text-sm font-medium">
+                        <span className="truncate">{token.name}</span>
+                        {token.scope === "send" ? (
+                          <Badge variant="outline">{scopeLabels.send}</Badge>
+                        ) : null}
+                      </p>
                       <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                         {token.tokenPrefix}… · {formatDate(token.lastUsedAt)}
                       </p>
@@ -236,7 +271,7 @@ export function McpSettings() {
           <div className="rounded-xl bg-surface-sunken p-4 font-mono text-xs leading-relaxed break-all ring-1 ring-border">
             {createdToken?.token}
           </div>
-          {createdToken ? (
+          {createdToken?.scope === "full" ? (
             <McpConnectionGuide
               className="border-t border-border/70 pt-4"
               endpoint={endpoint}

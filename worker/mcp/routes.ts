@@ -20,6 +20,9 @@ export const mcpRoutes = new Hono<AppEnv>().all("/", async (c) => {
     c.header("www-authenticate", 'Bearer realm="OpenWorkspace MCP"');
     return apiError(c, 401, "UNAUTHORIZED", "A valid account API token is required");
   }
+  if (identity.scope !== "full") {
+    return apiError(c, 403, "FORBIDDEN", "MCP requires a full-access API token");
+  }
 
   const authInfo: AuthInfo = {
     token,

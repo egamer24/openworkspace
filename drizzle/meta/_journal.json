@@ -71,6 +71,13 @@
       "when": 1788200117539,
       "tag": "0009_flippant_nekra",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793937048453,
+      "tag": "0010_account_api_token_scope",
+      "breakpoints": true
     }
   ]
 }

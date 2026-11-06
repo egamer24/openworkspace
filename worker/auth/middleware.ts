@@ -2,7 +2,11 @@ import { createMiddleware } from "hono/factory";
 import type { Context } from "hono";
 import type { AppEnv } from "../env";
 import { apiError } from "../lib/http";
-import { authenticateAccountApiToken, bearerToken } from "./api-tokens";
+import {
+  authenticateAccountApiToken,
+  bearerToken,
+  tokenScopeAllows,
+} from "./api-tokens";
 import { readSessionFromContext } from "./session";
 
 type AccountSession = NonNullable<
@@ -38,6 +42,9 @@ export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   if (!identity) {
     c.header("www-authenticate", 'Bearer realm="OpenWorkspace API"');
     return apiError(c, 401, "UNAUTHORIZED", "Authentication is required");
+  }
+  if (!tokenScopeAllows(identity.scope, c.req.method, c.req.path)) {
+    return apiError(c, 403, "FORBIDDEN", "This API token's scope does not allow this request");
   }
   c.set("user", identity.user);
   c.set("authKind", "api-token");

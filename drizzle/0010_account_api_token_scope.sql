@@ -1,0 +1,1 @@
+ALTER TABLE `account_api_tokens` ADD `scope` text DEFAULT 'full' NOT NULL;

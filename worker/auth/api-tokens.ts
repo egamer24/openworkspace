@@ -1,4 +1,5 @@
 import { and, eq, isNull, lt, or } from "drizzle-orm";
+import type { AccountApiTokenScope } from "../../shared/auth";
 import type { SessionUser } from "../env";
 import { createDb, type Database } from "../db/client";
 import { accountApiTokens, users } from "../db/schema";
@@ -12,8 +13,31 @@ const LAST_USED_WRITE_INTERVAL_MS = 5 * 60 * 1_000;
 export type AccountApiIdentity = {
   tokenId: string;
   tokenHash: string;
+  scope: AccountApiTokenScope;
   user: SessionUser;
 };
+
+// Paths are matched both under the public `/api` mount and the internal
+// account API mount used by MCP. Anything not listed is denied.
+const SEND_SCOPE_ROUTES: ReadonlyArray<readonly [string, RegExp]> = [
+  ["GET", /^(?:\/api)?\/mail\/mailboxes$/u],
+  ["POST", /^(?:\/api)?\/mail\/uploads$/u],
+  ["PUT", /^(?:\/api)?\/mail\/uploads\/content$/u],
+  ["POST", /^(?:\/api)?\/mail\/uploads\/[^/]+\/complete$/u],
+  ["DELETE", /^(?:\/api)?\/mail\/uploads\/[^/]+$/u],
+  ["POST", /^(?:\/api)?\/mail\/messages$/u],
+];
+
+export function tokenScopeAllows(
+  scope: AccountApiTokenScope,
+  method: string,
+  path: string,
+) {
+  if (scope === "full") return true;
+  return SEND_SCOPE_ROUTES.some(([allowedMethod, pattern]) =>
+    allowedMethod === method && pattern.test(path)
+  );
+}
 
 export class AccountApiTokenLimitError extends Error {}
 
@@ -34,6 +58,7 @@ export async function authenticateAccountApiToken(
   const [identity] = await db
     .select({
       tokenId: accountApiTokens.id,
+      scope: accountApiTokens.scope,
       lastUsedAt: accountApiTokens.lastUsedAt,
       id: users.id,
       name: users.name,
@@ -75,14 +100,15 @@ export async function authenticateAccountApiToken(
     }
   }
 
-  const { tokenId, lastUsedAt: _lastUsedAt, ...user } = identity;
-  return { tokenId, tokenHash, user };
+  const { tokenId, scope, lastUsedAt: _lastUsedAt, ...user } = identity;
+  return { tokenId, tokenHash, scope, user };
 }
 
 export async function createAccountApiToken(
   db: Database,
   userId: string,
   name: string,
+  scope: AccountApiTokenScope = "full",
 ) {
   const existing = await db
     .select({ id: accountApiTokens.id })
@@ -101,6 +127,7 @@ export async function createAccountApiToken(
     name,
     tokenHash: await hashToken(token),
     tokenPrefix: token.slice(0, 12),
+    scope,
     createdAt: new Date(),
   };
   await db.insert(accountApiTokens).values(row);
@@ -108,6 +135,7 @@ export async function createAccountApiToken(
     id: row.id,
     name: row.name,
     tokenPrefix: row.tokenPrefix,
+    scope: row.scope,
     createdAt: row.createdAt,
     token,
   };

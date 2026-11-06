@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { accessLinkKinds } from "../../shared/auth";
+import { accessLinkKinds, accountApiTokenScopes } from "../../shared/auth";
 import {
   webhookDeliveryStatuses,
   webhookEventTypes,
@@ -276,6 +276,9 @@ export const accountApiTokens = sqliteTable(
     name: text("name").notNull(),
     tokenHash: text("token_hash").notNull(),
     tokenPrefix: text("token_prefix").notNull(),
+    scope: text("scope", { enum: accountApiTokenScopes })
+      .notNull()
+      .default("full"),
     lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
     createdAt: integer("created_at", { mode: "timestamp_ms" })
       .notNull()
