@@ -107,13 +107,20 @@ export function prepareUnprocessableInboundEmail(input: {
   };
 }
 
+/** The stored row plus parsed bodies the spam filter inspects in memory. */
+export type PreparedInboundEmail = {
+  email: NewEmail;
+  html: string | null;
+  hasTextPart: boolean;
+};
+
 export async function prepareInboundEmail(input: {
   env: Env;
   mailboxId: string;
   job: PendingInbound;
   rawMime: ArrayBuffer;
   resolveParent: (inReplyTo: string[], references: string[]) => Email | null;
-}): Promise<NewEmail> {
+}): Promise<PreparedInboundEmail> {
   const { job } = input;
   const parsed = await parseMime(input.rawMime);
   const inReplyTo = messageIds(parsed.inReplyTo);
@@ -185,7 +192,7 @@ export async function prepareInboundEmail(input: {
     });
   }
 
-  return {
+  const email: NewEmail = {
     id: messageId,
     conversationId: parent && !detached ? parent.conversationId : createId("conv"),
     direction: "incoming",
@@ -209,5 +216,10 @@ export async function prepareInboundEmail(input: {
     timelineAt: job.receivedAt,
     transportState: "received",
     deliveryStatusJson: [],
+  };
+  return {
+    email,
+    html: parsed.html ?? null,
+    hasTextPart: Boolean(parsed.text?.trim()),
   };
 }

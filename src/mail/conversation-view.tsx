@@ -12,6 +12,7 @@ import {
   Mail,
   MailOpen,
   RotateCw,
+  ShieldAlert,
   Trash2,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -46,7 +47,11 @@ import { MessageAttachments } from "./message-attachments";
 import { notifyOutboundResult } from "./outbound-notification";
 import { MessageTranslation } from "./message-translation";
 import { ToolbarTooltip } from "./toolbar-tooltip";
-import { useResendMessage, useSetMessageRead } from "./use-mail-data";
+import {
+  useResendMessage,
+  useSetMessageRead,
+  useSetSpamSender,
+} from "./use-mail-data";
 import { useVisibleMessageRead } from "./use-visible-message-read";
 import type {
   Mailbox,
@@ -77,6 +82,7 @@ export function ConversationView({
   onBack,
   onArchive,
   onRestore,
+  onReportSpam,
   onTrash,
   onMarkRead,
   onMarkUnread,
@@ -99,6 +105,7 @@ export function ConversationView({
   onBack: () => void;
   onArchive: () => void;
   onRestore: () => void;
+  onReportSpam: () => void;
   onTrash: () => void;
   onMarkRead?: () => void;
   onMarkUnread?: () => void;
@@ -202,6 +209,15 @@ export function ConversationView({
               <Inbox />
             </ConversationToolbarButton>
           )}
+          {mailboxState === "active" && (
+            <ConversationToolbarButton
+              label="Report spam"
+              disabled={sharedActionPending}
+              onClick={onReportSpam}
+            >
+              <ShieldAlert />
+            </ConversationToolbarButton>
+          )}
           {mailboxState !== "trash" && (
             <ConversationToolbarButton
               label="Move conversation to trash"
@@ -274,6 +290,7 @@ export function ConversationView({
                   mailboxId={mailbox?.id}
                   showAvatar={shouldShowAvatar(previous, message)}
                   canForward={Boolean(mailbox?.canSend)}
+                  canManageSpam={Boolean(mailbox?.canSend)}
                   showViewedBy={mailbox?.kind === "shared"}
                   onViewed={() => markViewed(message.id)}
                   onReply={(action) => setReplySelection({
@@ -312,6 +329,7 @@ function MessageBubble({
   mailboxId,
   showAvatar,
   canForward,
+  canManageSpam,
   showViewedBy,
   onViewed,
   onReply,
@@ -323,6 +341,7 @@ function MessageBubble({
   mailboxId?: string;
   showAvatar: boolean;
   canForward: boolean;
+  canManageSpam: boolean;
   showViewedBy: boolean;
   onViewed: () => Promise<void>;
   onReply: (action: ReplyAction) => void;
@@ -376,6 +395,7 @@ function MessageBubble({
           mailboxId={mailboxId}
           sender={sender}
           outgoing={outgoing}
+          canManageSpam={canManageSpam}
         />
         <BubbleContent className="w-full min-w-36 px-4 py-3">
           {mailboxId && (message.bodyText || message.bodyHtml) ? (
@@ -513,12 +533,30 @@ function MessageMetadata({
   mailboxId,
   sender,
   outgoing,
+  canManageSpam,
 }: {
   message: MessageDetail;
   mailboxId?: string;
   sender: string;
   outgoing: boolean;
+  canManageSpam: boolean;
 }) {
+  const setSpamSender = useSetSpamSender();
+  const spam = message.spam;
+
+  function listSender(list: "allow" | "block") {
+    if (!mailboxId) return;
+    setSpamSender.mutate(
+      { mailboxId, entry: message.fromAddress, list },
+      {
+        onSuccess: () => toast.success(list === "allow"
+          ? `${message.fromAddress} will never go to Spam`
+          : `Mail from ${message.fromAddress} will go to Spam`),
+        onError: (error) => toast.error(error.message),
+      },
+    );
+  }
+
   return (
     <details className={cn("group/meta max-w-full px-1 text-xs", outgoing && "text-right")}>
       <summary className={cn(
@@ -527,6 +565,14 @@ function MessageMetadata({
       )}>
         <span className="min-w-0 truncate text-[0.8125rem] font-semibold text-foreground">{outgoing ? "You" : sender}</span>
         <time className="shrink-0 text-[11px] tabular-nums">{format(new Date(message.timelineAt), "MMM d · HH:mm")}</time>
+        {spam && spam.verdict !== "clean" && (
+          <span className={cn(
+            "shrink-0 rounded-full px-1.5 text-[10px] font-semibold",
+            spam.verdict === "spam" ? "bg-destructive/10 text-destructive" : "bg-warning/15 text-warning",
+          )}>
+            {spam.verdict === "spam" ? `Spam score ${spam.score}` : "Suspicious"}
+          </span>
+        )}
         <ChevronDown className="size-3 shrink-0 transition-transform group-open/meta:rotate-180" />
       </summary>
       <dl className={cn(
@@ -548,6 +594,52 @@ function MessageMetadata({
               <span className="text-muted-foreground">
                 {` · Spam score ${Math.round(message.aiClassification.spamConfidence * 100)}% · ${message.aiClassification.reason}`}
               </span>
+            </dd>
+          </>
+        )}
+        {spam && (
+          <>
+            <dt className="text-muted-foreground">Spam check</dt>
+            <dd>
+              <span className={spam.verdict === "spam"
+                ? "text-destructive"
+                : spam.verdict === "suspicious" ? "text-warning" : "text-success"}>
+                {spam.verdict === "spam" ? "Spam" : spam.verdict === "suspicious" ? "Suspicious" : "Passed"}
+              </span>
+              <span className="text-muted-foreground">{` · Score ${spam.score}`}</span>
+              {spam.reasons.length > 0 && (
+                <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                  {spam.reasons.map((item) => (
+                    <li key={item.reason}>
+                      <span className="tabular-nums">{item.points > 0 ? `+${item.points}` : item.points}</span>
+                      {` ${item.reason}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </dd>
+          </>
+        )}
+        {!outgoing && canManageSpam && mailboxId && (
+          <>
+            <dt className="text-muted-foreground">Sender</dt>
+            <dd className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="font-medium text-foreground hover:underline disabled:opacity-50"
+                disabled={setSpamSender.isPending}
+                onClick={() => listSender("allow")}
+              >
+                Always allow sender
+              </button>
+              <button
+                type="button"
+                className="font-medium text-foreground hover:underline disabled:opacity-50"
+                disabled={setSpamSender.isPending}
+                onClick={() => listSender("block")}
+              >
+                Always block sender
+              </button>
             </dd>
           </>
         )}

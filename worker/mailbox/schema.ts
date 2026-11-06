@@ -13,8 +13,10 @@ import type {
   EmailAuthenticationResults,
   MailAddress,
   RecipientDeliveryStatus,
+  SpamReason,
   StoredAttachment,
 } from "./model";
+import { spamVerdicts } from "./model";
 
 /**
  * Only custom classification folders are stored. Inbox, Sent, Archive, Spam,
@@ -139,6 +141,10 @@ export const emails = sqliteTable(
       .$type<EmailAuthenticationResults>(),
     aiClassificationJson: text("ai_classification_json", { mode: "json" })
       .$type<EmailAiClassification>(),
+    spamScore: integer("spam_score"),
+    spamVerdict: text("spam_verdict", { enum: spamVerdicts }),
+    spamReasonsJson: text("spam_reasons_json", { mode: "json" })
+      .$type<SpamReason[]>(),
     attachmentsJson: text("attachments_json", { mode: "json" })
       .$type<StoredAttachment[]>()
       .notNull()
@@ -219,6 +225,26 @@ export const mailboxAiConfiguration = sqliteTable(
     instructions: text("instructions").notNull().default(""),
     confidenceThreshold: integer("confidence_threshold").notNull().default(75),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+);
+
+export const spamFilterSettings = sqliteTable(
+  "spam_filter_settings",
+  {
+    id: text("id").primaryKey(),
+    spamThreshold: integer("spam_threshold").notNull(),
+    suspiciousThreshold: integer("suspicious_threshold").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+);
+
+/** Allow/block entries are a lowercased address or domain. */
+export const spamSenderRules = sqliteTable(
+  "spam_sender_rules",
+  {
+    entry: text("entry").primaryKey(),
+    list: text("list", { enum: ["allow", "block"] }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
 );
 

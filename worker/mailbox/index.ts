@@ -31,7 +31,21 @@ import {
   prepareUnprocessableInboundEmail,
   readInboundRawMime,
   UnprocessableInboundEmailError,
+  type PreparedInboundEmail,
 } from "../mail/inbound";
+import {
+  assessSpam,
+  DEFAULT_SPAM_THRESHOLD,
+  DEFAULT_SUSPICIOUS_THRESHOLD,
+  matchSenderList,
+  MAX_SPAM_SENDER_RULES,
+  parseAuthenticationResults,
+  readHeaderBlock,
+  spamSenderCandidates,
+  type SpamAssessment,
+  type SpamSenderList,
+  type SpamThresholds,
+} from "../mail/spam-filter";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
 import {
   suggestParticipants,
@@ -60,6 +74,8 @@ import {
   mailboxAiConfiguration,
   pendingInbound,
   pendingObjectDeletions,
+  spamFilterSettings,
+  spamSenderRules,
   type Email,
   type FolderRecord,
   type NewEmail,
@@ -81,6 +97,8 @@ const schema = {
   mailboxAiConfiguration,
   pendingInbound,
   pendingObjectDeletions,
+  spamFilterSettings,
+  spamSenderRules,
 };
 type MailboxDatabase = DrizzleSqliteDODatabase<typeof schema>;
 const INBOUND_ALARM_BATCH_SIZE = 1;
@@ -90,6 +108,7 @@ const MAX_INBOUND_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
 const ALARM_WAKE_DELAY_MS = 1_000;
 const PRESENCE_TTL_MS = 60_000;
 const AI_CONFIGURATION_ID = "default";
+const SPAM_SETTINGS_ID = "default";
 
 type MailboxSocketAttachment = {
   userId: string;
@@ -145,6 +164,11 @@ export type ConversationListItem = {
   messageCount: number;
   unreadCount: number;
   hasIncoming: boolean;
+};
+
+export type SpamSettings = SpamThresholds & {
+  allow: string[];
+  block: string[];
 };
 
 export type SubmitOutgoingResult = {
@@ -900,6 +924,152 @@ export class MailboxDO extends DurableObject<Env> {
     return email?.attachmentsJson.find((file) => file.id === attachmentId) ?? null;
   }
 
+  private spamThresholds(): SpamThresholds {
+    const stored = this.db
+      .select()
+      .from(spamFilterSettings)
+      .where(eq(spamFilterSettings.id, SPAM_SETTINGS_ID))
+      .all()[0];
+    return {
+      spamThreshold: stored?.spamThreshold ?? DEFAULT_SPAM_THRESHOLD,
+      suspiciousThreshold: stored?.suspiciousThreshold ?? DEFAULT_SUSPICIOUS_THRESHOLD,
+    };
+  }
+
+  getSpamSettings(): SpamSettings {
+    const rules = this.db
+      .select()
+      .from(spamSenderRules)
+      .orderBy(asc(spamSenderRules.entry))
+      .all();
+    return {
+      ...this.spamThresholds(),
+      allow: rules.filter((rule) => rule.list === "allow").map((rule) => rule.entry),
+      block: rules.filter((rule) => rule.list === "block").map((rule) => rule.entry),
+    };
+  }
+
+  /** Replaces thresholds and both lists. Entries arrive normalized by the API. */
+  setSpamSettings(settings: SpamSettings) {
+    const allow = [...new Set(settings.allow)];
+    const block = [...new Set(settings.block)].filter((entry) => !allow.includes(entry));
+    if (
+      settings.suspiciousThreshold < 1
+      || settings.spamThreshold > 100
+      || settings.suspiciousThreshold >= settings.spamThreshold
+      || allow.length + block.length > MAX_SPAM_SENDER_RULES
+    ) {
+      throw new Error("Invalid spam filter settings");
+    }
+    const now = new Date();
+    this.db.transaction((tx) => {
+      const thresholds = {
+        spamThreshold: settings.spamThreshold,
+        suspiciousThreshold: settings.suspiciousThreshold,
+        updatedAt: now,
+      };
+      tx.insert(spamFilterSettings)
+        .values({ id: SPAM_SETTINGS_ID, ...thresholds })
+        .onConflictDoUpdate({ target: spamFilterSettings.id, set: thresholds })
+        .run();
+      tx.delete(spamSenderRules).run();
+      for (const [list, entries] of [["allow", allow], ["block", block]] as const) {
+        for (const entry of entries) {
+          tx.insert(spamSenderRules).values({ entry, list, createdAt: now }).run();
+        }
+      }
+    });
+    return this.getSpamSettings();
+  }
+
+  /** Adds an entry, moving it if it is already on the other list. */
+  setSpamSender(entry: string, list: SpamSenderList) {
+    const added = this.db.transaction((tx) => {
+      const existing = tx
+        .select({ entry: spamSenderRules.entry })
+        .from(spamSenderRules)
+        .where(eq(spamSenderRules.entry, entry))
+        .all()[0];
+      if (!existing) {
+        const count = tx.select({ count: sql<number>`count(*)` }).from(spamSenderRules).all()[0]?.count ?? 0;
+        if (count >= MAX_SPAM_SENDER_RULES) return false;
+      }
+      tx.insert(spamSenderRules)
+        .values({ entry, list, createdAt: new Date() })
+        .onConflictDoUpdate({ target: spamSenderRules.entry, set: { list } })
+        .run();
+      return true;
+    });
+    return added ? { status: "ok" as const, settings: this.getSpamSettings() } : { status: "limit" as const };
+  }
+
+  removeSpamSender(entry: string) {
+    const removed = this.db
+      .delete(spamSenderRules)
+      .where(eq(spamSenderRules.entry, entry))
+      .returning({ entry: spamSenderRules.entry })
+      .all().length > 0;
+    return removed ? this.getSpamSettings() : null;
+  }
+
+  private senderSpamList(sender: string) {
+    const rules = this.db
+      .select({ list: spamSenderRules.list })
+      .from(spamSenderRules)
+      .where(inArray(spamSenderRules.entry, spamSenderCandidates(sender)))
+      .all();
+    return matchSenderList(rules.map((rule) => rule.list));
+  }
+
+  private senderRelationship(sender: string) {
+    const address = sender.toLowerCase();
+    const domain = address.slice(address.lastIndexOf("@") + 1);
+    // ponytail: scans every outgoing recipient per delivery; add an indexed
+    // correspondents table if very large mailboxes make this slow.
+    const row = this.state.storage.sql.exec<{
+      known_address: number | null;
+      known_domain: number;
+    }>(`
+      select max(address = ?) as known_address, count(*) as known_domain
+      from (
+        select lower(json_extract(recipient.value, '$.address')) as address
+        from emails, json_each(emails.to_json) recipient
+        where emails.direction = 'outgoing'
+        union all
+        select lower(json_extract(recipient.value, '$.address'))
+        from emails, json_each(emails.cc_json) recipient
+        where emails.direction = 'outgoing'
+        union all
+        select lower(json_extract(recipient.value, '$.address'))
+        from emails, json_each(emails.bcc_json) recipient
+        where emails.direction = 'outgoing'
+      )
+      where substr(address, instr(address, '@') + 1) = ?
+    `, address, domain).one();
+    return {
+      address: Boolean(row.known_address),
+      domain: row.known_domain > 0,
+    };
+  }
+
+  private assessInboundSpam(
+    rawMime: ArrayBuffer,
+    prepared: PreparedInboundEmail,
+  ): SpamAssessment {
+    const { email } = prepared;
+    const from = email.fromJson[0] ?? { address: "", name: null };
+    return assessSpam({
+      authentication: parseAuthenticationResults(readHeaderBlock(rawMime)),
+      relationship: this.senderRelationship(from.address),
+      senderList: this.senderSpamList(from.address),
+      from,
+      recipientCount: (email.toJson?.length ?? 0) + (email.ccJson?.length ?? 0),
+      html: prepared.html,
+      hasTextPart: prepared.hasTextPart,
+      attachments: email.attachmentsJson ?? [],
+    }, this.spamThresholds());
+  }
+
   async completeOfficePreview(emailId: string, attachmentId: string, sourceKey: string, status: "ready" | "failed") {
     const email = this.getEmail(emailId);
     const file = email?.attachmentsJson.find((file) => file.id === attachmentId && file.r2Key === sourceKey);
@@ -1225,6 +1395,7 @@ export class MailboxDO extends DurableObject<Env> {
   private insertClassifiedInboundEmail(
     email: NewEmail,
     classification: EmailAiClassification | null,
+    spam: SpamAssessment,
   ) {
     email = prepareOfficePreviews(email);
     const stored = this.db.transaction((tx) => {
@@ -1243,6 +1414,9 @@ export class MailboxDO extends DurableObject<Env> {
         .values({
           ...email,
           aiClassificationJson: normalizedClassification,
+          spamScore: spam.score,
+          spamVerdict: spam.verdict,
+          spamReasonsJson: spam.reasons,
         })
         .onConflictDoNothing()
         .returning()
@@ -1250,7 +1424,11 @@ export class MailboxDO extends DurableObject<Env> {
       if (!inserted) return null;
       insertOfficePreviewJobs(this.state.storage.sql, email);
 
-      if (normalizedClassification?.spam) {
+      // The local verdict already reflects the lists. AI may add a spam
+      // decision, but never for an allowed sender.
+      const isSpam = spam.verdict === "spam"
+        || (spam.senderList !== "allow" && Boolean(normalizedClassification?.spam));
+      if (isSpam) {
         tx.update(conversations)
           .set({ mailboxState: "spam", folderId: null })
           .where(and(
@@ -1673,7 +1851,7 @@ export class MailboxDO extends DurableObject<Env> {
 
       try {
         const rawMime = await readInboundRawMime(this.bindings, job);
-        const email = await prepareInboundEmail({
+        const prepared = await prepareInboundEmail({
           env: this.bindings,
           mailboxId: this.state.id.name ?? "unknown-mailbox",
           job,
@@ -1681,6 +1859,7 @@ export class MailboxDO extends DurableObject<Env> {
           resolveParent: (inReplyTo, references) =>
             this.resolveParent(inReplyTo, references),
         });
+        const spam = this.assessInboundSpam(rawMime, prepared);
         let classification: EmailAiClassification | null = null;
         try {
           classification = await this.classifyInbound(rawMime);
@@ -1707,7 +1886,11 @@ export class MailboxDO extends DurableObject<Env> {
             error,
           );
         }
-        const stored = this.insertClassifiedInboundEmail(email, classification);
+        const stored = this.insertClassifiedInboundEmail(
+          prepared.email,
+          classification,
+          spam,
+        );
         if (!stored) {
           throw new Error("Parsed inbound email was not persisted");
         }

@@ -22,6 +22,15 @@ export type EmailAuthenticationResults = {
   spamThreshold: number | null;
 };
 
+export const spamVerdicts = ["clean", "suspicious", "spam"] as const;
+export type SpamVerdict = (typeof spamVerdicts)[number];
+
+/** One local spam signal: positive points raise the score, negative lower it. */
+export type SpamReason = {
+  points: number;
+  reason: string;
+};
+
 export type MailboxAiConfiguration = {
   instructions: string;
   confidenceThreshold: number;

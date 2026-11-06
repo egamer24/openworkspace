@@ -10,6 +10,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Personal and shared mailboxes** — multiple owned addresses plus read-only or read-and-send access per member
 - **Multiple domains** — accept provisioned addresses across manually configured Cloudflare mail zones
 - **Delivery status** — bounces, deferrals, and complaints surface in the app
+- **Local spam filter** — every incoming message is scored inside its mailbox's Durable Object; no content leaves the Worker
 - **Attachment previews** — PDF, images, text, and background PDF conversion for Office documents
 - **Realtime and push** — mailbox-scoped WebSockets plus optional PWA notifications
 - **Signed webhooks** — account-wide email and administration events with retry history
@@ -212,6 +213,7 @@ Outbound mail is logged locally instead of sent. To test push locally, add a key
 - **Settings** — each person manages their avatar, appearance, current-device push subscription, and per-mailbox notification preferences.
 - **Mailboxes** — an admin can create multiple personal addresses for a user or shared addresses with read-only or read-and-send members. Each user has one primary personal mailbox for identity and recovery.
 - **PWA notifications** — desktop and Android browsers can subscribe from Settings. On iPhone and iPad, first add OpenWorkspace to the Home Screen, then enable notifications from the installed app.
+- **Spam filter** — incoming mail gets a local 0–100 score from Cloudflare's `Authentication-Results` header (DMARC, SPF, DKIM; only the one with authserv-id `mx.cloudflare.net` is trusted), whether the mailbox has written to the sender or their domain, structure checks (display names showing another address, mismatched link domains, HTML-only bodies, long recipient lists), and risky attachments. By default a score of 70 or more moves the conversation to Spam and 40–69 marks the message as suspicious in Inbox; each message lists its reasons under its details. Members with send access set the thresholds and sender allow and block lists (address or domain) under **Settings → Spam filter**, or with **Always allow** / **Always block** on a message. Allowed senders never go to Spam, blocked senders always do, and optional AI classification can only add a spam decision on top.
 
 ### Connect an MCP client
 

@@ -294,6 +294,7 @@ export function MailShell({ mailboxId }: { mailboxId?: string }) {
             onBack={() => navigate({ conversation: null })}
             onArchive={() => mutateConversation({ mailboxState: "archive" }, true)}
             onRestore={() => mutateConversation({ mailboxState: "active" }, true)}
+            onReportSpam={() => mutateConversation({ mailboxState: "spam" }, true)}
             onTrash={() => mutateConversation({ mailboxState: "trash" }, true)}
             onMarkRead={(conversation?.unreadCount ?? 0) > 0
               ? () => void changeConversationRead(true)

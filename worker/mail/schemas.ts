@@ -14,6 +14,11 @@ import {
 } from "../../shared/mail-translation";
 import { emailSchema } from "../auth/schemas";
 import { dedupeRecipientFields, recipientCount } from "./recipients";
+import {
+  MAX_SPAM_SENDER_RULES,
+  normalizeSpamSenderEntry,
+  spamSenderLists,
+} from "./spam-filter";
 
 export const folderSchema = z.string().trim().min(1).max(80);
 
@@ -275,3 +280,40 @@ export const bulkConversationActionSchema = z.discriminatedUnion("type", [
     conversationIds: bulkConversationIdsSchema,
   }),
 ]);
+
+export const spamSenderEntrySchema = z
+  .string()
+  .max(254)
+  .transform((value, context) => {
+    const entry = normalizeSpamSenderEntry(value);
+    if (entry) return entry;
+    context.addIssue({
+      code: "custom",
+      message: "Enter an email address or a domain",
+    });
+    return z.NEVER;
+  });
+
+export const spamSettingsSchema = z
+  .object({
+    spamThreshold: z.number().int().min(2).max(100),
+    suspiciousThreshold: z.number().int().min(1).max(99),
+    allow: z.array(spamSenderEntrySchema).max(MAX_SPAM_SENDER_RULES),
+    block: z.array(spamSenderEntrySchema).max(MAX_SPAM_SENDER_RULES),
+  })
+  .refine((value) => value.suspiciousThreshold < value.spamThreshold, {
+    path: ["suspiciousThreshold"],
+    message: "The suspicious threshold must be below the spam threshold",
+  })
+  .refine((value) => !value.block.some((entry) => value.allow.includes(entry)), {
+    path: ["block"],
+    message: "An entry cannot be on both the allow and block lists",
+  })
+  .refine(
+    (value) => new Set([...value.allow, ...value.block]).size <= MAX_SPAM_SENDER_RULES,
+    { path: ["block"], message: `At most ${MAX_SPAM_SENDER_RULES} entries are allowed` },
+  );
+
+export const spamSenderSchema = z.object({
+  list: z.enum(spamSenderLists),
+});

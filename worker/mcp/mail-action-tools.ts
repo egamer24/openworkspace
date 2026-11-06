@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { AccountApiClient, apiPath } from "./account-client";
+import { spamSenderLists } from "../mail/spam-filter";
 import { runTool } from "./results";
 import {
   conversationIdsSchema,
@@ -204,6 +205,54 @@ export function registerMailActionTools(server: McpServer, api: AccountApiClient
     ({ mailboxId, instructions, confidenceThreshold }) => runTool(() => api.json(
       `/mail/mailboxes/${encodeURIComponent(mailboxId)}/ai`,
       { method: "PUT", json: { instructions, confidenceThreshold } },
+    )),
+  );
+
+  server.registerTool(
+    "get_spam_settings",
+    {
+      title: "Get spam filter settings",
+      description: "Read the mailbox's local spam thresholds and sender allow and block lists.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/spam`,
+    )),
+  );
+
+  server.registerTool(
+    "add_spam_sender",
+    {
+      title: "Allow or block a sender",
+      description: "Add an email address or domain to the mailbox's spam allow or block list. An entry on the other list is moved. Requires send access.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        entry: z.string().trim().min(1).max(254).describe("Email address or domain."),
+        list: z.enum(spamSenderLists),
+      }),
+      annotations: write,
+    },
+    ({ mailboxId, entry, list }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/spam/senders/${encodeURIComponent(entry)}`,
+      { method: "PUT", json: { list } },
+    )),
+  );
+
+  server.registerTool(
+    "remove_spam_sender",
+    {
+      title: "Remove a spam list entry",
+      description: "Remove an email address or domain from the mailbox's spam allow or block list. Requires send access.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        entry: z.string().trim().min(1).max(254),
+      }),
+      annotations: write,
+    },
+    ({ mailboxId, entry }) => runTool(() => api.json(
+      `/mail/mailboxes/${encodeURIComponent(mailboxId)}/spam/senders/${encodeURIComponent(entry)}`,
+      { method: "DELETE" },
     )),
   );
 }
