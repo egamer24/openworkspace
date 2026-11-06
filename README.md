@@ -226,6 +226,32 @@ The token acts as its owner: mailbox access, send permission, account status, an
 
 The endpoint supports both current MCP requests and stateless clients using the 2024–2025 protocol revisions.
 
+### Send mail from other apps
+
+For apps that only need to send mail, such as invoicing tools or an SMTP-to-HTTP relay, create a token with **Send only** access under **Settings → MCP**. A send-only token cannot use MCP or read mail. It can only call these endpoints, with the same mailbox permission checks as the web app:
+
+| Request | Purpose |
+| --- | --- |
+| `GET /api/mail/mailboxes` | List mailboxes; use the `id` of one with `canSend: true` |
+| `POST /api/mail/uploads?mailboxId=…`, then PUT to the returned `uploadUrl`, then `POST /api/mail/uploads/{id}/complete?mailboxId=…` | Upload an attachment (`DELETE /api/mail/uploads/{id}?mailboxId=…` discards it) |
+| `POST /api/mail/messages` | Send a new message |
+
+```bash
+curl https://mail.example.com/api/mail/messages \
+  -H "Authorization: Bearer mcp_…" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "requestId": "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b",
+    "mailboxId": "<mailbox id>",
+    "to": ["customer@example.net"],
+    "subject": "Invoice 1042",
+    "bodyText": "Your invoice is attached.",
+    "attachments": [{ "uploadId": "upl_…" }]
+  }'
+```
+
+`requestId` is a UUID idempotency key: retrying with the same id and body returns the original message (`200`) instead of sending twice, and reusing it with a different body returns `409`. A new message returns `201` with `messageId` and `transportState`. The message is stored in the mailbox's Sent folder and emits the `email.sent` webhook like any other send. Errors return `400` (validation), `401` (missing or revoked token), or `403` (no send access, or a request outside the token's scope).
+
 ### Configure outgoing webhooks
 
 Administrators manage account-wide endpoints under **Administration → Webhooks**. Each endpoint chooses from email received/sent, user joined/updated, and mailbox lifecycle events. Email events include both the stored text and HTML bodies plus attachment metadata; attachment contents are not embedded.

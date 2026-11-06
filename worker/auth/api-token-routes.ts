@@ -20,6 +20,7 @@ export const accountApiTokenRoutes = new Hono<AppEnv>()
         id: accountApiTokens.id,
         name: accountApiTokens.name,
         tokenPrefix: accountApiTokens.tokenPrefix,
+        scope: accountApiTokens.scope,
         lastUsedAt: accountApiTokens.lastUsedAt,
         createdAt: accountApiTokens.createdAt,
       })
@@ -30,10 +31,12 @@ export const accountApiTokenRoutes = new Hono<AppEnv>()
   })
   .post("/", zValidator("json", createAccountApiTokenSchema), async (c) => {
     try {
+      const { name, scope } = c.req.valid("json");
       const token = await createAccountApiToken(
         createDb(c.env.DB),
         c.get("user").id,
-        c.req.valid("json").name,
+        name,
+        scope,
       );
       return c.json({ ok: true as const, token }, 201);
     } catch (error) {

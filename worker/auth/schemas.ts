@@ -3,6 +3,7 @@ import type {
   RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import { z } from "zod";
+import { accountApiTokenScopes } from "../../shared/auth";
 import { isValidExternalEmailAddress } from "../../shared/mail";
 import { normalizeEmail } from "../lib/ids";
 import { isValidXmlCharacters } from "../saml/xml";
@@ -74,4 +75,5 @@ export const mockLoginSchema = z.object({
 
 export const createAccountApiTokenSchema = z.object({
   name: z.string().trim().min(1).max(80),
+  scope: z.enum(accountApiTokenScopes).default("full"),
 });
