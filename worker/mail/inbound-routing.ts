@@ -27,6 +27,14 @@ export async function resolveInboundRoute(
         CASE WHEN r.id IS NULL THEN d.unknown_recipient_mailbox_id END) AS mailboxId,
       r.id AS routeId,
       coalesce(r.keep_copy, 1) AS keepCopy,
+      -- A throwaway stops working when it is turned off or its creator loses
+      -- send access to the mailbox it delivers into.
+      CASE WHEN r.disabled_at IS NOT NULL THEN 1
+        WHEN r.throwaway = 1 AND NOT EXISTS (
+          SELECT 1 FROM mailbox_members mm
+          WHERE mm.mailbox_id = r.mailbox_id
+            AND mm.user_id = r.created_by_user_id AND mm.can_send = 1
+        ) THEN 1 ELSE 0 END AS disabled,
       (SELECT json_group_array(f.email)
         FROM routing_address_destinations rd
         JOIN forwarding_destinations f ON f.id = rd.destination_id
@@ -40,9 +48,10 @@ export async function resolveInboundRoute(
     mailboxId: string | null;
     routeId: string | null;
     keepCopy: number;
+    disabled: number;
     forwards: string;
   }>();
-  if (!row || (!row.mailboxId && !row.routeId)) return null;
+  if (!row || (!row.mailboxId && !row.routeId) || row.disabled) return null;
   return {
     mailboxId: row.mailboxId,
     keepCopy: Boolean(row.keepCopy),

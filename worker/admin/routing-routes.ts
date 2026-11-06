@@ -82,6 +82,9 @@ export const routingAdminRoutes = new Hono<AppEnv>()
           domainId: routingAddresses.domainId,
           mailboxId: routingAddresses.mailboxId,
           keepCopy: routingAddresses.keepCopy,
+          throwaway: routingAddresses.throwaway,
+          label: routingAddresses.label,
+          disabledAt: routingAddresses.disabledAt,
         })
         .from(routingAddresses)
         .innerJoin(domains, eq(routingAddresses.domainId, domains.id))
@@ -107,8 +110,9 @@ export const routingAdminRoutes = new Hono<AppEnv>()
         verifiedAt: row.verifiedAt,
         createdAt: row.createdAt,
       })),
-      addresses: addressRows.map(({ localPart, domain, ...row }) => ({
+      addresses: addressRows.map(({ localPart, domain, disabledAt, ...row }) => ({
         ...row,
+        enabled: disabledAt === null,
         address: mailboxAddress(localPart, domain),
         destinationIds: links
           .filter((link) => link.addressId === row.id)

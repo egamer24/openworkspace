@@ -8,6 +8,7 @@ import {
   Palette,
   ShieldCheck,
   UserRound,
+  VenetianMask,
   type LucideIcon,
 } from "lucide-react";
 import { Suspense, useState } from "react";
@@ -25,7 +26,13 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-type SettingsSection = "profile" | "appearance" | "notifications" | "sessions" | "mcp";
+type SettingsSection =
+  | "profile"
+  | "appearance"
+  | "notifications"
+  | "throwaway"
+  | "sessions"
+  | "mcp";
 
 const settingsSections: Array<{
   id: SettingsSection;
@@ -56,6 +63,13 @@ const settingsSections: Array<{
     path: "/settings/notifications",
   },
   {
+    id: "throwaway",
+    label: "Throwaway addresses",
+    description: "Random receive-only addresses you can turn off.",
+    Icon: VenetianMask,
+    path: "/settings/throwaway",
+  },
+  {
     id: "sessions",
     label: "Sessions",
     description: "Active sign-ins and locations.",
@@ -74,6 +88,7 @@ const settingsSections: Array<{
 function sectionFromPath(pathname: string): SettingsSection {
   if (pathname.startsWith("/settings/mcp")) return "mcp";
   if (pathname.startsWith("/settings/notifications")) return "notifications";
+  if (pathname.startsWith("/settings/throwaway")) return "throwaway";
   if (pathname.startsWith("/settings/sessions")) return "sessions";
   if (pathname.startsWith("/settings/appearance")) return "appearance";
   return "profile";
