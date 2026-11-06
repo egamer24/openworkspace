@@ -30,6 +30,7 @@ import {
   MobileAdminMenu,
 } from "./admin-navigation";
 import { DriveSettings } from "./drive-settings";
+import { CalendarModule } from "./calendar-module";
 import { GlobalAiProcessing } from "./global-ai-processing";
 import { MailboxAccessEditor } from "./mailbox-access-editor";
 import type {
@@ -311,6 +312,10 @@ export function AdminPage() {
               <div className="max-w-3xl space-y-6">
                 <GlobalAiProcessing
                   enabled={state.data?.aiProcessingEnabled ?? false}
+                  loading={state.isLoading}
+                />
+                <CalendarModule
+                  enabled={state.data?.calendarEnabled ?? false}
                   loading={state.isLoading}
                 />
                 <div className="space-y-3">

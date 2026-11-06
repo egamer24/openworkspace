@@ -2,6 +2,7 @@ import { createMcpHandler, type AuthInfo } from "@modelcontextprotocol/server";
 import { Hono } from "hono";
 import { authenticateAccountApiToken, bearerToken } from "../auth/api-tokens";
 import { driveEnabled } from "../drive/service";
+import { calendarModuleEnabled } from "../calendar/module";
 import type { AppEnv } from "../env";
 import { apiError } from "../lib/http";
 import { AccountApiClient } from "./account-client";
@@ -41,11 +42,13 @@ export const mcpRoutes = new Hono<AppEnv>().all("/", async (c) => {
     new URL(c.req.url).origin,
   );
   const drive = await driveEnabled(c.env.DB);
+  const calendarEnabled = await calendarModuleEnabled(c.env.DB);
   const handler = createMcpHandler(
     () => createAccountMcpServer({
       api,
       isAdmin: identity.user.role === "admin",
       driveEnabled: drive,
+      calendarEnabled,
     }),
     {
       legacy: "stateless",

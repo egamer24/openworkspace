@@ -38,12 +38,18 @@ import {
   samlAuthnRequests,
   sessions,
   users,
+  bookingHandles,
 } from "../db/schema";
 import type { AppEnv } from "../env";
 import {
   globalAiProcessingEnabled,
   setGlobalAiProcessingEnabled,
 } from "../ai/configuration";
+import {
+  calendarModuleEnabled,
+  setCalendarModuleEnabled,
+} from "../calendar/module";
+import { bookingHandleSchema, calendarModuleSchema } from "../calendar/schemas";
 import { randomToken, hashToken } from "../lib/crypto";
 import { apiError } from "../lib/http";
 import { createId } from "../lib/ids";
@@ -167,6 +173,7 @@ export const adminRoutes = new Hono<AppEnv>()
     const db = createDb(c.env.DB);
     const [
       aiProcessingEnabled,
+      calendarEnabled,
       domainRows,
       userRows,
       mailboxRows,
@@ -182,6 +189,7 @@ export const adminRoutes = new Hono<AppEnv>()
       onboardingSteps,
     ] = await Promise.all([
       globalAiProcessingEnabled(c.env.DB),
+      calendarModuleEnabled(c.env.DB),
       db
         .select({
           id: domains.id,
@@ -202,8 +210,10 @@ export const adminRoutes = new Hono<AppEnv>()
           status: users.status,
           createdAt: users.createdAt,
           personalEmail: mailboxAddressSql,
+          bookingHandle: bookingHandles.handle,
         })
         .from(users)
+        .leftJoin(bookingHandles, eq(bookingHandles.userId, users.id))
         .leftJoin(
           mailboxes,
           and(
@@ -317,6 +327,7 @@ export const adminRoutes = new Hono<AppEnv>()
     return c.json({
       ok: true as const,
       aiProcessingEnabled,
+      calendarEnabled,
       cloudflareOnboarding: Boolean(c.env.CLOUDFLARE_API_TOKEN),
       domains: domainRows.map((domain) => ({
         ...domain,
@@ -369,6 +380,17 @@ export const adminRoutes = new Hono<AppEnv>()
         ok: true as const,
         enabled: setting.enabled,
       });
+    },
+  )
+  .put(
+    "/calendar",
+    zValidator("json", calendarModuleSchema),
+    async (c) => {
+      const setting = await setCalendarModuleEnabled(
+        c.env.DB,
+        c.req.valid("json").enabled,
+      );
+      return c.json({ ok: true as const, enabled: setting.enabled });
     },
   )
   .route("/", mailboxAdminRoutes)
@@ -436,6 +458,29 @@ export const adminRoutes = new Hono<AppEnv>()
         { ok: true as const, accessLink: invitation.result },
         201,
       );
+    },
+  )
+  .put(
+    "/users/:id/booking-handle",
+    zValidator("json", bookingHandleSchema),
+    async (c) => {
+      const db = createDb(c.env.DB);
+      const userId = c.req.param("id");
+      const { handle } = c.req.valid("json");
+      const [target] = await db.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!target) return apiError(c, 404, "NOT_FOUND", "User not found");
+      const [taken] = await db.select({ userId: bookingHandles.userId })
+        .from(bookingHandles)
+        .where(eq(bookingHandles.handle, handle))
+        .limit(1);
+      if (taken && taken.userId !== userId) {
+        return apiError(c, 409, "CONFLICT", "Another user has this booking handle");
+      }
+      // Old links stop working; the handle is the only public identifier.
+      await db.insert(bookingHandles)
+        .values({ userId, handle })
+        .onConflictDoUpdate({ target: bookingHandles.userId, set: { handle } });
+      return c.json({ ok: true as const, handle });
     },
   )
   .post("/users/:id/access-link", async (c) => {

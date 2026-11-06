@@ -41,6 +41,11 @@ export type BackupBindings = {
   BACKUP_STORAGE?: R2Bucket;
 };
 
+export type BookingBindings = {
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
+};
+
 export type AppEnv = {
   Bindings: Env
     & AuthBindings
@@ -50,7 +55,8 @@ export type AppEnv = {
     & SamlBindings
     & R2S3Bindings
     & PushBindings
-    & BackupBindings;
+    & BackupBindings
+    & BookingBindings;
   Variables: {
     user: SessionUser;
     authKind: "session" | "api-token";

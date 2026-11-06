@@ -30,6 +30,7 @@
     "playwright.config.ts",
     "drizzle.config.ts",
     "drizzle.mailbox.config.ts",
+    "drizzle.calendar.config.ts",
     "worker-configuration.d.ts"
   ],
   "references": []

@@ -11,6 +11,10 @@
         "class_name": "MailboxDO"
       },
       {
+        "name": "CALENDAR",
+        "class_name": "CalendarDO"
+      },
+      {
         "name": "OFFICE_PREVIEW_CONTAINER",
         "class_name": "OfficePreviewContainer"
       }
@@ -18,6 +22,10 @@
   },
   "exports": {
     "MailboxDO": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "CalendarDO": {
       "type": "durable-object",
       "storage": "sqlite"
     },

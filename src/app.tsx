@@ -4,6 +4,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
   useParams,
 } from "react-router";
 import { AuthScreen } from "@/auth/auth-screen";
@@ -21,6 +22,12 @@ const AdminPage = lazy(() =>
 );
 const DrivePage = lazy(() =>
   import("@/drive/drive-page").then((module) => ({ default: module.DrivePage })),
+);
+const BookingPages = lazy(() =>
+  import("@/booking/booking-pages").then((module) => ({ default: module.BookingPages })),
+);
+const CalendarPage = lazy(() =>
+  import("@/calendar/calendar-page").then((module) => ({ default: module.CalendarPage })),
 );
 const MailShell = lazy(() =>
   import("@/mail/mail-shell").then((module) => ({ default: module.MailShell })),
@@ -107,6 +114,15 @@ function LoadingScreen() {
 
 export function App() {
   const auth = useAuth();
+  const location = useLocation();
+  // Public booking pages work for guests and do not wait on the session check.
+  if (location.pathname.startsWith("/book/")) {
+    return (
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes><Route path="/book/*" element={<BookingPages />} /></Routes>
+      </Suspense>
+    );
+  }
   if (auth.loading) return <LoadingScreen />;
   if (auth.error) return <AuthCheckError onRetry={auth.retry} />;
   const mail = auth.authenticated ? <MailboxRoute /> : <AuthScreen />;
@@ -128,6 +144,7 @@ export function App() {
           <Route path="/saml/login/:requestId" element={<SamlLoginScreen />} />
           <Route path="/admin" element={auth.authenticated && auth.user?.role === "admin" ? <AdminPage /> : <Navigate to="/" replace />} />
           <Route path="/drive" element={auth.authenticated ? <DrivePage /> : <Navigate to="/" replace />} />
+          <Route path="/calendar" element={auth.authenticated && auth.modules.calendar ? <CalendarPage /> : <Navigate to="/" replace />} />
           <Route path="/settings" element={settings}>
             <Route index element={<Navigate to="/settings/profile" replace />} />
             <Route path="profile" element={<SettingsProfilePage />} />

@@ -1,4 +1,5 @@
 import {
+  CalendarDays,
   Check,
   ChevronsUpDown,
   HardDrive,
@@ -84,6 +85,12 @@ export function MailHeader({
               onChange={(event) => onSearchChange(event.target.value)}
             />
           </label>
+        )}
+
+        {auth.modules.calendar && (
+          <Button variant="ghost" size="icon" aria-label="Calendar" onClick={() => navigate("/calendar")}>
+            <CalendarDays />
+          </Button>
         )}
 
         <Button className="hidden lg:inline-flex" disabled={!mailbox?.canSend} onClick={onCompose}>
@@ -179,6 +186,11 @@ export function MailHeader({
             {drive.isSuccess && (
               <DropdownMenuItem onClick={() => navigate("/drive")}>
                 <HardDrive />Drive
+              </DropdownMenuItem>
+            )}
+            {auth.modules.calendar && (
+              <DropdownMenuItem onClick={() => navigate("/calendar")}>
+                <CalendarDays />Calendar
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onClick={() => navigate("/settings")}>

@@ -17,6 +17,7 @@ One Worker, your domains, your data. Invite people with a link, grant mailbox ac
 - **Scheduled backups** — optional daily `.eml` + manifest snapshots in a separate R2 bucket with retention
 - **JMAP** — native mail clients over HTTPS with personal tokens, including change sync, push, sending with attachments, and import
 - **Drive (optional)** — file storage with folders, trash, sharing and public links; off by default
+- **Optional calendar** — per-user calendars with recurrence, reminders, ICS feeds and import (off by default)
 - **Runs on Cloudflare** — Workers, D1, Durable Objects, R2, Images, Email Service, and Queues
 
 ## Deploy to Cloudflare
@@ -380,6 +381,29 @@ curl "https://mail.example.com/api/admin/mailboxes/<mailbox id>/import?state=arc
 | `receivedAt` | ISO 8601 timestamp for the message's position in the timeline | the `Date` header, then now |
 
 Imported messages are threaded and indexed like live mail, but they never trigger AI classification, push notifications, webhooks, or Office previews, and outgoing messages are never sent. A thread lives where its newest message says, so the order you import in doesn't matter. Importing the same bytes again returns `{"status":"duplicate"}`, which makes interrupted or overlapping runs safe to repeat. Responses are `200` with `status` `imported` or `duplicate`, `400` for invalid parameters or an unreadable message, `404` for an unknown mailbox, `413` above 25 MiB, and `429` above 600 imports per minute per administrator.
+
+### Calendar (optional module)
+
+The calendar is off by default. An administrator turns it on under **Administration → Mailboxes → Calendar**; while it is off, `/api/calendar/*`, `/ics/*` feeds, reminders, MCP calendar tools and the navigation entry are all unavailable, and stored events are kept.
+
+- Each person gets their own calendar Durable Object with any number of calendars (name, color, show/hide).
+- Month, week and agenda views; events can repeat daily, weekly, monthly or yearly with intervals, weekdays, an end date or a count. Recurrences expand in the event's time zone, so a 09:00 meeting stays at 09:00 across DST. Recurring events can be edited for one occurrence, this and following, or all.
+- Reminders use the same PWA push notifications as mail. They are best-effort: a reminder that could not be sent within 15 minutes is dropped.
+- **Copy ICS feed URL** creates a secret, read-only `https://mail.example.com/ics/<token>.ics` subscription link for phones and other calendar apps. **New feed URL** replaces it and **Revoke feed URL** disables it immediately.
+- `.ics` files can be imported into a calendar; events with rules outside the supported subset (for example `BYSETPOS`, `RDATE` or non-IANA time zones) are skipped and listed.
+- MCP tokens get `list_calendars`, `list_calendar_events`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event` and `get_free_busy`.
+
+#### Booking pages
+
+Part of the calendar module (the public pages and API return 404 while it is off).
+
+- Each person gets a public handle (`/book/<handle>`, editable by administrators under the user's settings) and manages **booking types** from the calendar's **Booking pages** button: duration, location, weekly hours in a chosen time zone, date overrides and blackout days, buffers, minimum notice, how many days ahead, start-time interval, a per-day cap, optional notes, the target calendar and the mailbox confirmations are sent from. Two disabled 15 and 30 minute starters are created on first use.
+- `/book/<handle>/<slug>` shows free times in the guest's time zone (switchable). Guests only ever see free slots; event details never leave the calendar object. Busy time comes from all of the host's calendars (recurring events expanded; free and cancelled events ignored).
+- Booking runs inside the host's calendar Durable Object, which re-checks the slot and inserts the event in one step, so a slot cannot be booked twice.
+- The guest gets a confirmation from the chosen mailbox (kept in its Sent folder) with an `.ics` file (`METHOD:PUBLISH`) and a signed link to cancel or reschedule, valid until the meeting starts. The host gets a push notification.
+- Public endpoints are rate limited per IP, include a honeypot field, validate email addresses and respect the daily cap. Set `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` (`wrangler secret put`) to also require [Cloudflare Turnstile](https://developers.cloudflare.com/turnstile/) on the booking form.
+- MCP tokens also get `list_booking_types`, `list_upcoming_bookings` and `cancel_booking`.
+- Bookings involve one host; round-robin and multi-host types are not supported.
 
 ## License
 

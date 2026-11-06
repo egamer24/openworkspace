@@ -9,13 +9,17 @@
   },
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/jmap/*", "/d/*", "/.well-known/*", "/oauth/*", "!/saml/login/*", "/saml/*"]
+    "run_worker_first": ["/api/*", "/mcp", "/mcp/*", "/jmap/*", "/d/*", "/ics/*", "/.well-known/*", "/oauth/*", "!/saml/login/*", "/saml/*"]
   },
   "durable_objects": {
     "bindings": [
       {
         "name": "MAILBOX",
         "class_name": "MailboxDO"
+      },
+      {
+        "name": "CALENDAR",
+        "class_name": "CalendarDO"
       },
       {
         "name": "OFFICE_PREVIEW_CONTAINER",
@@ -25,6 +29,10 @@
   },
   "exports": {
     "MailboxDO": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    },
+    "CalendarDO": {
       "type": "durable-object",
       "storage": "sqlite"
     },

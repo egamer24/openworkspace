@@ -3,6 +3,8 @@ import { accountApi } from "./account-api";
 import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
+import { publicBookingRoutes } from "./calendar/booking-routes";
+import { calendarFeedRoutes } from "./calendar/routes";
 import { createDb } from "./db/client";
 import { domains, mailboxes } from "./db/schema";
 import { mailboxAddressPredicate } from "./db/mailboxes";
@@ -28,6 +30,7 @@ import {
   wellKnownRoutes,
 } from "./oidc/routes";
 export { MailboxDO } from "./mailbox";
+export { CalendarDO } from "./calendar";
 export { OfficePreviewContainer } from "./mail/office-preview-container";
 import { OFFICE_PREVIEW_QUEUE } from "../shared/office-preview";
 import { consumeOfficePreviews } from "./mail/office-preview-queue";
@@ -47,11 +50,13 @@ const app = new Hono<AppEnv>()
   .route("/api/oidc/logout", oidcLogoutRoutes)
   .route("/api/saml/login", samlLoginRoutes)
   .route("/api/downloads", mailDownloadRoutes)
+  .route("/api/public/booking", publicBookingRoutes)
   .route("/api", accountApi)
   .route("/api/notifications", pushNotificationRoutes)
   .route("/mcp", mcpRoutes)
   .route("/", jmapRoutes)
   .route("/d", drivePublicRoutes)
+  .route("/ics", calendarFeedRoutes)
   .route("/.well-known", wellKnownRoutes)
   .route("/oauth", oidcRoutes)
   .route("/saml", samlRoutes)

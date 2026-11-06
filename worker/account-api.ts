@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { adminRoutes } from "./admin/routes";
 import { driveRoutes } from "./drive/routes";
+import { calendarRoutes } from "./calendar/routes";
 import type { AppEnv } from "./env";
 import { draftRoutes } from "./mail/drafts";
 import { autoReplyRoutes } from "./mail/auto-reply-routes";
@@ -16,6 +17,7 @@ export const accountApi = new Hono<AppEnv>()
   .route("/mail/mailboxes/:id", retentionRoutes)
   .route("/mail/mailboxes/:id", ruleRoutes)
   .route("/mail/mailboxes/:id", spamRoutes)
+  .route("/calendar", calendarRoutes)
   .route("/mail", mailRoutes)
   .route("/admin", adminRoutes)
   .route("/drive", driveRoutes);
