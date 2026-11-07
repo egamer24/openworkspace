@@ -298,6 +298,7 @@ export const driveRoutes = new Hono<AppEnv>()
       env: c.env,
       r2Key: driveStagingKey(id),
       contentType,
+      contentLength: input.size,
     });
     // Without R2 S3 credentials the browser PUTs through the Worker instead.
     const uploadUrl = presigned

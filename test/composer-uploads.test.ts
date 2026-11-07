@@ -40,7 +40,8 @@ describe("composer upload finalization", () => {
       .get("X-Amz-SignedHeaders")
       ?.split(";");
     expect(signedHeaders).toContain("content-type");
-    expect(signedHeaders).not.toContain("content-length");
+    // The client streams exactly the declared size; R2 rejects any other length.
+    expect(signedHeaders).toContain("content-length");
     expect(intent.headers).toEqual({ "content-type": "text/plain" });
 
     await discardComposerUploads({
