@@ -50,6 +50,7 @@ import {
 } from "../mail/auto-reply";
 import { createDb } from "../db/client";
 import { domains, mailboxes } from "../db/schema";
+import { singleLineHeaders } from "../mail/rfc";
 import { mailboxAddressPredicate } from "../db/mailboxes";
 import { normalizeMailboxAddress } from "../lib/ids";
 import {
@@ -754,14 +755,14 @@ export class MailboxDO extends DurableObject<Env> {
       .where(eq(mailboxes.id, this.state.id.name ?? ""))
       .limit(1);
     try {
-      const result = await this.bindings.EMAIL.send(buildAutoReply({
+      const result = await this.bindings.EMAIL.send(singleLineHeaders(buildAutoReply({
         mailboxAddress,
         mailboxName: mailbox?.displayName ?? "",
         recipient,
         original: email,
         subject: settings.subject,
         bodyText: settings.bodyText,
-      }));
+      })));
       this.db.update(autoReplyLog)
         .set({ lastOutboundMessageId: result.messageId })
         .where(eq(autoReplyLog.senderAddress, recipient))
