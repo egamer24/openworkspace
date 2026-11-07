@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { createId } from "../lib/ids";
 import { and, asc, desc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { drizzle, type DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
@@ -1222,11 +1223,23 @@ export class MailboxDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Threading trusts the sender's In-Reply-To and References, so a message's
+   * own spam verdict must not carry the conversation it claims to answer
+   * (and other senders' mail) into Spam: it starts its own conversation.
+   */
+  private detachFromConversation<T extends NewEmail>(email: T): T {
+    const joined = this.db.select({ id: emails.id }).from(emails)
+      .where(eq(emails.conversationId, email.conversationId)).limit(1).all()[0];
+    return joined ? { ...email, conversationId: createId("conv") } : email;
+  }
+
   private insertClassifiedInboundEmail(
     email: NewEmail,
     classification: EmailAiClassification | null,
   ) {
     email = prepareOfficePreviews(email);
+    if (classification?.spam) email = this.detachFromConversation(email);
     const stored = this.db.transaction((tx) => {
       const trustedFolder = classification?.folderId
         ? tx
