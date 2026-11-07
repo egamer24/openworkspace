@@ -35,20 +35,13 @@ function isBlockedIp(hostname: string) {
     return PRIVATE_IPV4.test(hostname) || hostname === "255.255.255.255";
   }
   if (isIpv6(hostname)) {
-    const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-    return (
-      normalized === "::1"
-      || normalized === "::"
-      || normalized.startsWith("fc")
-      || normalized.startsWith("fd")
-      || normalized.startsWith("fe8")
-      || normalized.startsWith("fe9")
-      || normalized.startsWith("fea")
-      || normalized.startsWith("feb")
-      || normalized.startsWith("::ffff:127.")
-      || normalized.startsWith("::ffff:10.")
-      || normalized.startsWith("::ffff:192.168.")
-    );
+    // URL parsing serializes IPv6 (and any embedded IPv4) as hex groups, so a
+    // prefix check on dotted text never matches. Allow only global unicast
+    // (2000::/3) that cannot embed an IPv4 address (6to4 2002::/16, Teredo 2001::/32).
+    const groups = hostname.toLowerCase().replace(/^\[|\]$/gu, "").split(":");
+    const first = Number.parseInt(groups[0] || "0", 16);
+    const second = Number.parseInt(groups[1] || "0", 16);
+    return !(first >= 0x2000 && first <= 0x3fff) || first === 0x2002 || (first === 0x2001 && second === 0);
   }
   return false;
 }
@@ -66,7 +59,8 @@ export function assertProxyableRemoteUrl(value: string): URL {
   if (url.username || url.password) {
     throw new Error("Remote URLs must not include credentials");
   }
-  const host = url.hostname.toLowerCase();
+  // "localhost." is the same host as "localhost".
+  const host = url.hostname.toLowerCase().replace(/\.+$/u, "");
   if (!host || BLOCKED_HOSTS.has(host)) {
     throw new Error("Remote host is not allowed");
   }

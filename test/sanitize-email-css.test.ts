@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeEmailCss } from "../src/mail/sanitize-email-html";
+import { rewriteSrcset, sanitizeEmailCss } from "../src/mail/sanitize-email-html";
 import { mailRemoteProxyPath } from "../shared/mail-remote";
 import {
   assertProxyableRemoteUrl,
@@ -44,6 +44,14 @@ describe("sanitizeEmailCss", () => {
   });
 });
 
+describe("rewriteSrcset", () => {
+  it("proxies remote candidates and drops everything else", () => {
+    const proxy = (url: string) => `/proxy?u=${encodeURIComponent(url)}`;
+    expect(rewriteSrcset("https://a.example/1.png 1x, //tracker.example/p.png 2x, /local.png 3x", proxy))
+      .toBe(`${proxy("https://a.example/1.png")} 1x`);
+  });
+});
+
 describe("assertProxyableRemoteUrl", () => {
   it("accepts public https urls", () => {
     expect(assertProxyableRemoteUrl("https://cdn.example/a.png").hostname)
@@ -55,6 +63,22 @@ describe("assertProxyableRemoteUrl", () => {
     expect(() => assertProxyableRemoteUrl("http://192.168.0.1/x")).toThrow();
     expect(() => assertProxyableRemoteUrl("http://localhost/x")).toThrow();
     expect(() => assertProxyableRemoteUrl("file:///etc/passwd")).toThrow();
+  });
+
+  it("rejects IPv4 inside IPv6, local IPv6 and trailing-dot hosts", () => {
+    for (const url of [
+      "http://[::ffff:127.0.0.1]/x",
+      "http://[::ffff:a9fe:a9fe]/x",
+      "http://[::127.0.0.1]/x",
+      "http://[64:ff9b::7f00:1]/x",
+      "http://[2002:7f00:1::]/x",
+      "http://[2001:0:7f00:1::]/x",
+      "http://[fe80::1]/x",
+      "http://[fc00::1]/x",
+      "http://localhost./x",
+      "http://metadata.google.internal./x",
+    ]) expect(() => assertProxyableRemoteUrl(url), url).toThrow();
+    expect(assertProxyableRemoteUrl("http://[2606:4700::1111]/x").hostname).toBe("[2606:4700::1111]");
   });
 });
 
