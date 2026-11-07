@@ -2177,6 +2177,26 @@ export class MailboxDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Threading trusts the sender's In-Reply-To and References, so a message's
+   * own spam or delete verdict must not carry the conversation it claims to
+   * answer (and other senders' mail) into Spam or Trash: it starts its own.
+   */
+  private detachFromConversation<T extends NewEmail>(email: T): T {
+    const joined = this.db.select({ id: emails.id }).from(emails)
+      .where(eq(emails.conversationId, email.conversationId)).limit(1).all()[0];
+    return joined ? { ...email, conversationId: createId("conv") } : email;
+  }
+
+  /** Whether the mailbox's rules would send this message to Spam or Trash. */
+  private rulesDiscard(email: NewEmail) {
+    const rules = this.listRules().filter((rule) => rule.enabled);
+    if (!rules.length) return false;
+    const outcome = evaluateRules(rules, email, "active");
+    return outcome.mailboxState === "spam" || outcome.mailboxState === "trash"
+      || (outcome.forwards.length > 0 && outcome.forwards.every((forward) => !forward.keepCopy));
+  }
+
   private insertClassifiedInboundEmail(
     email: NewEmail,
     classification: EmailAiClassification | null,
@@ -2184,6 +2204,11 @@ export class MailboxDO extends DurableObject<Env> {
     spam: SpamAssessment | null,
   ) {
     email = prepareOfficePreviews(email);
+    // The local verdict already reflects the lists. AI may add a spam
+    // decision, but never for an allowed sender.
+    const isSpam = spam?.verdict === "spam"
+      || (spam?.senderList !== "allow" && Boolean(classification?.spam));
+    if (isSpam) email = this.detachFromConversation(email);
     const stored = this.db.transaction((tx) => {
       const trustedFolder = classification?.folderId
         ? tx
@@ -2210,10 +2235,6 @@ export class MailboxDO extends DurableObject<Env> {
       if (!inserted) return null;
       insertOfficePreviewJobs(this.state.storage.sql, email);
 
-      // The local verdict already reflects the lists. AI may add a spam
-      // decision, but never for an allowed sender.
-      const isSpam = spam?.verdict === "spam"
-        || (spam?.senderList !== "allow" && Boolean(normalizedClassification?.spam));
       if (isSpam) {
         tx.update(conversations)
           .set({ mailboxState: "spam", folderId: null })
@@ -2751,6 +2772,26 @@ export class MailboxDO extends DurableObject<Env> {
         await this.finishStoredInbound(job, existing, now, false);
         continue;
       }
+      const storeFallback = async (reason: string, rawMimeR2Key: string | null, cause?: unknown) => {
+        const stored = await this.insertEmail(prepareUnprocessableInboundEmail({ job, reason, rawMimeR2Key }));
+        if (!stored) throw new Error("Inbound fallback email was not persisted", { cause });
+        await this.finishStoredInbound(job, stored, now, true);
+      };
+      // A message that exceeds the isolate's CPU or memory limit aborts the
+      // alarm before any catch runs. Lease the attempt durably first, so such a
+      // message backs off behind newer mail and is given up on after 24 hours.
+      if (job.attempts > 0 && now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS) {
+        await storeFallback("Message processing remained unavailable for 24 hours", job.rawObjectKey);
+        console.error(`Stored fallback for inbound delivery ${job.id} after ${job.attempts} attempts`);
+        continue;
+      }
+      const attempts = job.attempts + 1;
+      this.db
+        .update(pendingInbound)
+        .set({ attempts, nextAttemptAt: new Date(now + retryDelay(attempts)) })
+        .where(eq(pendingInbound.id, job.id))
+        .run();
+      await this.state.storage.sync();
 
       try {
         const rawMime = await readInboundRawMime(this.bindings, job);
@@ -2791,7 +2832,7 @@ export class MailboxDO extends DurableObject<Env> {
           );
         }
         const stored = this.insertClassifiedInboundEmail(
-          prepared.email,
+          this.rulesDiscard(prepared.email) ? this.detachFromConversation(prepared.email) : prepared.email,
           classification,
           spam,
         );
@@ -2814,51 +2855,23 @@ export class MailboxDO extends DurableObject<Env> {
         await this.finishStoredInbound(job, stored, now, true);
       } catch (error) {
         if (error instanceof UnprocessableInboundEmailError) {
-          const fallback = prepareUnprocessableInboundEmail({
-            job,
-            reason: error.message,
-            rawMimeR2Key: job.rawObjectKey,
-          });
-          const stored = await this.insertEmail(fallback);
-          if (!stored) {
-            throw new Error("Inbound fallback email was not persisted", {
-              cause: error,
-            });
-          }
-          await this.finishStoredInbound(job, stored, now, true);
+          await storeFallback(error.message, job.rawObjectKey, error);
           console.error(`Stored fallback for inbound delivery ${job.id}`, error);
           continue;
         }
         if (now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS) {
-          const fallback = prepareUnprocessableInboundEmail({
-            job,
-            reason: "Message processing remained unavailable for 24 hours",
-            rawMimeR2Key: error instanceof MissingRawMimeError
-              ? null
-              : job.rawObjectKey,
-          });
-          const stored = await this.insertEmail(fallback);
-          if (!stored) {
-            throw new Error("Inbound infrastructure fallback was not persisted", {
-              cause: error,
-            });
-          }
-          await this.finishStoredInbound(job, stored, now, true);
+          await storeFallback(
+            "Message processing remained unavailable for 24 hours",
+            error instanceof MissingRawMimeError ? null : job.rawObjectKey,
+            error,
+          );
           console.error(
             `Stored infrastructure fallback for inbound delivery ${job.id}`,
             error,
           );
           continue;
         }
-        const attempts = job.attempts + 1;
-        this.db
-          .update(pendingInbound)
-          .set({
-            attempts,
-            nextAttemptAt: new Date(now + retryDelay(attempts)),
-          })
-          .where(eq(pendingInbound.id, job.id))
-          .run();
+        // The attempt was already leased above.
         console.error(`Could not ingest inbound delivery ${job.id}`, error);
       }
     }

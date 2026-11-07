@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
 import {
   evaluateRules,
@@ -220,6 +220,48 @@ describe("rules on delivery", () => {
       env.DB.prepare("DELETE FROM domains WHERE id = 'dom_rules'"),
       env.DB.prepare("DELETE FROM users WHERE id = 'usr_test'"),
     ]);
+  });
+});
+
+describe("rules and threading", () => {
+  it("moves only the forged reply to Trash, not the conversation it joined", async () => {
+    const mailboxId = `mbx_thread_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(env, mailboxId);
+    expect(await mailbox.createRule({
+      name: "Junk to trash",
+      enabled: true,
+      match: "all",
+      conditions: [{ type: "subject", op: "contains", value: "junk" }],
+      actions: [{ type: "trash" }],
+      stopProcessing: false,
+    }, "usr_test")).toMatchObject({ status: "ok" });
+    const deliver = async (label: string, headers: string[]) => {
+      const id = `delivery_${label}_${crypto.randomUUID()}`;
+      const rawObjectKey = `test/${id}.eml`;
+      await env.MAIL_STORAGE.put(rawObjectKey, [
+        "From: someone@example.net",
+        "To: me@example.test",
+        `Message-ID: <${label}@example.net>`,
+        ...headers,
+        "Content-Type: text/plain",
+        "",
+        label,
+      ].join("\r\n"));
+      await mailbox.enqueueInbound({
+        id, mailboxId, rawObjectKey, envelopeFrom: "someone@example.net", envelopeTo: "me@example.test", receivedAt: Date.now(),
+      });
+      await runDurableObjectAlarm(mailbox);
+      return (await mailbox.getEmail(inboundMessageId(id)))!;
+    };
+    const original = await deliver("original", ["Subject: Quarterly plan"]);
+    const forged = await deliver("forged", ["Subject: Re: junk", "In-Reply-To: <original@example.net>"]);
+    expect(forged.conversationId).not.toBe(original.conversationId);
+    await runInDurableObject(mailbox, (_instance, state) => {
+      const stateOf = (id: string) => state.storage.sql
+        .exec<{ mailbox_state: string }>("select mailbox_state from conversations where id = ?", id).one().mailbox_state;
+      expect(stateOf(original.conversationId)).toBe("active");
+      expect(stateOf(forged.conversationId)).toBe("trash");
+    });
   });
 });
 

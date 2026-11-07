@@ -26,3 +26,13 @@ describe("email quote parsing", () => {
     expect(parseReplyText(text)).toEqual({ bodyText: text, quotedText: null });
   });
 });
+
+describe("quote parser cost", () => {
+  it("stays linear on crafted input", () => {
+    const started = performance.now();
+    parseReplyText(Array.from({ length: 200_000 }, (_, i) => (i % 2 ? ">" : "a")).join("\n"));
+    parseReplyText(`am ${"schrieb ".repeat(50_000)}`);
+    parseReplyText(`from:${" ".repeat(100_000)}a\rb`);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
