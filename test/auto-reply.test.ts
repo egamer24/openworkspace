@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   autoReplyStatus,
   buildAutoReply,
@@ -215,6 +215,43 @@ describe("auto-reply delivery", () => {
     await mailbox.setAutoReply(settings, "usr_test");
     expect(await mailbox.recentAutoReplies()).toEqual([]);
     expect(await mailbox.autoReplyState()).toBe("active");
+  });
+});
+
+describe("auto-reply headers", () => {
+  it("never copies line breaks from a decoded subject into the reply", async () => {
+    const mailboxId = `mbx_auto_crlf_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(env, mailboxId);
+    await mailbox.setAutoReply({
+      enabled: true, startsAt: null, endsAt: null, timeZone: "UTC", subject: null,
+      bodyText: "Away.", audience: "everyone", skipInternal: true, replyIntervalDays: 4,
+    }, "usr_test");
+    const id = `delivery_crlf_${crypto.randomUUID()}`;
+    await env.MAIL_STORAGE.put(`test/${id}.eml`, [
+      "From: mallory@example.net",
+      `To: ${own}`,
+      "Subject: =?UTF-8?Q?hi=0D=0ABcc:_victim@example.net?=",
+      `Message-ID: <${id}@example.net>`,
+      "",
+      "Body",
+    ].join("\r\n"));
+    await mailbox.enqueueInbound({
+      id, mailboxId, rawObjectKey: `test/${id}.eml`, envelopeFrom: "mallory@example.net", envelopeTo: own, receivedAt: Date.now(),
+    });
+    await runInDurableObject(mailbox, async (instance, state) => {
+      const bindings = Reflect.get(instance, "bindings") as Env;
+      const send = vi.spyOn(bindings.EMAIL, "send").mockResolvedValue({ messageId: "<auto@example.test>" });
+      try {
+        await state.storage.deleteAlarm();
+        await instance.alarm();
+        await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+        const message = send.mock.calls[0]![0] as unknown as { subject: string };
+        expect(message.subject).toContain("Bcc: victim@example.net");
+        expect(message.subject).not.toMatch(/[\r\n]/u);
+      } finally {
+        send.mockRestore();
+      }
+    });
   });
 });
 
