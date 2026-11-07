@@ -225,3 +225,24 @@ describe("outbound email limits", () => {
     });
   });
 });
+
+describe("header-bound values", async () => {
+  const { singleLineHeaders } = await import("../worker/mail/rfc");
+  it("folds CR/LF that decoded inbound values carry", () => {
+    expect(singleLineHeaders({
+      from: { name: "Team\r\nBcc: x@evil.example", email: "team@example.test" },
+      to: "a@example.net",
+      subject: "Auto: hi\r\nBcc: x@evil.example",
+      text: "line 1\r\nline 2",
+      headers: { "In-Reply-To": "<a@b>\r\nReply-To: x@evil.example" },
+      attachments: [{ filename: "a\r\nContent-Type: text/html", type: "text/plain", content: "" }],
+    })).toEqual({
+      from: { name: "Team Bcc: x@evil.example", email: "team@example.test" },
+      to: "a@example.net",
+      subject: "Auto: hi Bcc: x@evil.example",
+      text: "line 1\r\nline 2",
+      headers: { "In-Reply-To": "<a@b> Reply-To: x@evil.example" },
+      attachments: [{ filename: "a Content-Type: text/html", type: "text/plain", content: "" }],
+    });
+  });
+});

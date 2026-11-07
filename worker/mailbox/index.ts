@@ -33,6 +33,7 @@ import {
   UnprocessableInboundEmailError,
 } from "../mail/inbound";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
+import { singleLineHeaders } from "../mail/rfc";
 import {
   suggestParticipants,
   type ParticipantSource,
@@ -1860,7 +1861,7 @@ export class MailboxDO extends DurableObject<Env> {
       return failed;
     }
     try {
-      const result = await this.bindings.EMAIL.send(delivery);
+      const result = await this.bindings.EMAIL.send(singleLineHeaders(delivery));
       this.updateTransport(message.id, {
         state: "submitted",
         messageIdHeader: result.messageId,
