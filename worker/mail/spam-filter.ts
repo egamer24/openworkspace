@@ -345,6 +345,10 @@ export function assessSpam(
   },
   thresholds: SpamThresholds,
 ): SpamAssessment {
+  // A forged From must not borrow an allowed sender's trust (a block still applies).
+  if (input.senderList === "allow" && input.authentication?.dmarc === "fail") {
+    input = { ...input, senderList: null };
+  }
   const reasons = [
     ...senderListReasons(input.senderList),
     ...authenticationReasons(input.authentication),

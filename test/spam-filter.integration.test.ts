@@ -13,6 +13,7 @@ function rawMessage(input: {
   from: string;
   authentication?: string;
   subject?: string;
+  headers?: string[];
 }) {
   return [
     ...(input.authentication
@@ -22,6 +23,7 @@ function rawMessage(input: {
     "To: me@example.test",
     `Subject: ${input.subject ?? "Hello"}`,
     `Message-ID: <${crypto.randomUUID()}@example.net>`,
+    ...(input.headers ?? []),
     "Content-Type: text/plain; charset=utf-8",
     "",
     "Plain text body.",
@@ -136,12 +138,33 @@ describe("local spam filter delivery", () => {
     expect(blocked.mailboxState).toBe("spam");
     expect(blocked.email.spamVerdict).toBe("spam");
 
+    // A spam message that names an existing thread does not take it along.
+    const thread = await deliver(mailbox, mailboxId, rawMessage({
+      from: "partner@ok.example",
+      authentication: "dkim=pass header.d=ok.example; spf=pass smtp.mailfrom=ok.example; dmarc=pass header.from=ok.example",
+    }));
+    const forgedReply = await deliver(mailbox, mailboxId, rawMessage({
+      from: "promo@mail.evil.example",
+      authentication: "dkim=pass header.d=evil.example; spf=pass smtp.mailfrom=evil.example; dmarc=pass header.from=evil.example",
+      headers: [`In-Reply-To: <${thread.email.messageIdHeader}>`],
+    }));
+    expect(forgedReply.mailboxState).toBe("spam");
+    expect(forgedReply.email.conversationId).not.toBe(thread.email.conversationId);
+    expect(await mailbox.getConversationSnapshot(thread.email.conversationId))
+      .toMatchObject({ mailboxState: "active" });
+
     const allowed = await deliver(mailbox, mailboxId, rawMessage({
       from: "friend@evil.example",
-      authentication: "dkim=fail; spf=fail; dmarc=fail",
+      authentication: "dkim=fail; spf=fail; dmarc=pass header.from=evil.example",
     }));
     expect(allowed.mailboxState).toBe("active");
     expect(allowed.email.spamVerdict).toBe("clean");
+    // Someone else writing as the allowed sender fails DMARC and gets no pass.
+    const forged = await deliver(mailbox, mailboxId, rawMessage({
+      from: "friend@evil.example",
+      authentication: "dkim=fail; spf=fail; dmarc=fail",
+    }));
+    expect(forged.mailboxState).toBe("spam");
 
     // AI may add a spam decision, but never for an allow-listed sender.
     const bindings = await runInDurableObject(
