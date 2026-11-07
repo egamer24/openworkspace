@@ -522,4 +522,64 @@ describe("calendar invitations", () => {
       event: { title: "Design review", organizer: { address: "alan@contoso.example" } },
     });
   });
+
+  it("replaces an accepted event only from mail that passed DMARC as its organizer", async () => {
+    const { cookie, mailboxId } = await signIn();
+    await setModule(cookie, true);
+    const uid = `forged-${crypto.randomUUID()}`;
+    const request = outlookRequest.replaceAll(OUTLOOK_UID, uid);
+    const respond = async (from: string, ics: string, headers?: string[]) => {
+      const invite = await deliver(mailboxId, {
+        from, to: "admin@example.test", subject: "Design review", method: "REQUEST", ics, style: "outlook",
+        ...(headers ? { headers } : {}),
+      });
+      return call(cookie, `/api/mail/mailboxes/${mailboxId}/messages/${invite.id}/invitation/respond`, {
+        method: "POST",
+        json: { response: "ACCEPTED" },
+      });
+    };
+    const { eventId } = await (await respond("Alan Turing <alan@contoso.example>", request)).json<{ eventId: string }>();
+    const moved = request.replace("SUMMARY;LANGUAGE=en-US:Design review", "SUMMARY:Moved");
+    // The ICS names the real organizer, but the mail comes from elsewhere or fails DMARC.
+    expect((await respond("Mallory <mallory@evil.example>", moved)).status).toBe(400);
+    expect((await respond("Alan Turing <alan@contoso.example>", moved, [cloudflareAuth("contoso.example", "fail")])).status).toBe(400);
+    expect(await (await call(cookie, `/api/calendar/events/${eventId}`)).json()).toMatchObject({ event: { title: "Design review" } });
+    expect((await respond("Alan Turing <alan@contoso.example>", moved)).status).toBe(200);
+  });
+
+  it("ignores a CANCEL that is stale or uninvites someone else", async () => {
+    const { cookie, mailboxId } = await signIn();
+    await setModule(cookie, true);
+    const uid = `scope-${crypto.randomUUID()}`;
+    const invite = await deliver(mailboxId, {
+      from: "Alan Turing <alan@contoso.example>",
+      to: "admin@example.test",
+      subject: "Design review",
+      method: "REQUEST",
+      ics: outlookRequest.replaceAll(OUTLOOK_UID, uid).replace("SEQUENCE:0", "SEQUENCE:2"),
+      style: "outlook",
+    });
+    const accepted = await call(cookie, `/api/mail/mailboxes/${mailboxId}/messages/${invite.id}/invitation/respond`, {
+      method: "POST",
+      json: { response: "ACCEPTED" },
+    });
+    const { eventId } = await accepted.json<{ eventId: string }>();
+    const status = async () => (await (await call(cookie, `/api/calendar/events/${eventId}`))
+      .json<{ event: { status: string } }>()).event.status;
+    const cancel = (ics: string) => deliver(mailboxId, {
+      from: "Alan Turing <alan@contoso.example>",
+      to: "admin@example.test",
+      subject: "Canceled: Design review",
+      method: "CANCEL",
+      ics,
+      style: "outlook",
+    });
+    const base = outlookCancel.replaceAll(OUTLOOK_UID, uid);
+    await cancel(base); // SEQUENCE 1 < 2
+    expect(await status()).toBe("confirmed");
+    await cancel(base.replace("SEQUENCE:1", "SEQUENCE:3").replace("MAILTO:admin@example.test", "MAILTO:ada@contoso.example"));
+    expect(await status()).toBe("confirmed");
+    await cancel(base.replace("SEQUENCE:1", "SEQUENCE:3"));
+    expect(await status()).toBe("cancelled");
+  });
 });

@@ -5,6 +5,7 @@ import { createDb } from "../db/client";
 import type { AppEnv } from "../env";
 import { apiError } from "../lib/http";
 import { getMailboxAccess } from "../mail/access";
+import { cloudflareDmarcPass } from "../mail/rfc";
 import { mailboxStub } from "../mailbox";
 import { calendarStub } from ".";
 import { parseIcs } from "./ics";
@@ -54,11 +55,14 @@ export const invitationRoutes = new Hono<AppEnv>()
       if (!object) return apiError(c, 404, "NOT_FOUND", "Invitation not found");
       const parsed = parseIcs(await object.text()).events.filter((event) => event.uid === invitation.uid);
       const name = user.name || access.displayName || null;
+      const sender = email.fromJson[0]?.address ?? null;
+      const raw = sender && email.rawMimeR2Key ? await c.env.MAIL_STORAGE.get(email.rawMimeR2Key) : null;
       const answered = await calendarStub(c.env, user.id).respondToInvitation({
         parsed,
         address: access.address,
         name,
         partstat: response,
+        authenticatedSender: raw && cloudflareDmarcPass(await raw.arrayBuffer(), sender!) ? sender : null,
       });
       if (!answered.ok) return apiError(c, answered.status, "BAD_REQUEST", answered.message);
 

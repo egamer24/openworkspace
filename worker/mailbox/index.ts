@@ -27,7 +27,8 @@ import { globalAiProcessingEnabled } from "../ai/configuration";
 import { calendarStub } from "../calendar";
 import { calendarModuleEnabled } from "../calendar/module";
 import { createDb } from "../db/client";
-import { mailboxMembers } from "../db/schema";
+import { domains, mailboxMembers, mailboxes } from "../db/schema";
+import { mailboxAddressSql } from "../db/mailboxes";
 import {
   inboundMessageId,
   MissingRawMimeError,
@@ -1299,7 +1300,14 @@ export class MailboxDO extends DurableObject<Env> {
     }
     const mailboxId = this.state.id.name ?? "unknown-mailbox";
     try {
-      const members = await createDb(this.bindings.DB)
+      const db = createDb(this.bindings.DB);
+      const [mailbox] = await db
+        .select({ address: mailboxAddressSql })
+        .from(mailboxes)
+        .innerJoin(domains, eq(domains.id, mailboxes.domainId))
+        .where(eq(mailboxes.id, mailboxId))
+        .limit(1);
+      const members = await db
         .select({ userId: mailboxMembers.userId })
         .from(mailboxMembers)
         .where(eq(mailboxMembers.mailboxId, mailboxId));
@@ -1308,8 +1316,10 @@ export class MailboxDO extends DurableObject<Env> {
           method: invitation.method,
           uid: invitation.uid,
           recurrenceId: invitation.recurrenceId,
+          sequence: invitation.sequence,
           sender,
           mailboxId,
+          address: mailbox?.address ?? null,
           attendees: invitation.attendees,
         });
       }
