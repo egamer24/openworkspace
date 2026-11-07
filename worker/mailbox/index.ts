@@ -1670,6 +1670,26 @@ export class MailboxDO extends DurableObject<Env> {
         await this.finishStoredInbound(job, existing, now, false);
         continue;
       }
+      const storeFallback = async (reason: string, rawMimeR2Key: string | null, cause?: unknown) => {
+        const stored = await this.insertEmail(prepareUnprocessableInboundEmail({ job, reason, rawMimeR2Key }));
+        if (!stored) throw new Error("Inbound fallback email was not persisted", { cause });
+        await this.finishStoredInbound(job, stored, now, true);
+      };
+      // A message that exceeds the isolate's CPU or memory limit aborts the
+      // alarm before any catch runs. Lease the attempt durably first, so such a
+      // message backs off behind newer mail and is given up on after 24 hours.
+      if (job.attempts > 0 && now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS) {
+        await storeFallback("Message processing remained unavailable for 24 hours", job.rawObjectKey);
+        console.error(`Stored fallback for inbound delivery ${job.id} after ${job.attempts} attempts`);
+        continue;
+      }
+      const attempts = job.attempts + 1;
+      this.db
+        .update(pendingInbound)
+        .set({ attempts, nextAttemptAt: new Date(now + retryDelay(attempts)) })
+        .where(eq(pendingInbound.id, job.id))
+        .run();
+      await this.state.storage.sync();
 
       try {
         const rawMime = await readInboundRawMime(this.bindings, job);
@@ -1714,51 +1734,23 @@ export class MailboxDO extends DurableObject<Env> {
         await this.finishStoredInbound(job, stored, now, true);
       } catch (error) {
         if (error instanceof UnprocessableInboundEmailError) {
-          const fallback = prepareUnprocessableInboundEmail({
-            job,
-            reason: error.message,
-            rawMimeR2Key: job.rawObjectKey,
-          });
-          const stored = await this.insertEmail(fallback);
-          if (!stored) {
-            throw new Error("Inbound fallback email was not persisted", {
-              cause: error,
-            });
-          }
-          await this.finishStoredInbound(job, stored, now, true);
+          await storeFallback(error.message, job.rawObjectKey, error);
           console.error(`Stored fallback for inbound delivery ${job.id}`, error);
           continue;
         }
         if (now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS) {
-          const fallback = prepareUnprocessableInboundEmail({
-            job,
-            reason: "Message processing remained unavailable for 24 hours",
-            rawMimeR2Key: error instanceof MissingRawMimeError
-              ? null
-              : job.rawObjectKey,
-          });
-          const stored = await this.insertEmail(fallback);
-          if (!stored) {
-            throw new Error("Inbound infrastructure fallback was not persisted", {
-              cause: error,
-            });
-          }
-          await this.finishStoredInbound(job, stored, now, true);
+          await storeFallback(
+            "Message processing remained unavailable for 24 hours",
+            error instanceof MissingRawMimeError ? null : job.rawObjectKey,
+            error,
+          );
           console.error(
             `Stored infrastructure fallback for inbound delivery ${job.id}`,
             error,
           );
           continue;
         }
-        const attempts = job.attempts + 1;
-        this.db
-          .update(pendingInbound)
-          .set({
-            attempts,
-            nextAttemptAt: new Date(now + retryDelay(attempts)),
-          })
-          .where(eq(pendingInbound.id, job.id))
-          .run();
+        // The attempt was already leased above.
         console.error(`Could not ingest inbound delivery ${job.id}`, error);
       }
     }

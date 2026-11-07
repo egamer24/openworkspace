@@ -690,6 +690,28 @@ describe("mail worker", () => {
       transportState: "received",
     });
 
+    // A message that aborted earlier alarms (CPU or memory) left only its
+    // leased attempts behind: it backs off and is never parsed again after 24h.
+    const poisonDeliveryId = "inbound-poison";
+    const poisonKey = "test/inbound-poison.eml";
+    await env.MAIL_STORAGE.put(poisonKey, "From: p@example.net\r\nTo: admin@example.test\r\nSubject: Poison\r\n\r\nx");
+    await mailbox.enqueueInbound({
+      id: poisonDeliveryId,
+      mailboxId: personalMailboxId,
+      rawObjectKey: poisonKey,
+      envelopeFrom: "p@example.net",
+      envelopeTo: "admin@example.test",
+      receivedAt: Date.now() - 24 * 60 * 60 * 1_000 - 1,
+    });
+    await runInDurableObject(mailbox, (_instance, state) => {
+      state.storage.sql.exec("update pending_inbound set attempts = 7 where id = ?", poisonDeliveryId);
+    });
+    await runDurableObjectAlarm(mailbox);
+    await expect(mailbox.getEmail(`msg_${poisonDeliveryId}`)).resolves.toMatchObject({
+      subject: "(unreadable message)",
+      rawMimeR2Key: poisonKey,
+    });
+
     const searchResponse = await exports.default.fetch(
       new Request(
         `http://example.test/api/mail/conversations?mailboxId=${personalMailboxId}&folder=inbox&search=Persisted`,
