@@ -104,7 +104,7 @@ describe("OIDC user lifecycle", () => {
     `).bind(
       pushSubscriptionId,
       userId,
-      `https://push.example.test/${crypto.randomUUID()}`,
+      `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`,
       "test-p256dh",
       "test-auth",
     ).run();

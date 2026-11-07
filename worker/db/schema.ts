@@ -472,6 +472,8 @@ export const pushSubscriptions = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /** The session that last bound this browser; pushes stop when it is revoked. */
+    sessionId: text("session_id"),
     endpoint: text("endpoint").notNull(),
     p256dh: text("p256dh").notNull(),
     auth: text("auth").notNull(),

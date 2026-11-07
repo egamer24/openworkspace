@@ -217,7 +217,7 @@ describe("mailbox realtime", () => {
 
 describe("notification preferences", () => {
   it("binds a push registration to the current account", async () => {
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     const create = await exports.default.fetch(
       new Request("http://example.test/api/notifications/subscriptions", {
         method: "PUT",
@@ -259,7 +259,7 @@ describe("notification preferences", () => {
         method: "PUT",
         headers: { cookie: session.cookie, "content-type": "application/json" },
         body: JSON.stringify({
-          endpoint: `https://push.example.test/${crypto.randomUUID()}`,
+          endpoint: `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`,
           keys: { p256dh: "not-a-p256-key", auth: "too-short" },
         }),
       }),
@@ -267,11 +267,29 @@ describe("notification preferences", () => {
     expect(create.status).toBe(400);
   });
 
+  it("accepts only browser push service endpoints", async () => {
+    const { isPushServiceEndpoint } = await import("../worker/mail/push-notifications");
+    for (const endpoint of [
+      "https://fcm.googleapis.com/fcm/send/x",
+      "https://updates.push.services.mozilla.com/wpush/v2/x",
+      "https://web.push.apple.com/x",
+      "https://wns2-par02p.notify.windows.com/w/?token=x",
+    ]) expect(isPushServiceEndpoint(endpoint), endpoint).toBe(true);
+    for (const endpoint of [
+      "https://example.test/x",
+      "https://fcm.googleapis.com.evil.example/x",
+      "https://evilfcm.googleapis.com.example/x",
+      "https://fcm.googleapis.com:8443/x",
+      "http://fcm.googleapis.com/x",
+      "https://127.0.0.1/x",
+    ]) expect(isPushServiceEndpoint(endpoint), endpoint).toBe(false);
+  });
+
   it("keeps account push when an unrelated session expires", async () => {
     const expiredTokenHash = `expired_${crypto.randomUUID()}`;
     const expiredSessionId = `ses_${crypto.randomUUID()}`;
     const pushSubscriptionId = `push_${crypto.randomUUID()}`;
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     const now = Date.now();
     await env.DB.prepare(`
       INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at)

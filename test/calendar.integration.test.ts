@@ -191,10 +191,13 @@ describe("calendar module", () => {
     });
 
     // Reminder push jobs fan out to the owner's devices only.
+    const memberSession = await env.DB.prepare("SELECT id FROM sessions WHERE user_id = ? LIMIT 1")
+      .bind(memberId).first<{ id: string }>();
     await createDb(env.DB).insert(pushSubscriptions).values({
       id: "push_calendar_member",
       userId: memberId,
-      endpoint: "https://push.example.test/calendar-member",
+      sessionId: memberSession!.id,
+      endpoint: "https://fcm.googleapis.com/fcm/send/calendar-member",
       p256dh: "BLc4xRzKlKORKWlbdgFaBrrPK3ydWAHo4M0gs0i1oEKgPpWC5cW8OCzVrOQRv-1npXRWk8udnW3oYhIO4475rds",
       auth: "5I2Bu2oKdyy9CwL8QVF0NQ",
       createdAt: new Date(),

@@ -85,7 +85,7 @@ import {
 } from "../mail/rules";
 import { buildRuleForward } from "../mail/rule-forward";
 import { createDb } from "../db/client";
-import { domains, mailboxMembers, mailboxes } from "../db/schema";
+import { domains, mailboxMembers, mailboxes, users } from "../db/schema";
 import { createId, normalizeMailboxAddress } from "../lib/ids";
 import {
   deferWebhookTask,
@@ -1032,7 +1032,30 @@ export class MailboxDO extends DurableObject<Env> {
    * and before notifications. Forwarding runs afterwards in waitUntil.
    */
   private async applyRules(job: PendingInbound, email: Email, rawMime: ArrayBuffer) {
-    const rules = this.listRules().filter((rule) => rule.enabled);
+    const stored = this.db.select().from(mailRules).where(eq(mailRules.enabled, true))
+      .orderBy(asc(mailRules.position)).all();
+    if (!stored.length) return;
+    const db = createDb(this.bindings.DB);
+    const mailboxId = this.state.id.name ?? "";
+    // A forward sends mail outside on its creator's authority: it stops once
+    // they are disabled or lose send access, like a throwaway address does.
+    const forwarders = [...new Set(stored
+      .filter((rule) => rule.actionsJson.some((action) => action.type === "forward"))
+      .map((rule) => rule.createdBy))];
+    const senders = forwarders.length
+      ? new Set((await db
+        .select({ userId: mailboxMembers.userId })
+        .from(mailboxMembers)
+        .innerJoin(users, and(eq(users.id, mailboxMembers.userId), eq(users.status, "active")))
+        .where(and(
+          eq(mailboxMembers.mailboxId, mailboxId),
+          eq(mailboxMembers.canSend, true),
+          inArray(mailboxMembers.userId, forwarders),
+        ))).map((row) => row.userId))
+      : new Set<string>();
+    const rules = stored
+      .filter((rule) => senders.has(rule.createdBy) || !rule.actionsJson.some((action) => action.type === "forward"))
+      .map(ruleView);
     if (!rules.length) return;
     const conversation = this.db
       .select({ mailboxState: conversations.mailboxState })
@@ -1055,8 +1078,6 @@ export class MailboxDO extends DurableObject<Env> {
         .where(eq(conversations.id, email.conversationId))
         .run();
     }
-    const db = createDb(this.bindings.DB);
-    const mailboxId = this.state.id.name ?? "";
     if (outcome.markRead) {
       const members = await db
         .select({ userId: mailboxMembers.userId })

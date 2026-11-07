@@ -109,6 +109,14 @@ describe("rules on delivery", () => {
   it("forwards from the mailbox, trashes forward-only copies, and never loops", async () => {
     const mailboxId = `mbx_rules_${crypto.randomUUID()}`;
     const mailbox = mailboxStub(env, mailboxId);
+    // Forwards run on their creator's authority: an active member with send access.
+    await env.DB.batch([
+      env.DB.prepare("INSERT OR IGNORE INTO users (id, name, role, status) VALUES ('usr_test', 'Rules', 'member', 'active')"),
+      env.DB.prepare("INSERT OR IGNORE INTO domains (id, name, created_by_user_id) VALUES ('dom_rules', 'rules.example.test', 'usr_test')"),
+      env.DB.prepare("INSERT INTO mailboxes (id, local_part, domain_id, display_name, created_by_user_id) VALUES (?, ?, 'dom_rules', 'Rules', 'usr_test')")
+        .bind(mailboxId, mailboxId),
+      env.DB.prepare("INSERT INTO mailbox_members (mailbox_id, user_id, can_send) VALUES (?, 'usr_test', 1)").bind(mailboxId),
+    ]);
     expect(await mailbox.createRule({
       name: "Invoices to accounting",
       enabled: true,
@@ -183,10 +191,35 @@ describe("rules on delivery", () => {
           ).one().mailbox_state;
         await vi.waitFor(() => expect(stateOf(invoiceId)).toBe("trash"));
         expect(stateOf(listId)).toBe("archive");
+
       } finally {
         send.mockRestore();
       }
     });
+    // The creator loses send access: the rule no longer forwards.
+    await env.DB.prepare("UPDATE mailbox_members SET can_send = 0 WHERE mailbox_id = ?").bind(mailboxId).run();
+    const keptId = await deliver("revoked", "vendor@example.net", ["Subject: Invoice 1043"]);
+    await runInDurableObject(mailbox, async (instance, state) => {
+      const bindings = Reflect.get(instance, "bindings") as Env;
+      const send = vi.spyOn(bindings.EMAIL, "send").mockResolvedValue({ messageId: "<fwd@example.test>" });
+      try {
+        await state.storage.deleteAlarm();
+        await instance.alarm();
+        expect(state.storage.sql.exec<{ mailbox_state: string }>(
+          "select c.mailbox_state from conversations c join emails e on e.conversation_id = c.id where e.id = ?",
+          keptId,
+        ).one().mailbox_state).toBe("active");
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
+    });
+    // The rules API test below bootstraps the first account.
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM mailboxes WHERE id = ?").bind(mailboxId),
+      env.DB.prepare("DELETE FROM domains WHERE id = 'dom_rules'"),
+      env.DB.prepare("DELETE FROM users WHERE id = 'usr_test'"),
+    ]);
   });
 });
 

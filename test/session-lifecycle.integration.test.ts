@@ -140,7 +140,7 @@ describe("session and push ownership", () => {
   it("atomically transfers an endpoint to the currently authenticated account", async () => {
     const firstUserId = await createUser("First Push User");
     const secondUserId = await createUser("Second Push User");
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     await bindPush(await login(firstUserId), endpoint);
     await bindPush(await login(secondUserId), endpoint);
 
@@ -150,9 +150,9 @@ describe("session and push ownership", () => {
     expect(owner?.userId).toBe(secondUserId);
   });
 
-  it("keeps account push after session revoke but detaches it on explicit logout", async () => {
+  it("drops push registered by a revoked session and detaches it on explicit logout", async () => {
     const userId = await createUser("Push Lifecycle User");
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     const firstCookie = await login(userId);
     await bindPush(firstCookie, endpoint);
     const firstSession = await sessionForCookie(firstCookie);
@@ -164,13 +164,15 @@ describe("session and push ownership", () => {
       }),
     );
     expect(revoke.status).toBe(200);
+    // Whoever held the revoked session could have registered their own endpoint.
     expect(
       await env.DB.prepare(
         "SELECT id FROM push_subscriptions WHERE endpoint = ?",
       ).bind(endpoint).first(),
-    ).toBeTruthy();
+    ).toBeNull();
 
     const secondCookie = await login(userId);
+    await bindPush(secondCookie, endpoint);
     const logout = await exports.default.fetch(
       new Request("http://example.test/api/auth/logout", {
         method: "POST",
