@@ -326,7 +326,7 @@ describe("public OIDC clients", () => {
     `).bind(
       pushSubscriptionId,
       state.users[0]!.id,
-      `https://push.example.test/${crypto.randomUUID()}`,
+      `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`,
       "test-p256dh",
       "test-auth",
     ).run();

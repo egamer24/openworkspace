@@ -78,7 +78,7 @@ async function registerPushTarget() {
   const body = await mailboxResponse.json() as {
     mailboxes: Array<{ id: string }>;
   };
-  const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+  const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
   const registration = await exports.default.fetch(
     new Request("http://example.test/api/notifications/subscriptions", {
       method: "PUT",

@@ -1,6 +1,6 @@
 import { and, desc, eq, gt } from "drizzle-orm";
 import type { Database } from "../db/client";
-import { sessions } from "../db/schema";
+import { pushSubscriptions, sessions } from "../db/schema";
 
 export async function sessionsForUser(
   db: Database,
@@ -41,5 +41,7 @@ export async function revokeUserSession(
       eq(sessions.userId, userId),
     ))
     .returning({ id: sessions.id });
+  // Whoever held the session may have registered their own push endpoint.
+  if (revoked) await db.delete(pushSubscriptions).where(eq(pushSubscriptions.sessionId, revoked.id));
   return revoked ?? null;
 }

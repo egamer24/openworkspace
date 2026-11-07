@@ -20,6 +20,7 @@ import {
   mailboxNotificationPreferences,
   mailboxes,
   pushSubscriptions,
+  sessions,
   users,
 } from "../db/schema";
 import { mailboxAddressSql, mailboxKindOrderSql } from "../db/mailboxes";
@@ -31,10 +32,28 @@ import { getMailboxAccess } from "./access";
 
 export const PUSH_NOTIFICATION_QUEUE = "openworkspace-push-notifications";
 
+/**
+ * Browser push services. The Worker POSTs to the endpoint on every delivery,
+ * so an arbitrary URL would make it a request relay for any member.
+ */
+const PUSH_SERVICE_HOSTS = [
+  "fcm.googleapis.com",
+  "push.services.mozilla.com",
+  "push.apple.com",
+  "notify.windows.com",
+];
+
+export function isPushServiceEndpoint(value: string) {
+  const url = new URL(value);
+  const host = url.hostname.toLowerCase();
+  return url.protocol === "https:" && !url.port && !url.username && !url.password
+    && PUSH_SERVICE_HOSTS.some((service) => host === service || host.endsWith(`.${service}`));
+}
+
 const pushSubscriptionSchema = z.object({
   endpoint: z.url().max(4_096).refine(
-    (value) => new URL(value).protocol === "https:",
-    "Push endpoint must use HTTPS",
+    isPushServiceEndpoint,
+    "Push endpoint must be an HTTPS URL of a browser push service",
   ),
   keys: z.object({
     p256dh: z.string().min(1).max(512).refine((value) => {
@@ -254,6 +273,7 @@ export const pushNotificationRoutes = new Hono<AppEnv>()
         .values({
           id: createId("push"),
           userId: c.get("user").id,
+          sessionId: c.get("sessionId"),
           endpoint: input.endpoint,
           p256dh: input.keys.p256dh,
           auth: input.keys.auth,
@@ -264,6 +284,7 @@ export const pushNotificationRoutes = new Hono<AppEnv>()
           target: pushSubscriptions.endpoint,
           set: {
             userId: c.get("user").id,
+            sessionId: c.get("sessionId"),
             p256dh: input.keys.p256dh,
             auth: input.keys.auth,
             updatedAt: now,
@@ -296,6 +317,8 @@ async function subscriptionsForMailbox(
   })
     .from(pushSubscriptions)
     .innerJoin(users, eq(pushSubscriptions.userId, users.id))
+    // A revoked or evicted session's registration stops until the browser rebinds it.
+    .innerJoin(sessions, eq(sessions.id, pushSubscriptions.sessionId))
     .innerJoin(
       mailboxMembers,
       and(
@@ -364,6 +387,8 @@ async function targetSubscription(
   })
     .from(pushSubscriptions)
     .innerJoin(users, eq(pushSubscriptions.userId, users.id))
+    // A revoked or evicted session's registration stops until the browser rebinds it.
+    .innerJoin(sessions, eq(sessions.id, pushSubscriptions.sessionId))
     .innerJoin(
       mailboxMembers,
       and(
