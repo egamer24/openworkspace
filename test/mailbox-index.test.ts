@@ -102,6 +102,8 @@ describe("mailbox conversation index", () => {
         "To: me@example.test",
         `Subject: ${delivery.subject}`,
         `Message-ID: <${delivery.id}@example.net>`,
+        // The spam claims to answer the product thread; it must not take it along.
+        ...(index ? [`In-Reply-To: <${deliveries[0]!.id}@example.net>`] : []),
         "",
         delivery.body,
       ].join("\r\n"));
@@ -191,6 +193,7 @@ describe("mailbox conversation index", () => {
     });
     expect(await mailbox.getConversationSnapshot(spamMessage!.conversationId))
       .toMatchObject({ mailboxState: "spam", folderId: null });
+    expect(spamMessage!.conversationId).not.toBe(productMessage!.conversationId);
     expect(runAi).toHaveBeenCalledTimes(2);
     expect(runAi).toHaveBeenCalledWith(
       expect.any(String),
