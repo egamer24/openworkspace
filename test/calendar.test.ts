@@ -385,3 +385,14 @@ describe("calendar durable object", () => {
     expect(calls).toBe(0);
   });
 });
+
+describe("ICS content lines", () => {
+  it("splits parameters in linear time and keeps quoted separators", () => {
+    const ics = (start: string, line = "X-A:b") => `BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:a\r\n${start}\r\nDTEND:20261210T160000Z\r\n${line}\r\nSUMMARY:x\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+    const started = performance.now();
+    parseIcs(ics("DTSTART:20261210T150000Z", `X${";".repeat(200_000)}:v`));
+    expect(performance.now() - started).toBeLessThan(1000);
+    const [event] = parseIcs(ics('DTSTART;X-NOTE="a; b: c";TZID=Europe/Berlin:20261210T160000')).events;
+    expect(event).toMatchObject({ timeZone: "Europe/Berlin", startsAt: Date.parse("2026-12-10T15:00:00Z") });
+  });
+});
