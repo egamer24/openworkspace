@@ -49,7 +49,8 @@ import {
 } from "../mail/rules";
 import { buildRuleForward } from "../mail/rule-forward";
 import { createDb } from "../db/client";
-import { mailboxMembers, mailboxes } from "../db/schema";
+import { mailboxMembers, mailboxes, users } from "../db/schema";
+import { singleLineHeaders } from "../mail/rfc";
 import { createId, normalizeMailboxAddress } from "../lib/ids";
 import {
   deferWebhookTask,
@@ -725,7 +726,27 @@ export class MailboxDO extends DurableObject<Env> {
    * and before notifications. Forwarding runs afterwards in waitUntil.
    */
   private async applyRules(job: PendingInbound, email: Email, rawMime: ArrayBuffer) {
-    const rules = this.listRules().filter((rule) => rule.enabled);
+    const stored = this.db.select().from(mailRules).where(eq(mailRules.enabled, true))
+      .orderBy(asc(mailRules.position)).all();
+    if (!stored.length) return;
+    const db = createDb(this.bindings.DB);
+    const mailboxId = this.state.id.name ?? "";
+    // A forward sends mail outside on its creator's authority: it stops once
+    // they are disabled or lose send access to this mailbox.
+    const forwardsMail = (rule: (typeof stored)[number]) => rule.actionsJson.some((action) => action.type === "forward");
+    const forwarders = [...new Set(stored.filter(forwardsMail).map((rule) => rule.createdBy))];
+    const senders = forwarders.length
+      ? new Set((await db
+        .select({ userId: mailboxMembers.userId })
+        .from(mailboxMembers)
+        .innerJoin(users, and(eq(users.id, mailboxMembers.userId), eq(users.status, "active")))
+        .where(and(
+          eq(mailboxMembers.mailboxId, mailboxId),
+          eq(mailboxMembers.canSend, true),
+          inArray(mailboxMembers.userId, forwarders),
+        ))).map((row) => row.userId))
+      : new Set<string>();
+    const rules = stored.filter((rule) => senders.has(rule.createdBy) || !forwardsMail(rule)).map(ruleView);
     if (!rules.length) return;
     const conversation = this.db
       .select({ mailboxState: conversations.mailboxState })
@@ -748,8 +769,6 @@ export class MailboxDO extends DurableObject<Env> {
         .where(eq(conversations.id, email.conversationId))
         .run();
     }
-    const db = createDb(this.bindings.DB);
-    const mailboxId = this.state.id.name ?? "";
     if (outcome.markRead) {
       const members = await db
         .select({ userId: mailboxMembers.userId })
@@ -792,11 +811,11 @@ export class MailboxDO extends DurableObject<Env> {
     let allSent = true;
     for (const forward of forwards) {
       try {
-        await this.bindings.EMAIL.send(await buildRuleForward(this.bindings, {
+        await this.bindings.EMAIL.send(singleLineHeaders(await buildRuleForward(this.bindings, {
           email,
           ...input,
           to: forward.to,
-        }));
+        })));
       } catch (error) {
         allSent = false;
         console.error(`Rule forward of ${email.id} to ${forward.to} failed`, error);
@@ -1445,6 +1464,29 @@ export class MailboxDO extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Threading trusts the sender's In-Reply-To and References, so a message
+   * that a rule discards must not carry the conversation it claims to answer
+   * (and other senders' mail) into Spam or Trash: it starts its own.
+   */
+  private detachFromConversation<T extends NewEmail>(email: T): T {
+    const joined = this.db.select({ id: emails.id }).from(emails)
+      .where(eq(emails.conversationId, email.conversationId)).limit(1).all()[0];
+    return joined ? { ...email, conversationId: createId("conv") } : email;
+  }
+
+  /** Whether the mailbox's rules would send this message to Spam or Trash. */
+  private rulesDiscard(email: NewEmail) {
+    const rules = this.listRules().filter((rule) => rule.enabled);
+    if (!rules.length) return false;
+    const outcome = evaluateRules(rules, {
+      fromJson: email.fromJson ?? [], toJson: email.toJson ?? [], ccJson: email.ccJson ?? [],
+      subject: email.subject ?? "", listId: email.listId ?? null, attachmentsJson: email.attachmentsJson ?? [],
+    }, "active");
+    return outcome.mailboxState === "spam" || outcome.mailboxState === "trash"
+      || (outcome.forwards.length > 0 && outcome.forwards.every((forward) => !forward.keepCopy));
+  }
+
   private insertClassifiedInboundEmail(
     email: NewEmail,
     classification: EmailAiClassification | null,
@@ -1930,7 +1972,7 @@ export class MailboxDO extends DurableObject<Env> {
             error,
           );
         }
-        const stored = this.insertClassifiedInboundEmail(email, classification);
+        const stored = this.insertClassifiedInboundEmail(this.rulesDiscard(email) ? this.detachFromConversation(email) : email, classification);
         if (!stored) {
           throw new Error("Parsed inbound email was not persisted");
         }
