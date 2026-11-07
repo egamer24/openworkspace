@@ -236,6 +236,8 @@ describe("mail routing administration", () => {
     const tooManyHops = await deliver("loop@example.test", { headers: { [FORWARDED_HEADER]: "3" } });
     expect(tooManyHops.forward).not.toHaveBeenCalled();
     expect(tooManyHops.setReject).toHaveBeenCalled();
+    const negative = await deliver("loop@example.test", { headers: { [FORWARDED_HEADER]: "-1000000" } });
+    expect(negative.forward.mock.calls[0]![1]?.get(FORWARDED_HEADER)).toBe("1");
 
     const nextHop = await deliver("loop@example.test", { headers: { [FORWARDED_HEADER]: "2" } });
     expect(nextHop.forward.mock.calls[0]![1]?.get(FORWARDED_HEADER)).toBe("3");
