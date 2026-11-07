@@ -57,7 +57,7 @@ import {
   type SpamLabel,
 } from "../mail/spam-learning";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
-import { cloudflareDmarcPass } from "../mail/rfc";
+import { cloudflareDmarcPass, singleLineHeaders } from "../mail/rfc";
 import {
   suggestParticipants,
   type ParticipantSource,
@@ -913,14 +913,14 @@ export class MailboxDO extends DurableObject<Env> {
       .where(eq(mailboxes.id, this.state.id.name ?? ""))
       .limit(1);
     try {
-      const result = await this.bindings.EMAIL.send(buildAutoReply({
+      const result = await this.bindings.EMAIL.send(singleLineHeaders(buildAutoReply({
         mailboxAddress,
         mailboxName: mailbox?.displayName ?? "",
         recipient,
         original: email,
         subject: settings.subject,
         bodyText: settings.bodyText,
-      }));
+      })));
       this.db.update(autoReplyLog)
         .set({ lastOutboundMessageId: result.messageId })
         .where(eq(autoReplyLog.senderAddress, recipient))
@@ -1120,11 +1120,11 @@ export class MailboxDO extends DurableObject<Env> {
     let allSent = true;
     for (const forward of forwards) {
       try {
-        await this.bindings.EMAIL.send(await buildRuleForward(this.bindings, {
+        await this.bindings.EMAIL.send(singleLineHeaders(await buildRuleForward(this.bindings, {
           email,
           ...input,
           to: forward.to,
-        }));
+        })));
       } catch (error) {
         allSent = false;
         console.error(`Rule forward of ${email.id} to ${forward.to} failed`, error);
@@ -2192,7 +2192,10 @@ export class MailboxDO extends DurableObject<Env> {
   private rulesDiscard(email: NewEmail) {
     const rules = this.listRules().filter((rule) => rule.enabled);
     if (!rules.length) return false;
-    const outcome = evaluateRules(rules, email, "active");
+    const outcome = evaluateRules(rules, {
+      fromJson: email.fromJson ?? [], toJson: email.toJson ?? [], ccJson: email.ccJson ?? [],
+      subject: email.subject ?? "", listId: email.listId ?? null, attachmentsJson: email.attachmentsJson ?? [],
+    }, "active");
     return outcome.mailboxState === "spam" || outcome.mailboxState === "trash"
       || (outcome.forwards.length > 0 && outcome.forwards.every((forward) => !forward.keepCopy));
   }
@@ -3062,7 +3065,7 @@ export class MailboxDO extends DurableObject<Env> {
       return failed;
     }
     try {
-      const result = await this.bindings.EMAIL.send(delivery);
+      const result = await this.bindings.EMAIL.send(singleLineHeaders(delivery));
       this.updateTransport(message.id, {
         state: "submitted",
         messageIdHeader: result.messageId,

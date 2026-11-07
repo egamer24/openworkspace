@@ -95,3 +95,45 @@ export function cloudflareDmarcPass(rawMime: ArrayBuffer | string, fromAddress: 
   const domain = fromAddress.slice(fromAddress.lastIndexOf("@") + 1).toLowerCase();
   return dmarc?.[0] === "dmarc=pass" && dmarc.includes(`header.from=${domain}`);
 }
+
+const LINE_BREAKS = /[\r\n]+/gu;
+
+type HeaderBoundFields = {
+  from?: string | { name?: string; email: string };
+  replyTo?: string | { name?: string; email: string };
+  subject?: string;
+  headers?: Record<string, string>;
+  attachments?: Array<{ filename?: string; type?: string; contentId?: string }>;
+};
+
+/**
+ * Folds CR/LF out of every value send_email puts in a header. Subjects,
+ * Message-IDs, file names and ICS titles come from other people's mail, where
+ * RFC 2047 encoded words decode into raw line breaks.
+ */
+export function singleLineHeaders<T extends HeaderBoundFields>(message: T): T {
+  const line = (value: string) => value.replace(LINE_BREAKS, " ");
+  type Party = string | { name?: string; email: string };
+  const party = (value: Party): Party => typeof value === "string"
+    ? line(value)
+    : { ...value, email: line(value.email), ...(value.name === undefined ? {} : { name: line(value.name) }) };
+  return {
+    ...message,
+    ...(message.from === undefined ? {} : { from: party(message.from) }),
+    ...(message.replyTo === undefined ? {} : { replyTo: party(message.replyTo) }),
+    ...(message.subject === undefined ? {} : { subject: line(message.subject) }),
+    ...(message.headers
+      ? { headers: Object.fromEntries(Object.entries(message.headers).map(([key, value]) => [key, line(value)])) }
+      : {}),
+    ...(message.attachments
+      ? {
+        attachments: message.attachments.map((attachment) => ({
+          ...attachment,
+          ...(attachment.filename === undefined ? {} : { filename: line(attachment.filename) }),
+          ...(attachment.type === undefined ? {} : { type: line(attachment.type) }),
+          ...(attachment.contentId === undefined ? {} : { contentId: line(attachment.contentId) }),
+        })),
+      }
+      : {}),
+  };
+}

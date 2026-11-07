@@ -34,6 +34,8 @@ export async function signR2PutUrl(input: {
   env: Bindings;
   r2Key: string;
   contentType: string;
+  /** Signed, so the URL stores exactly the declared size (quota and caps use it). */
+  contentLength: number;
 }) {
   const signer = r2Signer(input.env, input.r2Key);
   if (!signer) return null;
@@ -41,6 +43,7 @@ export async function signR2PutUrl(input: {
   const signed = await signer.client.sign(signer.url, {
     method: "PUT",
     headers: {
+      "content-length": String(input.contentLength),
       "content-type": input.contentType,
     },
     aws: {

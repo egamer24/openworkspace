@@ -138,10 +138,16 @@ describe("local spam filter delivery", () => {
 
     const allowed = await deliver(mailbox, mailboxId, rawMessage({
       from: "friend@evil.example",
-      authentication: "dkim=fail; spf=fail; dmarc=fail",
+      authentication: "dkim=fail; spf=fail; dmarc=pass header.from=evil.example",
     }));
     expect(allowed.mailboxState).toBe("active");
     expect(allowed.email.spamVerdict).toBe("clean");
+    // Someone else writing as the allowed sender fails DMARC and gets no pass.
+    const forged = await deliver(mailbox, mailboxId, rawMessage({
+      from: "friend@evil.example",
+      authentication: "dkim=fail; spf=fail; dmarc=fail",
+    }));
+    expect(forged.mailboxState).toBe("spam");
 
     // AI may add a spam decision, but never for an allow-listed sender.
     const bindings = await runInDurableObject(

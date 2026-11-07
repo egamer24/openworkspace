@@ -142,7 +142,7 @@ function inlineAttachmentUrls(
   return values;
 }
 
-function rewriteSrcset(
+export function rewriteSrcset(
   value: string,
   rewriteRemoteUrl: (url: string) => string | null,
 ) {
@@ -154,7 +154,8 @@ function rewriteSrcset(
       const match = /^(\S+)(\s+.+)?$/u.exec(trimmed);
       if (!match) return "";
       const [, source = "", descriptor = ""] = match;
-      if (!isRemoteHttpUrl(source)) return trimmed;
+      // Like src: anything not proxied (e.g. protocol-relative //host) is dropped.
+      if (!isRemoteHttpUrl(source)) return "";
       const proxied = rewriteRemoteUrl(source);
       return proxied ? `${proxied}${descriptor}` : "";
     })

@@ -212,10 +212,16 @@ describe("assessment", () => {
       authentication: auth({ dmarc: "fail", spf: "fail", dkim: "fail" }),
       attachments: [{ filename: "a.exe" }],
     };
-    expect(assessSpam({ ...risky, senderList: "allow" }, thresholds)).toMatchObject({
-      score: 15,
-      verdict: "clean",
+    expect(assessSpam({
+      ...risky,
+      authentication: auth({ spf: "fail", dkim: "fail" }),
       senderList: "allow",
+    }, thresholds)).toMatchObject({ verdict: "clean", senderList: "allow" });
+    // A From that failed DMARC is not the allowed sender.
+    expect(assessSpam({ ...risky, senderList: "allow" }, thresholds)).toMatchObject({
+      score: 100,
+      verdict: "spam",
+      senderList: null,
     });
     expect(assessSpam({
       ...baseInput,

@@ -69,7 +69,9 @@ export async function forwardInbound(
   message: ForwardableEmailMessage,
   destinations: string[],
 ) {
-  const hops = Number.parseInt(message.headers.get(FORWARDED_HEADER) ?? "0", 10) || 0;
+  // Digits only: parseInt would take "-1000000" and lift the hop cap.
+  const header = message.headers.get(FORWARDED_HEADER)?.trim() ?? "";
+  const hops = /^\d+$/u.test(header) ? Number(header) : 0;
   const sender = normalizeMailboxAddress(message.from);
   const targets = hops >= MAX_FORWARD_HOPS
     ? []

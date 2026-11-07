@@ -151,6 +151,7 @@ export async function createComposerUploadIntent(input: {
     env: input.env,
     r2Key: keys.staging,
     contentType,
+    contentLength: input.size,
   });
   if (presignedUrl) {
     return {
