@@ -9,6 +9,7 @@ export const CLOUDFLARE_EMAIL_ANALYTICS_RETENTION_MS =
   31 * 24 * 60 * 60 * 1_000;
 
 const EVENT_WINDOW_MS = 2 * 60 * 1_000;
+const EVENT_LIMIT = 250;
 const GRAPHQL_ENDPOINT = "https://api.cloudflare.com/client/v4/graphql";
 const EMAIL_ROUTING_QUERY = `
   query EmailRoutingAuthentication(
@@ -19,7 +20,7 @@ const EMAIL_ROUTING_QUERY = `
       zones(filter: { zoneTag: $zoneTag }) {
         emailRoutingAdaptive(
           filter: $filter
-          limit: 250
+          limit: ${EVENT_LIMIT}
           orderBy: [datetime_DESC]
         ) {
           action
@@ -130,10 +131,23 @@ export async function fetchCloudflareEmailAuthentication(input: {
   const events = body.data?.viewer.zones.flatMap(
     (zone) => zone.emailRoutingAdaptive,
   ) ?? [];
-  const event = events
+  // The Message-ID is chosen by the sender, so it does not identify one
+  // delivery: another message can reuse it within the window (to any address
+  // in the zone), or later traffic can push this one past the row limit.
+  // Show nothing rather than another message's verdict.
+  if (events.length >= EVENT_LIMIT) return null;
+  const matches = events
     .filter((candidate) =>
       normalizedMessageId(candidate.messageId) === expectedMessageId
-    )
+    );
+  const verdicts = new Set(matches.map((candidate) => JSON.stringify([
+    verdict(candidate.spf),
+    verdict(candidate.dkim),
+    verdict(candidate.dmarc),
+    candidate.isSpam === true || candidate.isSpam === 1,
+  ])));
+  if (verdicts.size > 1) return null;
+  const event = matches
     .sort((left, right) =>
       eventPriority(right, input.timelineAt) - eventPriority(left, input.timelineAt)
     )[0];

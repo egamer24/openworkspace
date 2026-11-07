@@ -71,4 +71,24 @@ describe("Cloudflare email authentication", () => {
       },
     });
   });
+
+  it("returns nothing when the Message-ID is ambiguous or results were cut off", async () => {
+    const timelineAt = Date.parse("2026-08-23T12:00:00.000Z");
+    const event = (overrides: Record<string, unknown>) => ({
+      datetime: "2026-08-23T12:00:01.000Z", dkim: "pass", dmarc: "pass", spf: "pass",
+      isSpam: 0, messageId: "<reused@example.com>", ...overrides,
+    });
+    const lookup = (events: unknown[]) => fetchCloudflareEmailAuthentication({
+      zoneId: "zone-id",
+      token: "analytics-token",
+      messageId: "reused@example.com",
+      timelineAt,
+      fetcher: async () => Response.json({ data: { viewer: { zones: [{ emailRoutingAdaptive: events }] } } }),
+    });
+    // A forged copy and the attacker's passing copy share the Message-ID.
+    await expect(lookup([event({}), event({ dmarc: "fail", spf: "fail", isSpam: 1 })])).resolves.toBeNull();
+    await expect(lookup(Array.from({ length: 250 }, () => event({})))).resolves.toBeNull();
+    // Several events of one delivery agree.
+    await expect(lookup([event({}), event({ action: "worker" })])).resolves.toMatchObject({ dmarc: "pass" });
+  });
 });
