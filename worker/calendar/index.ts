@@ -338,14 +338,19 @@ export class CalendarDO extends DurableObject<Env> {
     address: string;
     name: string | null;
     partstat: InvitationResponse;
+    /** The email's From address when Cloudflare's DMARC check passed for it. */
+    authenticatedSender: string | null;
   }): Promise<CalendarResult<{ eventId: string | null }>> {
     const uid = input.parsed[0]?.uid;
     if (!uid) return badRequest("The invitation has no event");
     const existing = this.master(uid);
     if (existing?.organizer?.mailboxId) return badRequest("You organize this event");
-    // A REQUEST can come from anyone: only the stored organizer may replace the event.
+    // A REQUEST can come from anyone, and its ORGANIZER is whatever the sender
+    // wrote: only mail that passed DMARC as the stored organizer may replace the event.
     const organizer = input.parsed.find((event) => event.recurrenceId === null)?.organizer ?? input.parsed[0]!.organizer;
-    if (existing && !sameAddress(existing.organizer?.address ?? "", organizer?.address ?? "")) {
+    const stored = existing?.organizer?.address;
+    if (existing && (!stored || !input.authenticatedSender
+      || !sameAddress(stored, input.authenticatedSender) || !sameAddress(stored, organizer?.address ?? ""))) {
       return badRequest("This invitation does not come from the event's organizer");
     }
     const now = Date.now();
@@ -421,8 +426,11 @@ export class CalendarDO extends DurableObject<Env> {
     method: Exclude<ItipMethod, "REQUEST">;
     uid: string;
     recurrenceId: number | null;
+    sequence: number;
     sender: string;
     mailboxId: string;
+    /** The receiving mailbox's address, which a CANCEL must name if it names anyone. */
+    address: string | null;
     attendees: CalendarAttendee[];
   }) {
     const master = this.master(input.uid);
@@ -446,6 +454,16 @@ export class CalendarDO extends DurableObject<Env> {
       return true;
     }
     if (master.organizer.mailboxId !== null || !sameAddress(master.organizer.address, input.sender)) {
+      return false;
+    }
+    // A stale CANCEL (replayed after the organizer re-sent the event) is ignored.
+    if (input.sequence < master.sequence) return false;
+    // A CANCEL that names attendees removes only them (RFC 5546 §3.2.5): if we
+    // are on the event but not on that list, someone else was uninvited.
+    const named = (address: string) => input.attendees.some((attendee) => sameAddress(attendee.address, address));
+    if (input.attendees.length && input.address
+      && master.attendees.some((attendee) => sameAddress(attendee.address, input.address!))
+      && !named(input.address)) {
       return false;
     }
     if (input.recurrenceId !== null && master.rrule) {

@@ -247,15 +247,20 @@ type ContentLine = {
 };
 
 function parseContentLine(line: string): ContentLine | null {
+  // One pass finds the unquoted ';' separators and the first unquoted ':'
+  // (a lookahead split was quadratic in the number of semicolons).
   let index = 0;
   let quoted = false;
+  const cuts: number[] = [];
   for (; index < line.length; index++) {
     const character = line[index];
     if (character === "\"") quoted = !quoted;
-    else if (character === ":" && !quoted) break;
+    else if (quoted) continue;
+    else if (character === ":") break;
+    else if (character === ";") cuts.push(index);
   }
   if (index >= line.length) return null;
-  const [name = "", ...rawParams] = line.slice(0, index).split(/;(?=(?:[^"]*"[^"]*")*[^"]*$)/u);
+  const [name = "", ...rawParams] = [-1, ...cuts].map((cut, i) => line.slice(cut + 1, cuts[i] ?? index));
   const params: Record<string, string> = {};
   for (const param of rawParams) {
     const [key, ...rest] = param.split("=");
