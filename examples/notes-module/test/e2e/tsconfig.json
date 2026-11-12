@@ -1,0 +1,4 @@
+{
+  "extends": "../../modules/notes/tsconfig.json",
+  "include": ["./**/*.ts", "../../dev.run.ts"]
+}

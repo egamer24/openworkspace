@@ -1,0 +1,4 @@
+node_modules
+.alchemy
+.env
+test/e2e/test-results

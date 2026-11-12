@@ -1,0 +1,36 @@
+{
+  "name": "notes-example",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "alchemy deploy",
+    "dev": "ALLOW_MOCK_AUTH=true alchemy dev dev.run.ts",
+    "typecheck": "tsc && tsc -p modules/notes && tsc -p test/e2e",
+    "test:e2e": "bun --bun playwright test -c test/e2e",
+    "db:generate": "cd modules/notes && drizzle-kit generate"
+  },
+  "dependencies": {
+    "@open-workspace/core": "0.3.0",
+    "@tanstack/react-query": "5.107.1",
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.17",
+    "lucide-react": "1.71.0",
+    "react": "19.3.1",
+    "react-router": "8.5.1",
+    "sonner": "2.0.8",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@alchemy.run/test": "2.0.0-beta.85",
+    "@effect/platform-bun": "4.1.3",
+    "@effect/platform-node": "4.1.3",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "alchemy": "2.0.0-beta.85",
+    "drizzle-kit": "0.31.11",
+    "effect": "4.1.3",
+    "playwright": "1.65.0",
+    "typescript": "7.0.2"
+  }
+}
