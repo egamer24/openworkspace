@@ -1,0 +1,32 @@
+---
+import "../styles/site.css";
+import SiteFooter from "../components/site-footer.astro";
+import SiteHeader from "../components/site-header.astro";
+import Layout from "../layouts/layout.astro";
+---
+
+<Layout title="Page not found: OpenWorkspace" noindex>
+  <SiteHeader current="other" />
+  <main class="lost">
+    <div>
+      <svg class="lost-mark" viewBox="10 10 44 44" aria-hidden="true">
+        <path
+          d="M38 14H22a8 8 0 0 0-8 8v20a8 8 0 0 0 8 8h20a8 8 0 0 0 8-8V30"
+        ></path>
+        <circle cx="48" cy="16" r="6"></circle>
+      </svg>
+      <h1>This page isn’t here</h1>
+      <p>
+        The address may be mistyped, or the page has moved. Everything about
+        OpenWorkspace is on the home page.
+      </p>
+      <div class="cta">
+        <a class="button button-primary" href="/">Go to the home page</a>
+        <a class="button" href="https://github.com/iivankin/openworkspace"
+          >View on GitHub</a
+        >
+      </div>
+    </div>
+  </main>
+  <SiteFooter />
+</Layout>

@@ -1,0 +1,16 @@
+---
+// The closing call to action. The status line is where site.mjs announces
+// copies to screen readers.
+
+import Command from "./command.astro";
+---
+
+<section class="wrap final" aria-labelledby="final-title">
+  <h2 id="final-title">Create your workspace</h2>
+  <p>
+    You need Bun and a Cloudflare account on the Workers Paid plan with your
+    domain in it.
+  </p>
+  <Command id="cmd-final" />
+  <p class="sr-status" role="status" aria-live="polite"></p>
+</section>

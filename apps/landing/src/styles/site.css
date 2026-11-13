@@ -1,0 +1,9 @@
+/* The landing page and the 404 page: the app's design tokens and Tailwind's
+   theme and utilities, without Tailwind's preflight, under the landing page's
+   own hand-written styles. */
+@layer theme, base, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "@open-workspace/core/theme.css";
+@import "./landing.css";

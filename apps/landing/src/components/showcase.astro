@@ -1,0 +1,125 @@
+---
+// Screens of the app as tabs (site.mjs switches them). The first screen
+// loads with the page; the others carry data-srcset, which site.mjs turns
+// into srcset once the browser is idle.
+const screens = [
+  {
+    id: "inbox",
+    tab: "Shared inbox",
+    alt: "The Mail app: Sam Brooks's mailbox and the shared Customer care mailbox, with a message to the team open.",
+  },
+  {
+    id: "people",
+    tab: "People",
+    alt: "Administration, People: three people with their addresses, an Admin badge, and Invited and Active states.",
+  },
+  {
+    id: "sso",
+    tab: "Single sign-on apps",
+    alt: "Administration, Single sign-on apps: Dashboards and Grafana over OIDC, and Wiki over SAML.",
+  },
+  {
+    id: "notifications",
+    tab: "Notifications",
+    alt: "Settings, Notifications: new mail alerts for this device, turned on for the Sam Brooks and Customer care mailboxes.",
+  },
+];
+
+const sizes =
+  "(min-width: 1800px) min(92vw, 1760px), (max-width: 1440px) calc(100vw - 2rem), 1280px";
+
+const widths = (id: string, scheme: "light" | "dark") =>
+  [1200, 2400, 2880]
+    .map((width) => {
+      const suffix = width === 2400 ? "" : `-${width}`;
+
+      return `/images/hero-${id}-${scheme}${suffix}.webp ${width}w`;
+    })
+    .join(", ");
+---
+
+<section class="showcase" aria-label="Screens of the app">
+  <div class="stage">
+    <div class="frame">
+      {screens.map(({ id, alt }, index) =>
+        index === 0 ? (
+          <div
+            class="view is-shown"
+            id={`view-${id}`}
+            role="tabpanel"
+            aria-labelledby={`tab-${id}`}
+          >
+            <picture>
+              <source
+                media="(max-width: 640px) and (prefers-color-scheme: dark)"
+                srcset={`/images/hero-${id}-dark-phone.webp`}
+              />
+              <source
+                media="(max-width: 640px)"
+                srcset={`/images/hero-${id}-light-phone.webp`}
+              />
+              <source
+                media="(prefers-color-scheme: dark)"
+                srcset={widths(id, "dark")}
+                sizes={sizes}
+              />
+              <img
+                src={`/images/hero-${id}-light.webp`}
+                srcset={widths(id, "light")}
+                sizes={sizes}
+                width="2400"
+                height="1267"
+                fetchpriority="high"
+                alt={alt}
+              />
+            </picture>
+          </div>
+        ) : (
+          <div
+            class="view"
+            id={`view-${id}`}
+            role="tabpanel"
+            aria-labelledby={`tab-${id}`}
+            hidden
+          >
+            <picture>
+              <source
+                media="(max-width: 640px) and (prefers-color-scheme: dark)"
+                data-srcset={`/images/hero-${id}-dark-phone.webp`}
+              />
+              <source
+                media="(max-width: 640px)"
+                data-srcset={`/images/hero-${id}-light-phone.webp`}
+              />
+              <source
+                media="(prefers-color-scheme: dark)"
+                data-srcset={widths(id, "dark")}
+                sizes={sizes}
+              />
+              <img
+                data-srcset={widths(id, "light")}
+                sizes={sizes}
+                width="2400"
+                height="1267"
+                decoding="async"
+                alt={alt}
+              />
+            </picture>
+          </div>
+        )
+      )}
+    </div>
+  </div>
+  <div class="tabs" role="tablist" aria-label="Screens of the app">
+    {screens.map(({ id, tab }, index) => <button
+      type="button"
+      role="tab"
+      id={`tab-${id}`}
+      aria-controls={`view-${id}`}
+      aria-selected={index === 0 ? "true" : "false"}
+      tabindex={index === 0 ? "0" : "-1"}
+    >
+      {tab}
+    </button>)}
+  </div>
+</section>

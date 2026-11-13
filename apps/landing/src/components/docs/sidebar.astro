@@ -1,0 +1,49 @@
+---
+// The docs pages, grouped, with the page you're on marked by the amber dot
+// of the logo.
+import type { DocGroup } from "../../docs.ts";
+
+type Props = { groups: readonly DocGroup[]; current?: string };
+
+const { groups, current } = Astro.props;
+
+const link =
+  "relative flex items-center rounded-md py-1.5 pr-3 pl-5 text-sm transition-colors";
+
+const idle = "text-muted-foreground hover:bg-muted hover:text-foreground";
+
+const active =
+  "bg-muted font-medium text-foreground before:absolute before:top-1/2 before:left-2 before:size-1.5 before:-translate-y-1/2 before:rounded-full before:bg-brand-accent";
+---
+
+<div class="grid gap-6">
+  <ul class="grid gap-0.5">
+    <li>
+      <a
+        href="/docs"
+        class:list={[link, current === undefined ? active : idle]}
+        aria-current={current === undefined ? "page" : undefined}
+        >Overview</a
+      >
+    </li>
+  </ul>
+  {groups.map((group) => <div>
+    <p
+      class="text-muted-foreground/80 mb-1.5 pr-3 pl-5 text-xs font-medium"
+      aria-hidden="true"
+    >
+      {group.title}
+    </p>
+    <ul class="grid gap-0.5" aria-label={group.title}>
+      {group.pages.map(({ slug, label }) => <li>
+        <a
+          href={`/docs/${slug}`}
+          class:list={[link, current === slug ? active : idle]}
+          aria-current={current === slug ? "page" : undefined}
+        >
+          {label}
+        </a>
+      </li>)}
+    </ul>
+  </div>)}
+</div>

@@ -1,0 +1,247 @@
+/* The docs: Tailwind with its preflight, on the app's design tokens
+   (@open-workspace/core/theme.css). The layout and the chrome are Tailwind
+   classes in the components; this file holds the base layer and the styles
+   of the rendered Markdown, which has no classes of its own. */
+@import "tailwindcss";
+@import "@open-workspace/core/theme.css";
+
+@source "../components/docs";
+@source "../layouts/docs-layout.astro";
+@source "../pages/docs";
+@source "../scripts";
+
+@theme {
+  --spacing-header: 3.5rem;
+}
+
+/* The same column as the landing page (landing.css). The landing page's
+   root font grows on large monitors and its column with it; the docs keep
+   their text size and only take the same width. */
+:root {
+  --wrap: 80rem;
+  --gutter: clamp(1rem, 4vw, 3rem);
+}
+@media (min-width: 1800px) {
+  :root {
+    --landing-rem: clamp(16px, 0.9vw, 22px);
+    --wrap: calc(80 * var(--landing-rem));
+    --gutter: min(4vw, 3 * var(--landing-rem));
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans antialiased;
+    scroll-padding-top: calc(var(--spacing-header) + 1.5rem);
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-surface text-foreground;
+    font-feature-settings:
+      "ss01" 1,
+      "cv11" 1;
+  }
+  ::selection {
+    background: color-mix(in oklab, var(--primary) 25%, transparent);
+  }
+  :focus-visible {
+    @apply outline-ring outline-2 outline-offset-2;
+  }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The rendered Markdown. Sizes follow ui.shadcn.com: a 15px body at 1.75
+   leading, semibold headings with tight tracking, and quiet hairlines. */
+@layer components {
+  .prose-doc {
+    @apply text-foreground/90 text-[0.9375rem] leading-7;
+    overflow-wrap: break-word;
+  }
+  .prose-doc > :first-child {
+    @apply mt-0;
+  }
+
+  .prose-doc h1 {
+    @apply text-foreground text-3xl font-semibold tracking-tight sm:text-4xl;
+    text-wrap: balance;
+  }
+  /* The paragraph under the title is the page's lede. */
+  .prose-doc h1 + p {
+    @apply text-muted-foreground mt-3 text-base leading-7 sm:text-lg;
+  }
+  .prose-doc h2 {
+    @apply text-foreground mt-12 border-b pb-2 text-xl font-semibold tracking-tight sm:text-2xl;
+  }
+  .prose-doc h3 {
+    @apply text-foreground mt-8 text-lg font-semibold tracking-tight;
+  }
+  .prose-doc h4,
+  .prose-doc h5,
+  .prose-doc h6 {
+    @apply text-foreground mt-6 text-base font-semibold;
+  }
+  .prose-doc :is(h2, h3, h4, h5, h6) + * {
+    @apply mt-3;
+  }
+
+  /* Headings link to themselves; a link mark shows on hover and focus. */
+  .prose-doc .heading-link {
+    @apply relative text-inherit no-underline;
+  }
+  .prose-doc .heading-link::after {
+    content: "";
+    @apply bg-muted-foreground ml-2 inline-block size-4 align-middle opacity-0 transition-opacity;
+    mask: var(--icon-link) center / contain no-repeat;
+  }
+  .prose-doc .heading-link:hover::after,
+  .prose-doc .heading-link:focus-visible::after {
+    @apply opacity-100;
+  }
+
+  .prose-doc :is(p, ul, ol, blockquote, .table-wrap, .code-block, hr, details) {
+    @apply mt-5;
+  }
+  .prose-doc :is(ul, ol) {
+    @apply pl-6;
+  }
+  .prose-doc ul {
+    @apply list-disc;
+  }
+  .prose-doc ol {
+    @apply list-decimal;
+  }
+  .prose-doc li {
+    @apply mt-2 pl-1;
+  }
+  .prose-doc li::marker {
+    @apply text-muted-foreground;
+  }
+  .prose-doc li > :is(ul, ol, p) {
+    @apply mt-2;
+  }
+  .prose-doc p,
+  .prose-doc li {
+    text-wrap: pretty;
+  }
+  .prose-doc strong {
+    @apply text-foreground font-semibold;
+  }
+
+  .prose-doc a:not(.heading-link) {
+    @apply text-foreground decoration-primary/40 hover:decoration-primary font-medium underline decoration-1 underline-offset-4 transition-colors hover:decoration-2;
+  }
+
+  .prose-doc blockquote {
+    @apply border-primary/50 text-muted-foreground border-l-2 pl-4;
+  }
+  .prose-doc blockquote > :first-child {
+    @apply mt-0;
+  }
+  .prose-doc hr {
+    @apply my-10 border-t;
+  }
+  .prose-doc img {
+    @apply rounded-lg border;
+  }
+
+  /* Inline code: a quiet chip in the mono face. */
+  .prose-doc :not(pre) > code {
+    @apply bg-muted text-foreground rounded-md border px-[0.35em] py-[0.15em] font-mono text-[0.84em] font-medium;
+    overflow-wrap: anywhere;
+  }
+  .prose-doc a > code {
+    @apply text-inherit;
+  }
+
+  /* Code blocks: a sunken panel, the file name when there is one, and a copy
+     button in the corner. */
+  .prose-doc .code-block {
+    @apply bg-surface-sunken relative overflow-hidden rounded-lg border;
+  }
+  .prose-doc .code-title {
+    @apply bg-surface text-muted-foreground flex h-10 items-center border-b px-4 font-mono text-xs;
+  }
+  .prose-doc .code-block pre {
+    @apply overflow-x-auto py-3.5 pr-16 pl-4 font-mono text-[0.8125rem] leading-6;
+    background: transparent !important;
+    tab-size: 2;
+  }
+  .prose-doc .code-block pre:focus-visible {
+    @apply -outline-offset-2;
+  }
+  .prose-doc .code-copy {
+    @apply bg-surface text-muted-foreground hover:bg-muted hover:text-foreground absolute top-2 right-2 inline-flex h-7 items-center rounded-md border px-2 text-xs font-medium shadow-xs transition-colors;
+  }
+  .prose-doc .code-title ~ .code-copy {
+    @apply top-1.5;
+  }
+  .prose-doc .code-copy[data-copied] {
+    @apply text-success;
+  }
+
+  /* Tables scroll on their own instead of widening the page. */
+  .prose-doc .table-wrap {
+    @apply overflow-x-auto rounded-lg border;
+  }
+  .prose-doc table {
+    @apply w-full border-collapse text-sm leading-6;
+  }
+  .prose-doc th {
+    @apply bg-surface-sunken text-foreground border-b px-4 py-2.5 text-left font-medium whitespace-nowrap;
+  }
+  .prose-doc td {
+    @apply border-b px-4 py-2.5 align-top;
+  }
+  .prose-doc tr:last-child td {
+    @apply border-b-0;
+  }
+  .prose-doc td code {
+    @apply whitespace-nowrap;
+  }
+}
+
+/* Shiki writes both themes as variables; the page's theme picks one. */
+.astro-code,
+.astro-code span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style, normal);
+  font-weight: var(--shiki-light-font-weight, inherit);
+}
+.dark .astro-code,
+.dark .astro-code span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style, normal);
+  font-weight: var(--shiki-dark-font-weight, inherit);
+}
+
+:root {
+  /* lucide "link" */
+  --icon-link: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71'/%3E%3Cpath d='M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'/%3E%3C/svg%3E");
+}
+
+/* The search dialog's results: Pagefind's excerpts mark the matches. */
+.search-excerpt mark {
+  @apply text-foreground bg-transparent font-semibold;
+}

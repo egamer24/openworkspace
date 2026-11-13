@@ -1,0 +1,70 @@
+---
+// "On this page": the page's h2 and h3 headings. Beside the page on wide
+// screens; a dropdown above it on narrower ones. docs.ts marks the section
+// in view (data-active) and names it in the dropdown's summary.
+import Icon from "./icon.astro";
+
+type Heading = { depth: number; slug: string; text: string };
+
+type Props = { headings: readonly Heading[]; variant: "aside" | "dropdown" };
+
+const { headings, variant } = Astro.props;
+
+const item =
+  "block py-1 text-muted-foreground transition-colors hover:text-foreground data-active:font-medium data-active:text-foreground";
+---
+
+{variant === "aside" ? (
+  <nav aria-labelledby="toc-title" class="text-sm">
+    <p id="toc-title" class="mb-3 font-medium">On this page</p>
+    <ul class="relative grid border-l">
+      {headings.map((heading) => <li>
+        <a
+          href={`#${heading.slug}`}
+          class:list={[
+            item,
+            "data-active:border-primary -ml-px border-l border-transparent",
+            heading.depth === 3 ? "pl-6" : "pl-3",
+          ]}
+          data-toc-link
+        >
+          {heading.text}
+        </a>
+      </li>)}
+    </ul>
+  </nav>
+) : (
+  <details
+    class="group bg-surface-sunken mb-8 rounded-lg border text-sm xl:hidden"
+  >
+    <summary
+      class="flex cursor-pointer list-none items-center gap-2 rounded-lg px-4 py-2.5 [&::-webkit-details-marker]:hidden"
+    >
+      <span class="font-medium">On this page</span>
+      <Icon name="chevron-right" class="text-muted-foreground size-3.5" />
+      <span
+        class="text-muted-foreground min-w-0 flex-1 truncate"
+        data-toc-current
+      >
+        {headings[0]?.text}
+      </span>
+      <Icon
+        name="chevron-down"
+        class="text-muted-foreground size-4 shrink-0 transition-transform group-open:rotate-180"
+      />
+    </summary>
+    <nav aria-label="On this page" class="border-t px-4 py-2">
+      <ul class="grid">
+        {headings.map((heading) => <li>
+          <a
+            href={`#${heading.slug}`}
+            class:list={[item, heading.depth === 3 ? "pl-4" : ""]}
+            data-toc-link
+          >
+            {heading.text}
+          </a>
+        </li>)}
+      </ul>
+    </nav>
+  </details>
+)}

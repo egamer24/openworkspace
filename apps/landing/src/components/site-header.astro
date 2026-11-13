@@ -1,0 +1,299 @@
+---
+// The site's header, the same on the landing page and the docs: the logo,
+// the site's links, GitHub and X, and the theme toggle. The docs add the menu
+// button for small screens and search. Its styles are scoped here and built
+// on the shared tokens, so the landing page's stylesheet and the docs'
+// Tailwind render it alike.
+import { links } from "../site.ts";
+import Icon from "./docs/icon.astro";
+
+type Props = {
+  current?: "home" | "docs" | "other";
+  /** The docs' wider grid, the menu button and search. */
+  docs?: boolean;
+};
+
+const { current = "home", docs = false } = Astro.props;
+const home = current === "home" ? "" : "/";
+---
+
+<header class="site-header">
+  <div class="bar">
+    {docs && <button
+      type="button"
+      class="icon-button menu-button"
+      aria-label="Open the docs menu"
+      aria-controls="docs-drawer"
+      aria-expanded="false"
+      data-drawer-open
+    >
+      <Icon name="menu" class="icon-lg" />
+    </button>}
+
+    <a href="/" class="logo" aria-label="OpenWorkspace home">
+      <img src="/icons/app-icon.svg" alt="" width="24" height="24" />
+      <span class:list={["logo-name", docs && "logo-name-docs"]}
+        >OpenWorkspace</span
+      >
+    </a>
+
+    <nav aria-label="Site" class="nav">
+      <a class="nav-link nav-optional" href={`${home}#features`}>Features</a>
+      <a
+        class="nav-link"
+        href="/docs"
+        aria-current={current === "docs" ? "page" : undefined}
+        >Docs</a
+      >
+    </nav>
+
+    <div class="actions">
+      {docs && (
+        <>
+          <button
+            type="button"
+            class="search-field"
+            aria-haspopup="dialog"
+            aria-controls="search"
+            aria-keyshortcuts="Control+K Meta+K"
+            data-search-open
+          >
+            <Icon name="search" class="icon" />
+            <span class="search-label">Search docs…</span>
+            <kbd data-search-shortcut>Ctrl K</kbd>
+          </button>
+          <button
+            type="button"
+            class="icon-button search-button"
+            aria-label="Search docs"
+            aria-haspopup="dialog"
+            aria-controls="search"
+            data-search-open
+          >
+            <Icon name="search" class="icon-lg" />
+          </button>
+        </>
+      )}
+
+      <a
+        href={links.github}
+        class="icon-button"
+        aria-label="OpenWorkspace on GitHub"
+      >
+        <Icon name="github" class="icon" />
+      </a>
+      <a href={links.x} class="icon-button" aria-label="Ilya Ivankin on X">
+        <svg
+          class="icon"
+          viewBox="0 0 24 24"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path
+            d="M17.75 3h3.07l-6.71 7.67L22 21h-6.18l-4.84-6.33L5.44 21H2.37l7.18-8.2L2 3h6.34l4.37 5.78L17.75 3Zm-1.08 16.18h1.7L7.4 4.73H5.58l11.09 14.45Z"
+          ></path>
+        </svg>
+      </a>
+      <button
+        type="button"
+        class="icon-button"
+        aria-label="Dark theme"
+        aria-pressed="false"
+        data-theme-toggle
+      >
+        <Icon name="moon" class="icon theme-moon" />
+        <Icon name="sun" class="icon theme-sun" />
+      </button>
+    </div>
+  </div>
+</header>
+
+<style>
+  .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    height: 56px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--surface) 85%, transparent);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    font-size: 14px;
+    line-height: 20px;
+    color: var(--foreground);
+  }
+  /* The header's contents are sized in px, so they look the same on every
+     page whatever the root font. The bar follows the page column, the same
+     on the landing page and the docs (--wrap, --gutter). */
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: min(100% - 2 * var(--gutter), var(--wrap));
+    height: 100%;
+    margin-inline: auto;
+  }
+
+  .logo {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 8px;
+    margin-right: 16px;
+    border-radius: 6px;
+    color: var(--foreground);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+  .logo img {
+    display: block;
+  }
+  @media (max-width: 639px) {
+    .logo-name-docs {
+      display: none;
+    }
+    .logo {
+      margin-right: 4px;
+    }
+  }
+
+  .nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .nav-link {
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--muted-foreground);
+    text-decoration: none;
+    transition:
+      color 0.15s,
+      background-color 0.15s;
+  }
+  .nav-link:hover {
+    background: var(--muted);
+    color: var(--foreground);
+    text-decoration: none;
+  }
+  .nav-link[aria-current="page"] {
+    color: var(--foreground);
+    font-weight: 500;
+  }
+  @media (max-width: 767px) {
+    .nav-optional {
+      display: none;
+    }
+  }
+
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .icon-button {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted-foreground);
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      background-color 0.15s;
+  }
+  .icon-button:hover {
+    background: var(--muted);
+    color: var(--foreground);
+  }
+  .menu-button {
+    margin-left: -8px;
+  }
+  @media (min-width: 1024px) {
+    .menu-button {
+      display: none;
+    }
+  }
+
+  .icon-button :global(svg),
+  .search-field :global(svg) {
+    display: block;
+    flex: none;
+    width: 18px;
+    height: 18px;
+  }
+  .icon-button :global(.icon-lg) {
+    width: 20px;
+    height: 20px;
+  }
+  .search-field :global(svg) {
+    width: 16px;
+    height: 16px;
+  }
+  .icon-button :global(.theme-sun) {
+    display: none;
+  }
+  :global(.dark) .icon-button :global(.theme-sun) {
+    display: block;
+  }
+  :global(.dark) .icon-button :global(.theme-moon) {
+    display: none;
+  }
+
+  .search-field {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    width: 240px;
+    height: 36px;
+    margin-right: 4px;
+    padding: 0 6px 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-sunken);
+    box-shadow: 0 1px 1px -0.5px var(--shadow-color-weak);
+    color: var(--muted-foreground);
+    font: inherit;
+    cursor: pointer;
+    transition:
+      color 0.15s,
+      background-color 0.15s;
+  }
+  .search-field:hover {
+    background: var(--muted);
+    color: var(--foreground);
+  }
+  .search-label {
+    flex: 1;
+    text-align: left;
+  }
+  .search-field kbd {
+    pointer-events: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    padding-inline: 6px;
+    font-family: "Geist Mono Variable", ui-monospace, monospace;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 20px;
+  }
+  @media (min-width: 640px) {
+    .search-field {
+      display: flex;
+    }
+    .search-button {
+      display: none;
+    }
+  }
+</style>

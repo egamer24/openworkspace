@@ -1,0 +1,30 @@
+---
+import { render } from "astro:content";
+
+import { loadDocs, readingOrder } from "../../docs.ts";
+import DocsLayout from "../../layouts/docs-layout.astro";
+
+export async function getStaticPaths() {
+  const pages = readingOrder(await loadDocs());
+
+  return pages.map((page) => ({
+    params: { slug: page.slug },
+    props: { page },
+  }));
+}
+
+const { page } = Astro.props;
+const { Content, headings } = await render(page.entry);
+const title = headings.find(({ depth }) => depth === 1)?.text ?? page.label;
+---
+
+<DocsLayout
+  title={title}
+  description={page.summary || title}
+  slug={page.slug}
+  headings={headings}
+>
+  <article class="prose-doc" data-pagefind-body>
+    <Content />
+  </article>
+</DocsLayout>

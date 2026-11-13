@@ -1,0 +1,11 @@
+---
+// The create command with its copy button (site.mjs copies the code's text).
+type Props = { id: string };
+
+const { id } = Astro.props;
+---
+
+<div class="cmd" role="group" aria-label="Create a workspace">
+  <code id={id}>bun create @open-workspace</code>
+  <button type="button" class="copy" data-copy={`#${id}`}>Copy</button>
+</div>

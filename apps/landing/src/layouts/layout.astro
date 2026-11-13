@@ -1,0 +1,79 @@
+---
+// The page shell every page shares: the head, the theme, the font preload
+// and the icons. Each page imports its own stylesheet (site.css for the
+// landing page, docs.css for the docs) and adds its own meta tags in the
+// "head" slot.
+import geist from "@fontsource-variable/geist/files/geist-latin-wght-normal.woff2?url";
+
+type Props = {
+  title: string;
+  description?: string;
+  canonical?: string;
+  noindex?: boolean;
+};
+
+const { title, description, canonical, noindex = false } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    {noindex && <meta name="robots" content="noindex" />}
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#131313"
+      media="(prefers-color-scheme: dark)"
+    />
+    <!--
+      Dark is the .dark class on <html>, as in the app: the theme picked with
+      the toggle (localStorage), or the system's. Set before the first paint.
+    -->
+    <script is:inline>
+      (() => {
+        let stored = null;
+
+        try {
+          stored = localStorage.getItem("openworkspace-theme");
+        } catch {
+          // Storage refused (a private window): follow the system.
+        }
+
+        const system = matchMedia("(prefers-color-scheme: dark)").matches;
+        const dark = stored === "dark" || (stored !== "light" && system);
+        document.documentElement.classList.toggle("dark", dark);
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+      })();
+    </script>
+    <slot name="head" />
+
+    <link rel="icon" href="/icons/app-icon.svg" type="image/svg+xml" />
+    <link
+      rel="icon"
+      href="/icons/app-icon-192.png"
+      type="image/png"
+      sizes="192x192"
+    />
+    <link rel="apple-touch-icon" href="/icons/app-icon-192.png" />
+
+    <link rel="preload" href={geist} as="font" type="font/woff2" crossorigin />
+  </head>
+  <body>
+    <slot />
+    <script>
+      import { initTheme } from "../scripts/theme.ts";
+
+      initTheme();
+    </script>
+  </body>
+</html>

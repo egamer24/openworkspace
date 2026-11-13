@@ -1,0 +1,49 @@
+---
+// The search dialog, opened with the header's search button or Ctrl/⌘ K.
+// search.ts loads the Pagefind index the build writes and lists the
+// matching pages and sections; arrow keys move through them.
+import Icon from "./icon.astro";
+---
+
+<dialog
+  id="search"
+  aria-label="Search docs"
+  class="bg-popover text-popover-foreground open:animate-fade-in fixed inset-x-0 top-[12vh] mx-auto w-[calc(100%-2rem)] max-w-xl overflow-hidden rounded-xl border p-0 shadow-2xl backdrop:bg-black/40 backdrop:backdrop-blur-[2px]"
+>
+  <div class="flex items-center gap-2 border-b px-4">
+    <Icon name="search" class="text-muted-foreground size-4 shrink-0" />
+    <input
+      type="search"
+      class="placeholder:text-muted-foreground h-12 w-full bg-transparent text-[0.9375rem] outline-none [&::-webkit-search-cancel-button]:hidden"
+      placeholder="Search docs…"
+      autocomplete="off"
+      spellcheck="false"
+      role="combobox"
+      aria-expanded="false"
+      aria-controls="search-results"
+      aria-autocomplete="list"
+      aria-label="Search docs"
+      data-search-input
+    />
+    <kbd
+      class="bg-muted text-muted-foreground rounded border px-1.5 font-mono text-[0.6875rem] leading-5"
+      >Esc</kbd
+    >
+  </div>
+  <div class="max-h-[min(60vh,28rem)] overflow-y-auto p-2" data-search-scroll>
+    <p
+      class="text-muted-foreground px-3 py-8 text-center text-sm"
+      role="status"
+      data-search-status
+    >
+      Type to search the docs.
+    </p>
+    <ul
+      id="search-results"
+      role="listbox"
+      aria-label="Results"
+      class="grid gap-0.5"
+      data-search-results
+    ></ul>
+  </div>
+</dialog>

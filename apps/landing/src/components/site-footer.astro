@@ -1,0 +1,171 @@
+---
+// The site's footer, the same on the landing page and the docs: three
+// columns of links, then the logo, the license and the year. Styles are
+// scoped here on the shared tokens, like the header's.
+import { links } from "../site.ts";
+
+type Props = {
+  /** The docs' wider grid. */
+  docs?: boolean;
+};
+
+const { docs = false } = Astro.props;
+const year = new Date().getFullYear();
+
+const columns = [
+  {
+    title: "Product",
+    items: [
+      { label: "Features", href: "/#features" },
+      { label: "Pricing", href: "/#price" },
+      { label: "Docs", href: "/docs" },
+    ],
+  },
+  {
+    title: "Docs",
+    items: [
+      { label: "Deploy", href: "/docs/deploy" },
+      { label: "Configuration", href: "/docs/configuration" },
+      { label: "Single sign-on", href: "/docs/sso" },
+      { label: "Migration", href: "/docs/migration" },
+      { label: "Modules", href: "/docs/modules" },
+    ],
+  },
+  {
+    title: "Community",
+    items: [
+      { label: "GitHub", href: links.github },
+      { label: "X", href: links.x },
+      { label: "npm", href: links.npm },
+    ],
+  },
+];
+---
+
+<footer class="site-footer">
+  <div class:list={["inner", docs ? "inner-docs" : "inner-home"]}>
+    <nav aria-label="Footer" class="columns">
+      {columns.map(({ title, items }) => <div class="column">
+        <h2 class="column-title">{title}</h2>
+        <ul class="column-links">
+          {items.map(({ label, href }) => <li>
+            <a class="footer-link" href={href}>{label}</a>
+          </li>)}
+        </ul>
+      </div>)}
+    </nav>
+
+    <div class="bottom">
+      <a href="/" class="logo" aria-label="OpenWorkspace home">
+        <img src="/icons/app-icon.svg" alt="" width="20" height="20" />
+        <span>OpenWorkspace</span>
+      </a>
+      <p class="legal">
+        Open source under the Apache 2.0 license. Not affiliated with
+        Cloudflare.
+      </p>
+      <p class="year">© {year}</p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+  .inner {
+    margin-inline: auto;
+    padding-block: 3rem 2rem;
+  }
+  .inner-home {
+    width: min(100% - 2 * clamp(1rem, 4vw, 3rem), 80rem);
+  }
+  .inner-docs {
+    max-width: 90rem;
+    padding-inline: 1rem;
+  }
+  @media (min-width: 640px) {
+    .inner-docs {
+      padding-inline: 1.5rem;
+    }
+  }
+
+  .columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 2rem 1.5rem;
+  }
+  @media (min-width: 640px) {
+    .columns {
+      grid-template-columns: repeat(3, minmax(0, 12rem));
+      gap: 2rem 3rem;
+    }
+  }
+  .column-title {
+    margin: 0;
+    color: var(--foreground);
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: normal;
+    line-height: 1.25rem;
+  }
+  .column-links {
+    display: grid;
+    gap: 0.625rem;
+    margin: 0.875rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+  .footer-link {
+    color: var(--muted-foreground);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .footer-link:hover {
+    color: var(--foreground);
+    text-decoration: none;
+  }
+
+  .bottom {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.5rem;
+    margin-top: 3rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 0.375rem;
+    color: var(--foreground);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+  .logo img {
+    display: block;
+  }
+  .legal,
+  .year {
+    margin: 0;
+  }
+  .year {
+    margin-left: auto;
+  }
+  @media (max-width: 639px) {
+    .bottom {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .year {
+      margin-left: 0;
+    }
+  }
+</style>

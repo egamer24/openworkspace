@@ -1,0 +1,56 @@
+---
+import Icon from "../../components/docs/icon.astro";
+import { loadDocs } from "../../docs.ts";
+import DocsLayout from "../../layouts/docs-layout.astro";
+
+const groups = await loadDocs();
+---
+
+<DocsLayout
+  title="Documentation"
+  description="How to deploy, configure and use OpenWorkspace, connect apps to it, and build modules for it."
+>
+  <article class="prose-doc">
+    <h1>Documentation</h1>
+    <p>
+      How to deploy OpenWorkspace to your Cloudflare account, configure it in
+      <code>alchemy.run.ts</code>, connect your other apps and AI agents, and
+      write modules of your own. The same pages are in the repository’s
+      <a href="https://github.com/iivankin/openworkspace/tree/master/docs"
+        ><code>docs</code> folder</a
+      >.
+    </p>
+  </article>
+
+  <div class="mt-10 grid gap-10">
+    {groups.map((group) => <section
+      aria-labelledby={`group-${group.pages[0]?.slug}`}
+    >
+      <h2
+        id={`group-${group.pages[0]?.slug}`}
+        class="text-muted-foreground mb-3 text-sm font-medium"
+      >
+        {group.title}
+      </h2>
+      <ul class="grid gap-3 sm:grid-cols-2">
+        {group.pages.map(({ slug, label, summary }) => <li>
+          <a
+            href={`/docs/${slug}`}
+            class="group bg-surface hover:border-primary/40 hover:bg-surface-sunken flex h-full gap-3 rounded-lg border p-4 transition-colors"
+          >
+            <Icon
+              name="file"
+              class="text-muted-foreground group-hover:text-primary mt-0.5 size-4 shrink-0"
+            />
+            <span class="grid content-start gap-1">
+              <span class="font-medium">{label}</span>
+              {summary && <span class="text-muted-foreground text-sm leading-6">
+                {summary}
+              </span>}
+            </span>
+          </a>
+        </li>)}
+      </ul>
+    </section>)}
+  </div>
+</DocsLayout>

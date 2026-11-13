@@ -1,0 +1,49 @@
+---
+// Setup in one command, with the console replay site.mjs plays once it
+// scrolls into view.
+---
+
+<section class="deploy-band" id="deploy" aria-labelledby="deploy-title">
+  <div class="wrap deploy">
+    <div class="deploy-copy">
+      <h2 id="deploy-title">Set it up with one command</h2>
+      <p>
+        The command signs you in to Cloudflare, lists the domains in your
+        account and deploys the whole workspace there.
+      </p>
+      <ol class="steps">
+        <li>
+          Run <code>bun create @open-workspace</code> and sign in to Cloudflare.
+        </li>
+        <li>
+          Pick your account, your mail domains and an AI provider. It deploys
+          the workspace.
+        </li>
+        <li>Open the app, create your admin account and invite your team.</li>
+      </ol>
+      <p class="more">
+        <a href="/docs/deploy">Read the setup guide</a>
+      </p>
+    </div>
+
+    <figure class="term" aria-labelledby="term-cap">
+      <div class="term-bar">
+        <span class="term-title">~/projects</span>
+        <button
+          type="button"
+          class="copy copy-quiet"
+          data-copy-text="bun create @open-workspace"
+        >
+          Copy command
+        </button>
+      </div>
+      <pre
+        class="term-body"
+        tabindex="0"
+      ><code is:raw><span class="ln ln-cmd" style="--i:0"><span class="dim">$</span> bun create @open-workspace</span><span class="ln" style="--i:1"><span class="g">┌</span>  <b>OpenWorkspace</b></span><span class="ln" style="--i:2"><span class="ok">◇</span>  Project name  <span class="ans">acme-workspace</span></span><span class="ln" style="--i:3"><span class="ok">◆</span>  Signed in to Cloudflare</span><span class="ln" style="--i:4"><span class="ok">◇</span>  Account  <span class="ans">Acme</span></span><span class="ln" style="--i:5"><span class="ok">◇</span>  Mail domains  <span class="ans">acme.com</span></span><span class="ln" style="--i:6"><span class="ok">◇</span>  Hostname  <span class="ans">mail.acme.com</span></span><span class="ln" style="--i:7"><span class="ok">◇</span>  AI  <span class="ans">Cloudflare AI Gateway</span></span><span class="ln" style="--i:8"><span class="ok">◇</span>  Deploying with Alchemy <span class="dim">…</span></span><span class="ln" style="--i:9"><span class="ok">◆</span>  Deployed to Acme</span><span class="ln" style="--i:10"><span class="g">└</span>  Open https://mail.acme.com and create the first administrator.<span class="caret" aria-hidden="true"></span></span></code></pre>
+      <figcaption id="term-cap" class="visually-hidden">
+        The setup command’s session, with example answers for acme.com.
+      </figcaption>
+    </figure>
+  </div>
+</section>

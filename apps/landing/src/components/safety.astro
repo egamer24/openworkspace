@@ -1,0 +1,111 @@
+---
+// Phishing warnings, AI sorting with plain-sentence rules, and MCP for agents.
+---
+
+<section class="band" aria-labelledby="safe-title">
+  <div class="wrap">
+    <div class="head">
+      <h2 id="safe-title">Phishing warnings and AI sorting in every inbox</h2>
+      <p>
+        OpenWorkspace warns you in plain words when a message looks forged,
+        comes from a lookalike domain or uses a colleague’s name. If you turn on
+        AI, it sorts incoming mail into folders using rules you write and
+        translates messages when you ask.
+      </p>
+    </div>
+    <div class="safe">
+      <div class="warnings">
+        <picture>
+          <source
+            srcset="/images/warning-lookalike-dark.webp"
+            media="(prefers-color-scheme: dark)"
+          />
+          <img
+            src="/images/warning-lookalike-light.webp"
+            width="908"
+            height="278"
+            alt="Warning: The sender's domain demo-examp1e.com is on the Spamhaus Domain Blocklist as a phishing domain. demo-examp1e.com looks like demo.example, but it is a different domain."
+            loading="lazy"
+          />
+        </picture>
+        <picture>
+          <source
+            srcset="/images/warning-impersonation-dark.webp"
+            media="(prefers-color-scheme: dark)"
+          />
+          <img
+            src="/images/warning-impersonation-light.webp"
+            width="908"
+            height="194"
+            alt="Warning: This sender uses the name Maya Chen, but maya.chen.desk@freemail.example is outside your organization."
+            loading="lazy"
+          />
+        </picture>
+      </div>
+      <figure class="sorted">
+        <blockquote class="sorted-rule">
+          Partnership and integration requests go to Product. Investor updates
+          and anything with a deck attached go to Pitch Decks. Newsletters I
+          subscribed to are not spam.
+        </blockquote>
+        <ul class="sorted-mail" aria-label="Incoming mail, filed by the rules">
+          <li>
+            <span class="sorted-who">Lena Fischer</span>
+            <span class="sorted-subj"
+              >Integrating our helpdesk with your inbox</span
+            >
+            <span class="sorted-to"
+              ><svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                />
+              </svg
+              >Product</span
+            >
+          </li>
+          <li>
+            <span class="sorted-who">Harbor Ventures</span>
+            <span class="sorted-subj">Q3 investor update, deck attached</span>
+            <span class="sorted-to"
+              ><svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"
+                />
+              </svg
+              >Pitch Decks</span
+            >
+          </li>
+          <li>
+            <span class="sorted-who">Design Weekly</span>
+            <span class="sorted-subj">Issue 212: type on small screens</span>
+            <span class="sorted-to"
+              ><svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M22 12h-6l-2 3h-4l-2-3H2" />
+                <path
+                  d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+                />
+              </svg
+              >Inbox</span
+            >
+          </li>
+        </ul>
+        <figcaption>
+          Rules are plain sentences. Mail that matches none stays in Inbox.
+        </figcaption>
+      </figure>
+    </div>
+    <div class="agents">
+      <div>
+        <h3>Works with AI agents</h3>
+        <p>
+          AI agents like Claude can read and send mail for you over MCP, with
+          only the permissions you approve.
+        </p>
+      </div>
+      <pre
+        class="mcp"
+        tabindex="0"
+      ><code is:raw><span class="dim">$</span> claude mcp add --transport http openworkspace https://mail.acme.com/mcp</code></pre>
+    </div>
+  </div>
+</section>

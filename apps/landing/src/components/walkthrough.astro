@@ -1,0 +1,84 @@
+---
+// alchemy.run.ts in three steps. The code is hand-highlighted HTML, kept raw
+// so its braces aren't read as expressions.
+---
+
+<div class="walkthrough" aria-labelledby="walk-title">
+  <h3 id="walk-title">Configure it in code</h3>
+  <p class="walk-lede">
+    The whole workspace is declared in <code>alchemy.run.ts</code>, next to the
+    rest of your Cloudflare infrastructure. Change the file and deploy again.
+  </p>
+  <ol class="walk-steps">
+    <li>
+      <p>
+        Declare the apps people sign in to: Cloudflare Access over OpenID
+        Connect and a wiki over SAML, with the teams that get in and SCIM for
+        the wiki's accounts.
+      </p>
+      <pre
+        tabindex="0"
+      ><code is:raw><span class="k">const</span> access = <span class="k">yield*</span> <span class="f">OidcClient</span>(<span class="s">"CloudflareAccess"</span>, {
+  name: <span class="s">"Cloudflare Access"</span>,
+  redirectUris: [<span class="s">"https://acme.cloudflareaccess.com/cdn-cgi/access/callback"</span>],
+  scopes: [<span class="s">"openid"</span>, <span class="s">"profile"</span>, <span class="s">"email"</span>, <span class="s">"groups"</span>],
+  access: { teams: { engineering: <span class="s">"engineering"</span> } },
+  trusted: <span class="k">true</span>,
+});
+<span class="k">const</span> wiki = <span class="k">yield*</span> <span class="f">SamlApp</span>(<span class="s">"Wiki"</span>, {
+  name: <span class="s">"Wiki"</span>,
+  entityId: <span class="s">"https://wiki.acme.com/saml/metadata"</span>,
+  acsUrl: <span class="s">"https://wiki.acme.com/saml/acs"</span>,
+  access: { teams: [<span class="s">"engineering"</span>, <span class="s">"support"</span>] },
+  provisioning: { baseUrl: <span class="s">"https://wiki.acme.com/scim/v2"</span>,
+    token: <span class="k">yield*</span> Config.Redacted(<span class="s">"WIKI_SCIM_TOKEN"</span>) },
+});</code></pre>
+    </li>
+    <li>
+      <p>
+        Declare the workspace with its apps and a webhook that tells your
+        onboarding service when someone joins.
+      </p>
+      <pre
+        tabindex="0"
+      ><code is:raw><span class="k">const</span> onboarding = <span class="k">yield*</span> <span class="f">Webhook</span>(<span class="s">"Onboarding"</span>, {
+  name: <span class="s">"Onboarding"</span>,
+  url: <span class="s">"https://hooks.acme.com/onboarding"</span>,
+  events: [<span class="s">"user.joined"</span>, <span class="s">"user.updated"</span>],
+});
+<span class="k">const</span> workspace = <span class="k">yield*</span> <span class="f">OpenWorkspace</span>({
+  hostname: <span class="s">"mail.acme.com"</span>,
+  mailDomains: [<span class="s">"acme.com"</span>],
+  apps: [access, wiki],
+  webhooks: [onboarding],
+  modules: [<span class="f">Email</span>()],
+});</code></pre>
+    </li>
+    <li>
+      <p>
+        Hand the workspace's outputs to Cloudflare. It becomes your Access
+        login, and only the engineering team gets into the admin app.
+      </p>
+      <pre
+        tabindex="0"
+      ><code is:raw><span class="k">const</span> login = <span class="k">yield*</span> Cloudflare.Access.<span class="f">IdentityProvider</span>(<span class="s">"Workspace"</span>, {
+  name: <span class="s">"Acme Workspace"</span>,
+  type: <span class="s">"oidc"</span>,
+  config: { clientId: access.clientId, authUrl: workspace.oidc.authorizationUrl,
+    <span class="dim">/* secret, token and keys URLs, scopes, claims */</span> },
+});
+<span class="k">yield*</span> Cloudflare.Access.<span class="f">Application</span>(<span class="s">"Admin"</span>, {
+  type: <span class="s">"self_hosted"</span>,
+  domain: <span class="s">"admin.acme.com"</span>,
+  allowedIdps: [login.identityProviderId],
+  policies: [{ decision: <span class="s">"allow"</span>, include: [{ oidc: { claimName: <span class="s">"groups"</span>,
+    claimValue: <span class="s">"engineering"</span>, identityProviderId: login.identityProviderId } }] }],
+});</code></pre>
+    </li>
+  </ol>
+  <p class="walk-more">
+    <a href="/docs/sso#connecting-cloudflare-access"
+      >See the full Cloudflare Access example</a
+    >
+  </p>
+</div>

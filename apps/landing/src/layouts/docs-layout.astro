@@ -1,0 +1,191 @@
+---
+// The docs pages, laid out like ui.shadcn.com/docs: a sticky header, the
+// grouped list of pages on the left (a drawer on small screens), the page in
+// a reading-width column with breadcrumbs above and prev/next cards below,
+// and "On this page" on the right (a dropdown above the page on narrower
+// screens).
+import "../styles/docs.css";
+import Icon from "../components/docs/icon.astro";
+import SearchDialog from "../components/docs/search-dialog.astro";
+import Sidebar from "../components/docs/sidebar.astro";
+import Toc from "../components/docs/toc.astro";
+import SiteFooter from "../components/site-footer.astro";
+import SiteHeader from "../components/site-header.astro";
+import { editBase, loadDocs, readingOrder } from "../docs.ts";
+import Layout from "./layout.astro";
+
+type Heading = { depth: number; slug: string; text: string };
+
+type Props = {
+  title: string;
+  description: string;
+  slug?: string;
+  headings?: readonly Heading[];
+};
+
+const { title, description, slug, headings = [] } = Astro.props;
+const groups = await loadDocs();
+const pages = readingOrder(groups);
+const index = pages.findIndex((page) => page.slug === slug);
+const current = pages[index];
+
+const previous =
+  slug === undefined ? undefined : index > 0 ? pages[index - 1] : undefined;
+
+const next = slug === undefined ? pages[0] : pages[index + 1];
+const toc = headings.filter(({ depth }) => depth === 2 || depth === 3);
+const path = slug === undefined ? "/docs" : `/docs/${slug}`;
+
+const card =
+  "group flex flex-col gap-1 rounded-lg border bg-surface p-4 transition-colors hover:border-primary/40 hover:bg-surface-sunken";
+---
+
+<Layout
+  title={`${title}: OpenWorkspace docs`}
+  description={description}
+  canonical={`https://openworkspace.dev${path}`}
+>
+  <a
+    href="#main"
+    class="bg-primary text-primary-foreground fixed top-2 left-2 z-50 -translate-y-20 rounded-md px-3 py-2 text-sm font-medium focus:translate-y-0"
+    >Skip to content</a
+  >
+
+  <SiteHeader current="docs" docs />
+
+  <div
+    class="mx-auto grid w-[min(100%-2*var(--gutter),var(--wrap))] lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-10 xl:grid-cols-[15rem_minmax(0,1fr)_14rem]"
+  >
+    <aside
+      class="top-header sticky hidden h-[calc(100dvh-var(--spacing-header))] overflow-y-auto overscroll-contain border-r py-8 pr-4 lg:block"
+    >
+      <nav aria-label="Docs">
+        <Sidebar groups={groups} current={slug} />
+      </nav>
+    </aside>
+
+    <main id="main" tabindex="-1" class="min-w-0 py-8 outline-none lg:py-10">
+      <div class="mx-auto w-full max-w-3xl">
+        <nav aria-label="Breadcrumb" class="text-muted-foreground mb-4 text-sm">
+          <ol class="flex flex-wrap items-center gap-1.5">
+            <li>
+              {current ? (
+                <a href="/docs" class="hover:text-foreground transition-colors">
+                  Docs
+                </a>
+              ) : (
+                <span aria-current="page" class="text-foreground"> Docs </span>
+              )}
+            </li>
+            {current && (
+              <>
+                <li aria-hidden="true">
+                  <Icon name="chevron-right" class="size-3.5" />
+                </li>
+                <li>{current.group}</li>
+                <li aria-hidden="true">
+                  <Icon name="chevron-right" class="size-3.5" />
+                </li>
+                <li>
+                  <span aria-current="page" class="text-foreground">
+                    {current.label}
+                  </span>
+                </li>
+              </>
+            )}
+          </ol>
+        </nav>
+
+        {toc.length > 0 && <Toc headings={toc} variant="dropdown" />}
+
+        <slot />
+
+        <footer class="mt-16 grid gap-8">
+          <nav
+            aria-label="Previous and next page"
+            class="grid gap-3 sm:grid-cols-2"
+          >
+            {previous && <a
+              href={`/docs/${previous.slug}`}
+              rel="prev"
+              class={card}
+            >
+              <span
+                class="text-muted-foreground flex items-center gap-1 text-xs"
+              >
+                <Icon name="chevron-left" class="size-3.5" />
+                Previous
+              </span>
+              <span class="font-medium">{previous.label}</span>
+            </a>}
+            {next && <a
+              href={`/docs/${next.slug}`}
+              rel="next"
+              class:list={[card, "items-end text-right sm:col-start-2"]}
+            >
+              <span
+                class="text-muted-foreground flex items-center gap-1 text-xs"
+              >
+                Next
+                <Icon name="chevron-right" class="size-3.5" />
+              </span>
+              <span class="font-medium">{next.label}</span>
+            </a>}
+          </nav>
+          {current && <a
+            href={`${editBase}/${current.slug}.md`}
+            class="text-muted-foreground hover:text-foreground inline-flex items-center gap-2 text-sm transition-colors"
+          >
+            <Icon name="pencil" class="size-3.5" />
+            Edit this page on GitHub
+          </a>}
+        </footer>
+      </div>
+    </main>
+
+    {toc.length > 0 && <aside
+      class="top-header sticky hidden h-[calc(100dvh-var(--spacing-header))] overflow-y-auto py-10 xl:block"
+    >
+      <Toc headings={toc} variant="aside" />
+    </aside>}
+  </div>
+
+  <SiteFooter docs />
+
+  <dialog
+    id="docs-drawer"
+    aria-label="Docs menu"
+    class="bg-surface text-foreground open:animate-fade-in fixed inset-y-0 left-0 m-0 h-dvh max-h-none w-[min(20rem,85vw)] overflow-y-auto border-r p-0 shadow-xl backdrop:bg-black/40"
+  >
+    <div
+      class="h-header bg-surface sticky top-0 flex items-center justify-between border-b px-4"
+    >
+      <a href="/" class="flex items-center gap-2 font-semibold tracking-tight">
+        <img src="/icons/app-icon.svg" alt="" width="24" height="24" />
+        OpenWorkspace
+      </a>
+      <button
+        type="button"
+        class="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-9 items-center justify-center rounded-md"
+        aria-label="Close the docs menu"
+        data-drawer-close
+      >
+        <Icon name="x" class="size-5" />
+      </button>
+    </div>
+    <nav aria-label="Docs" class="px-3 py-6">
+      <Sidebar groups={groups} current={slug} />
+    </nav>
+  </dialog>
+
+  <SearchDialog />
+
+  <script>
+    import { initDocs } from "../scripts/docs.ts";
+    import { initSearch } from "../scripts/search.ts";
+
+    initDocs();
+
+    initSearch();
+  </script>
+</Layout>

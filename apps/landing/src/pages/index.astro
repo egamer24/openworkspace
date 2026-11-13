@@ -1,0 +1,76 @@
+---
+import GetStarted from "../components/get-started.astro";
+import Hero from "../components/hero.astro";
+import Pricing from "../components/pricing.astro";
+import Safety from "../components/safety.astro";
+import Setup from "../components/setup.astro";
+import Showcase from "../components/showcase.astro";
+import SiteFooter from "../components/site-footer.astro";
+import SiteHeader from "../components/site-header.astro";
+import Sso from "../components/sso.astro";
+
+import "../styles/site.css";
+import Layout from "../layouts/layout.astro";
+
+const structuredData = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "OpenWorkspace",
+  applicationCategory: "BusinessApplication",
+  operatingSystem: "Cloudflare Workers",
+  license: "https://www.apache.org/licenses/LICENSE-2.0",
+  url: "https://openworkspace.dev/",
+  codeRepository: "https://github.com/iivankin/openworkspace",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
+---
+
+<Layout
+  title="OpenWorkspace: team email and SSO, hosted in your Cloudflare account"
+  description="OpenWorkspace is team email and SSO, hosted in your Cloudflare account. An open-source alternative to Google Workspace that deploys with one command and costs about $5 a month."
+  canonical="https://openworkspace.dev/"
+>
+  <Fragment slot="head">
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OpenWorkspace" />
+    <meta
+      property="og:title"
+      content="Team email and SSO, hosted in your Cloudflare account"
+    />
+    <meta
+      property="og:description"
+      content="An open-source alternative to Google Workspace. It deploys with one command and costs about $5 a month."
+    />
+    <meta property="og:url" content="https://openworkspace.dev/" />
+    <meta property="og:image" content="https://openworkspace.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta
+      property="og:image:alt"
+      content="The OpenWorkspace logo, the line Team email and SSO, hosted in your Cloudflare account, and the Mail app."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script
+      is:inline
+      type="application/ld+json"
+      set:html={JSON.stringify(structuredData)}
+    /></Fragment>
+
+  <a class="skip" href="#main">Skip to content</a>
+
+  <SiteHeader />
+
+  <main id="main">
+    <Hero />
+    <Showcase />
+    <Sso />
+    <Safety />
+    <Setup />
+    <Pricing />
+    <GetStarted />
+  </main>
+
+  <SiteFooter />
+
+  <script is:inline type="module" src="/site.mjs"></script>
+</Layout>

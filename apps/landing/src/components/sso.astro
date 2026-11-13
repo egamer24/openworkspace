@@ -1,0 +1,91 @@
+---
+// One work address for mail and the other apps: the hub of apps, the sign-in
+// flow, the apps that work with it, and the walkthrough in code.
+import LogoMarquee from "./logo-marquee.astro";
+import Walkthrough from "./walkthrough.astro";
+---
+
+<section class="wrap section" id="features" aria-labelledby="sso-title">
+  <div class="head">
+    <h2 id="sso-title">One work address for mail and your other apps</h2>
+    <p>
+      A person's address on your domain is who they are in the workspace. Teams
+      decide who gets into which app, and when someone leaves, you turn off one
+      account instead of many.
+    </p>
+  </div>
+  <div class="sso-row">
+    <figure class="hub" aria-labelledby="hub-cap">
+      <div class="hub-core">
+        <img src="/icons/app-icon.svg" alt="" width="44" height="44" />
+        <p class="hub-name">Your workspace</p>
+        <p class="hub-host">mail.acme.com</p>
+      </div>
+      <div class="hub-wire" aria-hidden="true">
+        <svg class="hub-lines" viewBox="0 0 100 300" preserveAspectRatio="none">
+          <path d="M0 150 C 50 150, 50 50, 100 50"></path>
+          <path d="M0 150 L 100 150"></path>
+          <path d="M0 150 C 50 150, 50 250, 100 250"></path>
+        </svg>
+      </div>
+      <ul class="hub-apps">
+        <li>
+          <span class="mono" aria-hidden="true">G</span
+          ><span class="app-name">Grafana</span
+          ><span class="chips"
+            ><span>OpenID Connect</span><span>SCIM</span></span
+          >
+        </li>
+        <li>
+          <span class="mono" aria-hidden="true">CA</span
+          ><span class="app-name">Cloudflare Access</span
+          ><span class="chips"><span>OpenID Connect</span></span>
+        </li>
+        <li>
+          <span class="mono mono-blank" aria-hidden="true">+</span
+          ><span class="app-name">Your other apps</span
+          ><span class="chips"
+            ><span>OpenID Connect</span><span>SAML</span><span>SCIM</span></span
+          >
+        </li>
+      </ul>
+      <figcaption id="hub-cap" class="visually-hidden">
+        The workspace signs people in to Grafana over OpenID Connect with SCIM
+        provisioning, to Cloudflare Access over OpenID Connect, and to other
+        apps over OpenID Connect or SAML, with SCIM where the app supports it.
+      </figcaption>
+    </figure>
+    <ol class="authflow" aria-label="Signing in to an app with the workspace">
+      <li class="af-app">
+        <div class="af-card mock-login" aria-hidden="true">
+          <span class="mock-mark">D</span>
+          <p class="mock-title">Dashboards</p>
+          <span class="mock-btn"
+            ><img src="/icons/app-icon.svg" alt="" width="18" height="18" />
+            Sign in with OpenWorkspace</span
+          >
+        </div>
+        <p>In the app</p>
+      </li>
+      <li class="af-consent">
+        <div class="af-card af-shot">
+          <picture
+            ><source
+              srcset="/images/consent-dark.webp"
+              media="(prefers-color-scheme: dark)"
+            />
+            <img
+              src="/images/consent-light.webp"
+              width="820"
+              height="1100"
+              loading="lazy"
+              alt="The workspace consent screen: Continue to Dashboards. Dashboards will be able to confirm who you are, see your name and profile picture, see your email address, and see which of the teams that may use this app you are in. Deny and Continue buttons."
+          /></picture>
+        </div>
+        <p>On your workspace</p>
+      </li>
+    </ol>
+  </div>
+  <LogoMarquee />
+  <Walkthrough />
+</section>
