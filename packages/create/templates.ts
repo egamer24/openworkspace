@@ -14,7 +14,7 @@ export type ProjectAnswers = {
 };
 
 export const versions = {
-  openWorkspace: "0.4.0",
+  openWorkspace: "0.4.1",
   alchemy: "2.0.0-beta.85",
   effect: "4.1.3",
   typescript: "7.0.2",
