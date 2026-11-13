@@ -3209,18 +3209,19 @@ export class MailboxDO extends DurableObject<Env> {
   async alarm() {
     const now = Date.now();
     await this.finishImport();
-    // Cheap maintenance runs first, so a delivery that keeps failing (or
-    // keeps getting the alarm killed) cannot hold it back.
-    await dispatchOfficePreviewJobs(
-      this.state.storage.sql,
-      this.bindings,
-      this.state.id.name ?? "unknown-mailbox"
-    );
+    // Object deletion runs first, so a delivery that keeps failing (or keeps
+    // getting the alarm killed) cannot hold it back.
     await this.processObjectDeletionJobs(now);
 
     try {
       await this.processInboundJobs(now);
     } finally {
+      // Previews of the mail just stored are queued in the same wake.
+      await dispatchOfficePreviewJobs(
+        this.state.storage.sql,
+        this.bindings,
+        this.state.id.name ?? "unknown-mailbox"
+      );
       await this.scheduleRemainingWork();
     }
   }
