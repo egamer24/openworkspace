@@ -1,0 +1,66 @@
+Received: from dc226.mta.exacttarget.com (136.147.184.226)
+        by cloudflare-email.net (cloudflare) id PeYHcasEeV3o
+        for <user@example.com>; Tue, 27 Oct 2026 16:30:43 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=none;
+	b=BePaOhbC3aGpKz4Ly+2rMy8O8IAokL2b/DgXgQLR3yML+kvN7Si+nnW2XzIRFGezctFskfA+k
+	UXIXeTAhQ0iN+FkTgqy+wOhmHMMq55GWR98rFM0gzPeT/+Q1qhr6FYM0XiyEl8kr+tkGmF1Kam8
+	WOMU+p0d3EtrD4CFO5s+mzt+DT9sKmTmhPVtWgg49g8KqhJUkCQk6UapDykIu15cX3g26JE7OoK
+	qBq3+5O5HkuQ3VUkoIWVE47l2Ef+rz5TYFKfK97uzjuvh3Jpg58ll8j3e9lSpSHH52jcDxCx7bC
+	OLThqMzXGiIGY85DbNZTpDMW0ZFClfjRbxLz8w+UTH9w==;
+ARC-Message-Signature: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; c=relaxed/relaxed;
+	h=Reply-To:List-Help:Date:Subject:To:From:from:cc:resent-date:resent-from
+	:resent-to:resent-cc:in-reply-to:references:list-id:list-subscribe
+	:list-post:list-owner:list-archive; t=1793118644; x=1793723444; bh=+l9a+A01
+	YjWccco39HvPRVi/ddKLknEeYzo99qQxdgU=; b=IGQoRfX1XFf4mqlP4q8Apy/+lsI+X0/QsZa
+	v6Oe7rU8zOmEAG4gJ7x1tR5TiD+vkqKLoStH15ug1iJNyTcF7pUMJWCw65CgnD/JqY4CPC7dRkf
+	qMVLZeXbWNuiDEozF5ugD5s6vyxV26aj+/EMS+QQkRqYa28EwL84GprOrjYd2OdelYdh+9UkD1Q
+	ELqVI1/bKc4gmZTicCTXGg/rqPBzFSBs8JkNKalXDz1jczDhUvQ5G901dBJpgOK9aYgAsNL8nPl
+	fQXkfE3yD0lUtoU9Ej+js+WdfWji6P1xuPD6n3GcLkyeY5xSihgvu67qoHF2nKAYp9eEwziJWZ1
+	H9MK2rg==;
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.i=reply@txn-email.playstation.com header.s=200608 header.b=rLL9i5Fa;
+	dkim=pass header.d=s6.y.mc.salesforce.com header.s=fbldkim6 header.b=jCxEa+OE;
+	dmarc=pass header.from=txn-email.playstation.com policy.dmarc=reject;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@dc226.mta.exacttarget.com) smtp.helo=dc226.mta.exacttarget.com;
+	spf=pass (mx.cloudflare.net: domain of bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com designates 136.147.184.226 as permitted sender) smtp.mailfrom=bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com;
+	arc=none smtp.remote-ip=136.147.184.226
+Received-SPF: pass (mx.cloudflare.net: domain of bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com designates 136.147.184.226 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=136.147.184.226; envelope-from="bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com"; helo=dc226.mta.exacttarget.com;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.i=reply@txn-email.playstation.com header.s=200608 header.b=rLL9i5Fa;
+	dkim=pass header.d=s6.y.mc.salesforce.com header.s=fbldkim6 header.b=jCxEa+OE;
+	dmarc=pass header.from=txn-email.playstation.com policy.dmarc=reject;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@dc226.mta.exacttarget.com) smtp.helo=dc226.mta.exacttarget.com;
+	spf=pass (mx.cloudflare.net: domain of bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com designates 136.147.184.226 as permitted sender) smtp.mailfrom=bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com;
+	arc=none smtp.remote-ip=136.147.184.226
+X-CF-SpamH-Score: 0
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; s=200608; d=txn-email.playstation.com;
+ h=From:To:Subject:Date:List-Help:MIME-Version:Reply-To:Message-ID:Content-Type;
+ i=reply@txn-email.playstation.com;
+ bh=+l9a+A01YjWccco39HvPRVi/ddKLknEeYzo99qQxdgU=;
+ b=rLL9i5FaERVa+rfIYjgn8vg/5Ny/zwQMuQzi8t8JJiZwcXzyDGyrvI2dJqH8lWFbCvgtO1PUi180
+   o2/tOH4o9hDcscOGLIwwhY1h3hOxUC9c9UgGSKPZT/EAM9vA+xVgNLZFHDZXwDJ/iHNLSis/rLch
+   4qrhjExfTf5XoDXExYc=
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; s=fbldkim6; d=s6.y.mc.salesforce.com;
+ h=From:To:Subject:Date:List-Help:MIME-Version:Reply-To:Message-ID:Content-Type;
+ bh=+l9a+A01YjWccco39HvPRVi/ddKLknEeYzo99qQxdgU=;
+ b=jCxEa+OE2UZcpl2ryo/nM6tCYji7Txj2KD40Gz35FZXHilUNZSuzTh23p1YfCJJLHCn+oNe3sn0l
+   hfw7f3Apy77Q/iDjR5P8Cxv1cL1rGUCNT43M2KmUiqbX5E0RclmqDfxgqdANpfDejnseROt3wV/K
+   IwspPPCOcmsID2nT462+uFa4o7uxU4+SJixeb8hFU/rFDoiVbBrN331UzMdeav4x2mt6ZnrCo/mh
+   7lURcu9+sR6F3zCO71l6tm8z5DvFJZa6llIwq/8wEn+HFBjbTgOW5SOS74UQCfG/zqBX1cMJkfko
+   5CQfJ615vdDJ+zpO4qXPSt+qXphn+miBjr3+WQ==
+Received: by dc226.mta.exacttarget.com id hs38r639mjco for <user@example.com>; Tue, 27 Oct 2026 16:30:43 +0000 (envelope-from <bounce-6GXEP4SGCD5ETIASSZBXDNTBQU.60275@bounce.txn-email.playstation.com>)
+From: "PlayStation" <reply@txn-email.playstation.com>
+To: <user@example.com>
+Subject: Pre-Order Purchase Confirmation and GTA+ Redemption Instructions
+Date: Tue, 27 Oct 2026 10:30:43 -0600
+List-Help: <http://click.txn-email.playstation.com/subscription_center.aspx?jwt=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJtaWQiOiI2NDE2MzgzIiwicyI6IjEzNzcxOTY2ODAiLCJsaWQiOiIxOSIsImoiOiI4Nzc5MDEiLCJqYiI6IjI0MjI0MjUiLCJkIjoiNjAyNzUifQ.-8BQGUvTzMefhKCSNujrz9FyoSJOwoCVI5-62MsKHYA>
+MIME-Version: 1.0
+Reply-To: "NP Transactional Emails" <reply-XACC2RSVPBEUNKUWLRACICUON4.60275@txn-email.playstation.com>
+x-messageKey: 37ad2e55-d7e9-4ff1-a98a-29f2f7cb1696
+X-Delivery: Transactional
+X-SFMC-Stack: 6
+x-job: 6416383_877901
+Message-ID: <5b641b42-1f9b-427c-8422-043ee660193b@ind1s06mta0613.xt.local>
+Content-Type: multipart/alternative;
+	boundary="E3jiQnlZqbDX=_?:"

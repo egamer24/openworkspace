@@ -1,0 +1,58 @@
+Received: from v535.v5be21903.use4.send.mailgun.net (159.112.243.35)
+        by cloudflare-email.net (cloudflare) id gUhc7plbeEX3
+        for <user@example.com>; Fri, 23 Oct 2026 22:06:06 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=none;
+	b=VkIPkkiE6o+XMpIw/T6ANp7ONGQCLSGpfSe3OLtI8HL5Sl9+RobIgdZqTa06Snsom1ZYyWNXJ
+	7JFGansUDM4FpyOc/Wy/AT9yAkO92DnhwuR0eSWqdJFCXESrJrPn+KkmN7PaAxoDIXoOsq1m8pv
+	yNMaA9L7/yAGlZF86eJdrDu3WyEDPGLKQySFjwpjo8cZCnmTyvYhCyaaL5A9XYv3b5tipiJeG2m
+	6q7Y5k/sGmuPKGo1WJ4HKqQpllA0fWQmAda6JLKl4NeNgO6QFz9am/Cl91keBYUG2y73NHdsF/A
+	CAfjTEptwEBwZr5QYMSF7UMCBxS2ak6e60HbVfssqscw==;
+ARC-Message-Signature: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; c=relaxed/relaxed;
+	h=To:From:Subject:Date:from:reply-to:cc:resent-date:resent-from:resent-to
+	:resent-cc:in-reply-to:references:list-id:list-help:list-subscribe
+	:list-post:list-owner:list-archive; t=1792793166; x=1793397966; bh=faCAPwnf
+	++4D7hAjupdQXxFSdkAMdgmJf5cSJjnIEX8=; b=e63pM8U0rVYTj70jpICS8AyP4t+BIO4f/1m
+	hUjNCkPYuKYCnaNL3Nh9mfI/sOmRQ5kYPuWuwgok6Z1ZJDc3PHx5yX5TM+iuvbfkVet+2D5JrxS
+	vFGFsUBzwY74qj/wEevvyNQNiPpfzCxKgslS/u9+7JNEA78rmB9H4jSDAaVIjLp9UXRmwJ+JCcp
+	RANiskJpQ3V2RiEDiPlc7Eb0AmUfGOsccoq4wCYoT1EKkO5kOiaYAUYJGVxTbV6Hjvrvuo1Q1ag
+	SZBxtjjvpM1oH2ub/YsO23GQip+YmydvyEGooPEAg4nhECvZBuiqvZrossDiaAreMP3AZUNHnDN
+	slIqzkA==;
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=cio79999.news.railway.app header.s=pic header.b=T8046vuP;
+	dmarc=pass header.from=news.railway.app policy.dmarc=reject;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@v535.v5be21903.use4.send.mailgun.net) smtp.helo=v535.v5be21903.use4.send.mailgun.net;
+	spf=pass (mx.cloudflare.net: domain of postmaster@cio79999.news.railway.app designates 159.112.243.35 as permitted sender) smtp.mailfrom=postmaster@cio79999.news.railway.app;
+	arc=none smtp.remote-ip=159.112.243.35
+Received-SPF: pass (mx.cloudflare.net: domain of postmaster@cio79999.news.railway.app designates 159.112.243.35 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=159.112.243.35; envelope-from="postmaster@cio79999.news.railway.app"; helo=v535.v5be21903.use4.send.mailgun.net;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=cio79999.news.railway.app header.s=pic header.b=T8046vuP;
+	dmarc=pass header.from=news.railway.app policy.dmarc=reject;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@v535.v5be21903.use4.send.mailgun.net) smtp.helo=v535.v5be21903.use4.send.mailgun.net;
+	spf=pass (mx.cloudflare.net: domain of postmaster@cio79999.news.railway.app designates 159.112.243.35 as permitted sender) smtp.mailfrom=postmaster@cio79999.news.railway.app;
+	arc=none smtp.remote-ip=159.112.243.35
+X-CF-SpamH-Score: 0
+DKIM-Signature: a=rsa-sha256; v=1; c=relaxed/relaxed; d=cio79999.news.railway.app; q=dns/txt; s=pic; t=1792793165; x=1792800365;
+ h=Message-Id: To: To: From: From: Subject: Subject: Content-Type: Mime-Version: Date: Sender;
+ bh=faCAPwnf++4D7hAjupdQXxFSdkAMdgmJf5cSJjnIEX8=;
+ b=T8046vuPJhqxjp3tbhpBhSwlbgcnAw96bx8A7Dn9Gv2KAWMDKlwWe2esdyJfdJ9FTk2dUMP3IJihg0JpnQGTFN3xJIr8u/CIlHe52Oss7Lwiw5wVudBYBUFewSzBvFNeCioyRQHnQiPTo/ZDAn3ulZGk+b+9g73Ms5Kbfphf/n0=
+X-Mailgun-Sid: WyJjODUwOSIsInVzZXJAZXhhbXBsZS5jb20iLCI2ZTQzM2EiXQ==
+Received: by 7e485cb5c64c0b332606265d0359641b0569462196595f4614dc1816059dd6d6 with HTTP
+ id 6adbda4d0dbe3e9258f60f5a; Fri, 23 Oct 2026 22:06:05 GMT
+X-Mailgun-Sending-Ip: 159.112.243.35
+Date: Fri, 23 Oct 2026 22:06:05 +0000
+Mime-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="97e27dffeb48cb9111df57db4bcb1b1d91693c052968623113013b3e71d8"
+Subject: Changelog #0313: October 21 security incident
+From: Railway <hello@news.railway.app>
+To: user@example.com
+X-Mailgun-Native-Send: true
+X-Mailgun-Track-Clicks: false
+X-Mailgun-Track-Opens: false
+X-Mailgun-Dkim: true
+X-Mailer: Customer.io (dgSF4AcDALXKpQG0yqUBAaFqmyZSkYBYHLZjncAMxA==;
+ +https://whatis.customeriomail.com)
+X-Report-Abuse-To: badactor@customer.io
+X-Mailgun-Variables: {"email_id": "dgSF4AcDALXKpQG0yqUBAaFqmyZSkYBYHLZjncAMxA=="}
+Message-Id: <20261023220605.335a24136fa7f559@cio79999.news.railway.app>

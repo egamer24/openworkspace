@@ -1,1 +1,0 @@
-ALTER TABLE `installations` ADD `ai_processing_enabled` integer DEFAULT false NOT NULL;

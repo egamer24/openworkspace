@@ -1,0 +1,58 @@
+Received: from out-3.smtp.github.com (192.30.252.194)
+        by cloudflare-email.net (cloudflare) id QKLwTV8RReB1
+        for <user@example.com>; Mon, 26 Oct 2026 21:16:30 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=none;
+	b=WzxSnyMsXGNH3BWlSisWGL6j6ZiK5wTo8l8cuuuLbUo6xYa97OmSDBRGPUoWWU2ZirCGUx2p+
+	zWDZyQKkR3YPNVIWIqKgb82Qqk2tS9fd77J8nPI2euePLrxzyaSz1Xc1eXTYe5cagJhcBZHLGfg
+	iF2dTIDGh8xA7OdkFFFG2IL7sAwzKEmSpCPQ/UUpLOp1OFCAlG5qzUN19KriCVe1Y8lN8W/wvln
+	QfohivKenP0qrwD31Mb0cOTsU1uLrb/sfI9uN5URve0Fx/TVVysLfiAAIexskXMWu3tYo8I+q3D
+	c2IC2WTHuONRXUXiHkeyfnRflfjDg81THPuzNxH9uSLQ==;
+ARC-Message-Signature: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; c=relaxed/relaxed;
+	h=Subject:From:Date:from:reply-to:to:cc:resent-date:resent-from:resent-to
+	:resent-cc:in-reply-to:references:list-id:list-help:list-subscribe
+	:list-post:list-owner:list-archive; t=1793049390; x=1793654190; bh=Q+nPbdxX
+	bMw9ahkepxhDbYShs9XCBKmJRNwekRpIE6k=; b=M0V1c3dh6dttwFVafsibE8/pyuvmklpcTr0
+	a1dz6c2Z2q6EffKV9npkJFAh1/JjgstKhkoc83aF+gw5H6XAdkiqcca3RRodbWQljNz0bHey3jL
+	meOEIfG/8wyrwipWz4Et7ttbwbz+tnuvC9pd1+K2oBzps9Z3zdIA3Q9AFODCCvNX8N0tHMDRJMy
+	8qU9BdkZb001Zto6QmduwSaTuLe+A3NWcWI5oZJ9aphZKrhCGHW6aemkn1cTfiYPzds1GedzBqo
+	EAfRH6gNbu3Mq+eSTj2fpo22MqZx/Vv21Nld0xWLRlR1pLI/pIbAe1TJr5GzbA5K+p2FIf5yex8
+	/K964hw==;
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=github.com header.s=pf2026 header.b=jDiEOx0C;
+	dmarc=pass header.from=github.com policy.dmarc=quarantine;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@out-3.smtp.github.com) smtp.helo=out-3.smtp.github.com;
+	spf=pass (mx.cloudflare.net: domain of noreply@github.com designates 192.30.252.194 as permitted sender) smtp.mailfrom=noreply@github.com;
+	arc=none smtp.remote-ip=192.30.252.194
+Received-SPF: pass (mx.cloudflare.net: domain of noreply@github.com designates 192.30.252.194 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=192.30.252.194; envelope-from="noreply@github.com"; helo=out-3.smtp.github.com;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=github.com header.s=pf2026 header.b=jDiEOx0C;
+	dmarc=pass header.from=github.com policy.dmarc=quarantine;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@out-3.smtp.github.com) smtp.helo=out-3.smtp.github.com;
+	spf=pass (mx.cloudflare.net: domain of noreply@github.com designates 192.30.252.194 as permitted sender) smtp.mailfrom=noreply@github.com;
+	arc=none smtp.remote-ip=192.30.252.194
+X-CF-SpamH-Score: 1
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=github.com;
+	s=pf2026; t=1793049390;
+	bh=Q+nPbdxXbMw9ahkepxhDbYShs9XCBKmJRNwekRpIE6k=;
+	h=Date:From:Subject:From;
+	b=jDiEOx0CFXA9TpkzYyDkV4qMQfVuM5yFoj6CpZXms+1AR6nAVomi7yxBWFNi6dLnG
+	 rdJGEZAGBmfiD6CqOS0wUgClqVHKqMh2H/hQJorKNoubeJFg2sduZ2069aAY7mv0V6
+	 tMvurErqUsvevr8Sm0o3t7/jHf9hcGn50aNU00tx0sYUAEAg5gLQ77ZpkbbLiu2QKB
+	 vfXOWl7lXGL0CWfx0lIRKghYeMQ/089mWbhDM3nu55RHo3JDFalmq/pJunGgkhrpDo
+	 oUNkcy+WdrFA+wz6sz/6izffDHFSD5//Brdd9stugxwGbOzRerCalAv4XY6krwPaVX
+	 3K9NS1Bh3I1QQ==
+Received: from github.com (hubbernetes-node-25b1c88.gc-cus-02.github.net [10.154.15.73])
+	by smtp.github.com (Postfix) with ESMTPA id 70F48481094
+	for <user@example.com>; Mon, 26 Oct 2026 14:16:30 -0700 (PDT)
+Date: Mon, 26 Oct 2026 14:16:30 -0700
+From: GitHub <noreply@github.com>
+Message-ID: <6adfc32e4e4b0_11812982192d@sharedworker-56c9487cd4-cpvk8.mail>
+Subject: [GitHub] You have used 90% of the Actions storage included for the
+ example-org account
+Mime-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="--==_mimepart_6adfc32ded0f7_11812982185f";
+ charset=UTF-8
+Content-Transfer-Encoding: 7bit
+X-Auto-Response-Suppress: All

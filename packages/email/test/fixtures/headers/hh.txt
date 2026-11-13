@@ -1,0 +1,56 @@
+Received: from mrelay-normal1.hh.ru (94.124.203.149)
+        by cloudflare-email.net (cloudflare) id mcbK04ZY5F4U
+        for <user@example.com>; Tue, 27 Oct 2026 14:51:14 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=none;
+	b=FeMZ98s4nQb3jzu+Akj2TrFQb3VHvGvNKN9pITM0TXmNYIGabfAOXHnTnSn8mqVmfm1NLiG4A
+	T8o2B6MZmDKm4GY4CbelNt6WGFSuVA8L9aF+hOra/g03xccwdGoNz6ZFYJVrE5T9Ev2KtUDX+3V
+	LaA94lZwk6ih+MUPozTI3XpIV/4icHkgmshmISutYFmgjBmoYMmwD1IET46946UUSQsZ0kSqxN2
+	t6NIMLOv7cPcSYM3DDyICa4YCnvvImHs3jNTzEWoPL/EyDIVpVpUzjyZ4nlNI2oMy7xNgt0ElRX
+	+ak8MVp9vmOf51Ir83WYt1ewh9mju2BILAS87UZ9S5tw==;
+ARC-Message-Signature: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; c=relaxed/relaxed;
+	h=Subject:To:From:Date:from:reply-to:cc:resent-date:resent-from:resent-to
+	:resent-cc:in-reply-to:references:list-id:list-help:list-subscribe
+	:list-post:list-owner:list-archive; t=1793112674; x=1793717474; bh=OM7CMDWv
+	hokrCpb0OIbaakkGbwcIDy2jy67kma4uUD4=; b=coKEB4gUoN/ShfmVwOeMT2y6l0Ib0bPA1OX
+	jYwHClwsJtZhOR1g9gVxgKbtnKg1ydqw9oAOlRez33cXnyycAY8TL7Y3ORGjIMkxkTxaVedjx3V
+	33sIhFZOo3Ll3RKGlwtlwlni6iEsH5FPIHD3Fz6riJVHvYuvX6L/ZTP0baAiX1IGAqBaFFt1IoL
+	I5S+STAqicNJje5lW8pqLP4gUH89w2nkvlZGsmdMZagHt30jy9VpKJy15Huc+yWNZDs4GGBUuX/
+	KeUzvYWUWT3z3QPYOrFltXZJxFLGU6w+AeBfy34t1gsJaxVtaBVrbqyALFJ3QxYqK97IwplIU6W
+	97ZeQsQ==;
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=hh.ru header.s=mail header.b=kTGv6Zp/;
+	dmarc=pass header.from=hh.ru policy.dmarc=quarantine;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mrelay-normal1.hh.ru) smtp.helo=mrelay-normal1.hh.ru;
+	spf=pass (mx.cloudflare.net: domain of no-reply@verp.hh.ru designates 94.124.203.149 as permitted sender) smtp.mailfrom=no-reply@verp.hh.ru;
+	arc=none smtp.remote-ip=94.124.203.149
+Received-SPF: pass (mx.cloudflare.net: domain of no-reply@verp.hh.ru designates 94.124.203.149 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=94.124.203.149; envelope-from="no-reply@verp.hh.ru"; helo=mrelay-normal1.hh.ru;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=hh.ru header.s=mail header.b=kTGv6Zp/;
+	dmarc=pass header.from=hh.ru policy.dmarc=quarantine;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mrelay-normal1.hh.ru) smtp.helo=mrelay-normal1.hh.ru;
+	spf=pass (mx.cloudflare.net: domain of no-reply@verp.hh.ru designates 94.124.203.149 as permitted sender) smtp.mailfrom=no-reply@verp.hh.ru;
+	arc=none smtp.remote-ip=94.124.203.149
+X-CF-SpamH-Score: 0
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=hh.ru; s=mail;
+	t=1793112671; bh=OM7CMDWvhokrCpb0OIbaakkGbwcIDy2jy67kma4uUD4=;
+	h=Date:From:To:Subject:List-Unsubscribe:From;
+	b=kTGv6Zp/ELZTg/St3+0I8SKWyenXOM8ZH3aUMcoj8P05M6n7cPzBGSFakSzztBHVD
+	 Fycc9wmsfCxH6uCQyohN7p0VxMVy3r3PjTimChPkV296S25+tZbW52TZVJwkltaeJc
+	 xJNMfOdQq9Q966IwSdYqAqsOXgdqlqbeMHpwVpWI=
+Received: from mailer-docker390 (balancer4.prod [172.20.23.165])
+	by mrelay-normal1.hh.ru (Postfix) with ESMTP id 4jDYMz2xc7z4FHB
+	for <user@example.com>; Tue, 27 Oct 2026 17:51:11 +0300 (MSK)
+Date: Tue, 27 Oct 2026 17:51:11 +0300 (MSK)
+From: "hh.ru" <noreply@hh.ru>
+To: Alex <user@example.com>
+Subject: =?UTF-8?B?0JLQsNC60LDQvdGB0LjRjyDQt9Cw0LrRgNGL0YLQsA==?=
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: quoted-printable
+X-HH-TEMPLATE-CODE: b2c_DiscardVacancyClosed_Direct_JobBoard
+List-Unsubscribe: <null/unsubscribe/d1d1d32d-6b81-49c8-a4a0-ed121b23af07?date=2026-10-27&t=hhapplicant_resume_status_update&s=6e5dd55fce9c4692d99cea4ef8604a00bfded5109d9c383e647351b8e849888a&direct=true>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+X-HH-TAGS: [pandora_queue=pandora_communication_normal][sender=hh-pandora]
+X-Postmaster-Msgtype: 
+Message-Id: <4jDYMz2xc7z4FHB@mrelay-normal1.hh.ru>

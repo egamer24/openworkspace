@@ -1,0 +1,74 @@
+Received: from o4.mailservice.namecheap.com (167.89.64.97)
+        by cloudflare-email.net (cloudflare) id OqhaIFb2S9wH
+        for <user@example.com>; Thu, 29 Oct 2026 15:24:22 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=none;
+	b=I0OxbF0K5P4f+WO8P4LqlC/OBRwJjucvMQ6Rletm0EN2PNt6xXglgdmlhNJLgxVlE0X77w0tL
+	IbjFgpIDEJ1NIeqNcK2xJEWCjlgDQn76m8ypBHZcInoEyrFCop3Wp96nmIlnL0/So6DHsDuzX61
+	UVVG30g6czLL8SUmF10IJcfIuCvtCDVl3ftmFD2/0SeqwrkMpqDN7jSrL8aftf60XfhajIhLmmF
+	zDxI4fmLS+pdo2CaOD3F+l0462/D5Ks1AzmBikxOLZBUvnisWCyeWsItkciZHasCXbNYgt7oGtl
+	bYJQPAMwGPlaRl3DmvYbbNCYSMCveFf4XUc7+PLlXt5A==;
+ARC-Message-Signature: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; c=relaxed/relaxed;
+	h=To:Subject:From:Date:from:reply-to:cc:resent-date:resent-from:resent-to
+	:resent-cc:in-reply-to:references:list-id:list-help:list-subscribe
+	:list-post:list-owner:list-archive; t=1793287462; x=1793892262; bh=8pIsyyzd
+	rtBksg3pzfICexZKEiXIZxaX/2ed5iE0ayo=; b=SayTL1P3Ty9WAQKooELeTFyZx3ejjT9j5qo
+	5IkyTpdJAMCNQuJH2lipAgKZPip2IhQyzykwR2y8kHn13yCchtxnGCghS8Trp0UHPPi1aQsYkcx
+	DHN4iHEOi/Ma72bVtKFRpGaLBSb+9VZOGEDFAbCR80QiEqtE7Qb3IglB38w2YF9DBoJzvl+84dk
+	Swn5s9wkXkclYaq5IXTV1zmvc1lFQ2uU5ehZ//eVkM7hES0p2AN50xp7rIvKlhmajawadiu5D5j
+	p4YQ3dMIsuIiRSzP0U4AcfdHAE8pNiGmZJsIK0qwwyfTgwODwDy/1Ud5wZQ4v97z9GEMZoajkh/
+	dR/Fd3A==;
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=namecheap.com header.s=s1 header.b=GpCZBeOu;
+	dmarc=pass header.from=namecheap.com policy.dmarc=reject;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@o4.mailservice.namecheap.com) smtp.helo=o4.mailservice.namecheap.com;
+	spf=pass (mx.cloudflare.net: domain of bounces+18856604-0811-user=example.com@mailserviceemailout1.namecheap.com designates 167.89.64.97 as permitted sender) smtp.mailfrom=bounces+18856604-0811-user=example.com@mailserviceemailout1.namecheap.com;
+	arc=none smtp.remote-ip=167.89.64.97
+Received-SPF: pass (mx.cloudflare.net: domain of bounces+18856604-0811-user=example.com@mailserviceemailout1.namecheap.com designates 167.89.64.97 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=167.89.64.97; envelope-from="bounces+18856604-0811-user=example.com@mailserviceemailout1.namecheap.com"; helo=o4.mailservice.namecheap.com;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=namecheap.com header.s=s1 header.b=GpCZBeOu;
+	dmarc=pass header.from=namecheap.com policy.dmarc=reject;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@o4.mailservice.namecheap.com) smtp.helo=o4.mailservice.namecheap.com;
+	spf=pass (mx.cloudflare.net: domain of bounces+18856604-0811-user=example.com@mailserviceemailout1.namecheap.com designates 167.89.64.97 as permitted sender) smtp.mailfrom=bounces+18856604-0811-user=example.com@mailserviceemailout1.namecheap.com;
+	arc=none smtp.remote-ip=167.89.64.97
+X-CF-SpamH-Score: 1
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=namecheap.com;
+	h=content-transfer-encoding:content-type:date:from:mime-version:subject:
+	to:cc:content-type:date:from:subject:to;
+	s=s1; t=1793287462;
+	bh=8pIsyyzdrtBksg3pzfICexZKEiXIZxaX/2ed5iE0ayo=;
+	b=GpCZBeOut3PY0rzEQLHzlUjbt9FyJL194R00BVai1J4rWrF+Fs2hnFfwYpqnV/AYEcRl
+	EJHmUkgPSnKm5o7yYyrMSvuGsVnpkvHWAfre9rS2DvvZ6N5gf4epLAwgtGGRQJIjEibBFM
+	y4Y15RkXohwoNpk/Nm5NJNNwOWQ2IJgPNhI5bLbI3/rXS1WMg3x7/8j5vfru8DWzXbuicB
+	Kgud8ZVqt5lp2ayPANF5P/K2AvWAmvLKRMDsW5SzjIfLBFOsQ9wem+TKPyoSV2aEjXe1KV
+	2I/klSFndj7cJLDixAWxbS2VjPsL4EOCIoFB/qUb3wC8JuAZ7sEpQef63lYllWcg==
+Received: by recvd-5fbf9c6c9f-8g6m9 with SMTP id recvd-5fbf9c6c9f-8g6m9-1-6AE36526-2D
+	2026-10-29 15:24:22.353912098 +0000 UTC m=+2586254.687756052
+Received: from MTg4NTY2MDQ (unknown)
+	by geopod-ismtpd-16 (SG) with HTTP
+	id 1B6pFqYySUqvmCwTwno02w
+	Thu, 29 Oct 2026 15:24:22.330 +0000 (UTC)
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset=iso-8859-1
+Date: Thu, 29 Oct 2026 15:24:22 +0000 (UTC)
+From: Namecheap Renewals <renewals@namecheap.com>
+Mime-Version: 1.0
+Message-ID: <1B6pFqYySUqvmCwTwno02w@geopod-ismtpd-16>
+Subject: Alex, example.app will expire in 15 days - renew now
+X-SG-EID: 
+ =?us-ascii?Q?u001=2ELbfaLz1eb6pjGs=2FQMq5Wx8YREMxM6bKtOEe0O55hd5mR5JXrWzPOm8zZO?=
+ =?us-ascii?Q?GXEpUKOKl9e5HSFebV+rbq67ExHSAKtoOcbPgw5?=
+ =?us-ascii?Q?pNTTlJCaZc2b+JYxP0q41naBBk6T5g2Yq2taBP2?=
+ =?us-ascii?Q?VMrStltVguBcPTwbxbOsfh=2FsdvRyaOWHHTyeFXq?=
+ =?us-ascii?Q?Pp9zmzMQGSRZEXVveEAgwj4A8BPAbaUN5Bi686z?=
+ =?us-ascii?Q?vFJ4ToT4yZ0NOFKFlKa7i87geBz607VMumi3hmH?= =?us-ascii?Q?N+9O?=
+X-SG-ID: 
+ =?us-ascii?Q?u001=2ESdBcvi+Evd=2FbQef8eZF3BsFIYXKmo4grtWwwdyyPjO9f29ZFcAYzPuymm?=
+ =?us-ascii?Q?lIEH8=2F=2Fn8CA4qLVuIJlPma3KZ6da+48qTo3JwIU?=
+ =?us-ascii?Q?9b7+Y5VbrJlUyr1dQWOHNuqA0zs1NSKMEfnRz7+?=
+ =?us-ascii?Q?MwH8pUiyHS6A0P0TonRThP1HCLDkCulex1mzKLG?=
+ =?us-ascii?Q?SeFugXW1GTxffQhIBgVpezGHVirza9JhGMsKEMy?=
+ =?us-ascii?Q?xyHegyF=2FVL=2F+h2ekwf4JIhCPEWfSdZqP+dgImNC?=
+ =?us-ascii?Q?hm0H?=
+To: user@example.com
+X-Entity-ID: u001.5lCqLsX7ifpOSZ9fzJmK6A==

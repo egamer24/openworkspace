@@ -1,0 +1,65 @@
+import type { Editor } from "@tiptap/react";
+
+import type { ComposerSession } from "./composer-session";
+
+export type ComposerContent = {
+  bodyHtml: string;
+  bodyText: string;
+  inlineAssetIds: string[];
+  linkedAssetIds: string[];
+};
+
+/**
+ * Serializes the editor from stable asset references. Upload metadata stays in
+ * ComposerSession and never has to be copied back into ProseMirror attributes.
+ */
+export function composerContent(
+  editor: Editor,
+  session: ComposerSession
+): ComposerContent {
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = editor.getHTML();
+  const inlineAssetIds: string[] = [];
+  const linkedAssetIds: string[] = [];
+
+  for (const reference of wrapper.querySelectorAll<HTMLElement>(
+    "[data-composer-asset]"
+  )) {
+    const assetId = reference.dataset.composerAsset ?? "";
+    const asset = session.getAsset(assetId);
+
+    if (!asset?.uploadId) {
+      reference.remove();
+      continue;
+    }
+
+    if (session.isLinked(asset.id)) {
+      linkedAssetIds.push(asset.id);
+      const placeholder = document.createElement("span");
+      placeholder.dataset.linkedAttachment = asset.uploadId;
+      placeholder.dataset.linkedAttachmentFilename = asset.filename;
+      placeholder.textContent = asset.filename;
+      reference.replaceWith(placeholder);
+      continue;
+    }
+
+    if (asset.intent === "inline" && asset.contentId) {
+      inlineAssetIds.push(asset.id);
+      const image = document.createElement("img");
+      image.src = `cid:${asset.contentId}`;
+      image.alt = asset.filename;
+      image.title = asset.filename;
+      reference.replaceWith(image);
+      continue;
+    }
+
+    reference.remove();
+  }
+
+  return {
+    bodyHtml: wrapper.innerHTML,
+    bodyText: editor.getText({ blockSeparator: "\n\n" }),
+    inlineAssetIds,
+    linkedAssetIds,
+  };
+}

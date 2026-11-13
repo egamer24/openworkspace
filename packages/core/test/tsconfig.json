@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "types": ["bun"]
+  },
+  "include": [
+    "./**/*.ts",
+    "../src/client-modules.d.ts",
+    "../worker/workers-runtime.d.ts",
+    "../worker/bindings.d.ts"
+  ],
+  "exclude": ["e2e"]
+}

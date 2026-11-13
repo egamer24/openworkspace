@@ -1,0 +1,102 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "./theme.css";
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  text-rendering: optimizeLegibility;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-size: 13px;
+    letter-spacing: -0.003em;
+    font-variant-ligatures: common-ligatures contextual;
+    font-feature-settings:
+      "ss01" 1,
+      "cv11" 1;
+  }
+  html {
+    @apply font-sans antialiased;
+  }
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: color-mix(in oklab, var(--foreground) 18%, transparent);
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklab, var(--foreground) 30%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+}
+
+::selection {
+  background: color-mix(in oklab, var(--primary) 40%, transparent);
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* The faint dot grid behind the screens before the app: sign-in, links, consent, loading. */
+@utility bg-dot-grid {
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in oklab, var(--foreground) 10%, transparent) 1px,
+    transparent 0
+  );
+  background-size: 22px 22px;
+}
+
+/* Reduced motion: entrances and transitions end at once; spinners keep turning. */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Safari's contacts/password AutoFill button sits inside the field, between the
+   text and an inline addon such as a domain suffix. Autofill still works from
+   the keyboard's suggestions. */
+@layer components {
+  .no-autofill-button::-webkit-contacts-auto-fill-button,
+  .no-autofill-button::-webkit-credentials-auto-fill-button {
+    visibility: hidden;
+    display: none !important;
+    pointer-events: none;
+    position: absolute;
+    right: 0;
+  }
+}

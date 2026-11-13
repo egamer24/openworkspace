@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#edeff4" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- The workspace's logo when it has one (worker/workspace-branding.ts). -->
+    <link id="app-favicon" rel="icon" href="/api/workspace-logo/icon/64" />
+    <link rel="apple-touch-icon" href="/api/workspace-logo/icon/180" />
+    <title>OpenWorkspace</title>
+    <script>
+      (() => {
+        const theme = localStorage.getItem("openworkspace-theme");
+        const prefersDark = window.matchMedia(
+          "(prefers-color-scheme: dark)"
+        ).matches;
+        const dark = theme === "dark" || (theme !== "light" && prefersDark);
+        document.documentElement.classList.toggle("dark", dark);
+        document
+          .querySelector('meta[name="color-scheme"]')
+          ?.setAttribute("content", dark ? "dark" : "light");
+        document
+          .querySelector('meta[name="theme-color"]')
+          ?.setAttribute("content", dark ? "#080808" : "#edeff4");
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

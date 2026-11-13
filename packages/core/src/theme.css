@@ -1,0 +1,209 @@
+/* OpenWorkspace's design tokens: the colors of the light and dark themes,
+   the radii, shadows, fonts and easing, and the Tailwind theme that maps them
+   to utilities (bg-primary, rounded-lg, font-mono). The app (styles.css) and
+   openworkspace.dev (apps/landing) both import this file, so the two share
+   one definition of the brand. Exported as @open-workspace/core/theme.css.
+
+   It holds no element styles: each importer brings its own base layer. Dark
+   is the .dark class on <html>; each importer decides when to set it. */
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-display);
+  --font-mono:
+    "Geist Mono Variable", ui-monospace, "SF Mono", SFMono-Regular, Menlo,
+    monospace;
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --color-brand: var(--brand);
+  --color-brand-accent: var(--brand-accent);
+
+  /* Cool, quiet surfaces shared by mail, settings, and administration. */
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.7);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.35);
+  --radius-2xl: calc(var(--radius) * 1.7);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.8);
+
+  /* Borders carry structure; elevation is reserved for overlays. */
+  --shadow-2xs: 0 1px 1px -0.5px var(--shadow-color-weak);
+  --shadow-xs:
+    0 1px 2px -1px var(--shadow-color-weak),
+    0 1px 1px -0.5px var(--shadow-color-weak);
+  --shadow-sm:
+    0 2px 4px -2px var(--shadow-color-weak), 0 1px 2px -1px var(--shadow-color);
+  --shadow-md:
+    0 5px 14px -6px var(--shadow-color), 0 2px 4px -2px var(--shadow-color-weak);
+  --shadow-lg:
+    0 10px 26px -10px var(--shadow-color),
+    0 4px 8px -6px var(--shadow-color-weak);
+  --shadow-xl:
+    0 18px 38px -14px var(--shadow-color-strong),
+    0 6px 12px -8px var(--shadow-color);
+  --shadow-2xl:
+    0 28px 56px -18px var(--shadow-color-strong),
+    0 10px 20px -12px var(--shadow-color);
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+
+  --animate-rise: rise 0.32s var(--ease-out-quart) both;
+  --animate-fade-in: fade-in 0.25s var(--ease-out-quart) both;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/* Workspace — a faintly cool canvas, solid white panes, and one cobalt accent. */
+:root {
+  /* The logo: cobalt, and the amber dot. The same in both themes; the light
+     theme's primary is this cobalt. */
+  --brand: oklch(0.52 0.19 266);
+  --brand-accent: #ffb547;
+
+  --background: oklch(0.953 0.006 262);
+  --foreground: oklch(0.205 0.018 266);
+  --surface: oklch(1 0 0);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.978 0.004 262);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.205 0.018 266);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.205 0.018 266);
+  --primary: oklch(0.52 0.19 266);
+  --primary-foreground: oklch(0.99 0.004 266);
+  --secondary: oklch(0.955 0.007 262);
+  --secondary-foreground: oklch(0.27 0.025 266);
+  --muted: oklch(0.958 0.006 262);
+  --muted-foreground: oklch(0.52 0.018 264);
+  --accent: oklch(0.955 0.012 266);
+  --accent-foreground: oklch(0.3 0.08 266);
+  --destructive: oklch(0.56 0.2 25);
+  --destructive-foreground: oklch(0.99 0.004 25);
+  --success: oklch(0.56 0.12 155);
+  --warning: oklch(0.7 0.14 70);
+  --info: oklch(0.56 0.15 255);
+  --border: oklch(0.915 0.006 262);
+  --input: oklch(0.87 0.01 262);
+  --ring: oklch(0.52 0.19 266);
+  --chart-1: oklch(0.52 0.19 266);
+  --chart-2: oklch(0.65 0.13 200);
+  --chart-3: oklch(0.6 0.13 155);
+  --chart-4: oklch(0.7 0.14 70);
+  --chart-5: oklch(0.6 0.18 330);
+  --radius: 0.625rem;
+  --sidebar: oklch(1 0 0);
+  --sidebar-foreground: oklch(0.32 0.018 266);
+  --sidebar-primary: oklch(0.52 0.19 266);
+  --sidebar-primary-foreground: oklch(0.99 0.004 266);
+  --sidebar-accent: oklch(0.945 0.024 268);
+  --sidebar-accent-foreground: oklch(0.32 0.13 266);
+  --sidebar-border: oklch(0.915 0.006 262);
+  --sidebar-ring: oklch(0.52 0.19 266);
+
+  --shadow-color-weak: oklch(0.25 0.04 266 / 0.04);
+  --shadow-color: oklch(0.25 0.04 266 / 0.08);
+  --shadow-color-strong: oklch(0.2 0.05 266 / 0.16);
+}
+
+.dark {
+  --background: oklch(0.135 0 0);
+  --foreground: oklch(0.94 0 0);
+  --surface: oklch(0.185 0 0);
+  --surface-raised: oklch(0.22 0 0);
+  --surface-sunken: oklch(0.165 0 0);
+  --card: oklch(0.185 0 0);
+  --card-foreground: oklch(0.94 0 0);
+  --popover: oklch(0.215 0 0);
+  --popover-foreground: oklch(0.94 0 0);
+  --primary: oklch(0.7 0.14 268);
+  --primary-foreground: oklch(0.16 0.03 268);
+  --secondary: oklch(0.24 0 0);
+  --secondary-foreground: oklch(0.92 0 0);
+  --muted: oklch(0.235 0 0);
+  --muted-foreground: oklch(0.67 0 0);
+  --accent: oklch(0.25 0.012 268);
+  --accent-foreground: oklch(0.95 0.015 268);
+  --destructive: oklch(0.68 0.18 24);
+  --destructive-foreground: oklch(0.16 0 0);
+  --success: oklch(0.72 0.13 155);
+  --warning: oklch(0.79 0.13 76);
+  --info: oklch(0.72 0.12 255);
+  --border: oklch(1 0 0 / 0.08);
+  --input: oklch(1 0 0 / 0.14);
+  --ring: oklch(0.7 0.14 268);
+  --chart-1: oklch(0.7 0.14 268);
+  --sidebar: oklch(0.185 0 0);
+  --sidebar-foreground: oklch(0.84 0 0);
+  --sidebar-primary: oklch(0.7 0.14 268);
+  --sidebar-primary-foreground: oklch(0.16 0.03 268);
+  --sidebar-accent: oklch(0.26 0.03 268);
+  --sidebar-accent-foreground: oklch(0.95 0.02 268);
+  --sidebar-border: oklch(1 0 0 / 0.08);
+  --sidebar-ring: oklch(0.7 0.14 268);
+
+  --shadow-color-weak: oklch(0 0 0 / 0.3);
+  --shadow-color: oklch(0 0 0 / 0.45);
+  --shadow-color-strong: oklch(0 0 0 / 0.62);
+}

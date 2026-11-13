@@ -1,0 +1,99 @@
+{
+  "name": "@open-workspace/email",
+  "version": "0.3.0",
+  "description": "Team mail for OpenWorkspace: personal and shared inboxes, mailing lists, previews, safety, and AI.",
+  "keywords": [
+    "alchemy",
+    "cloudflare",
+    "email",
+    "jmap",
+    "self-hosted",
+    "workers"
+  ],
+  "homepage": "https://openworkspace.dev",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iivankin/openworkspace.git",
+    "directory": "packages/email"
+  },
+  "files": [
+    "index.ts",
+    "alchemy",
+    "src",
+    "worker",
+    "shared",
+    "migrations",
+    "drizzle",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./alchemy": "./alchemy/index.ts",
+    "./client": "./src/client.tsx",
+    "./*": "./*"
+  },
+  "scripts": {
+    "dev": "ALLOW_MOCK_AUTH=true alchemy dev dev/alchemy.run.ts",
+    "test": "bun run test:unit && bun run test:stack",
+    "test:unit": "bun test ./test/unit",
+    "test:stack": "bun test --preload ./test/stack/setup.ts --timeout 60000 ./test/stack",
+    "test:e2e": "playwright test -c test/e2e --project=desktop && playwright test -c test/e2e --project=mobile",
+    "typecheck": "tsc -p tsconfig.json && tsc -p test/tsconfig.json && tsc -p test/e2e/tsconfig.json",
+    "db:generate": "drizzle-kit generate && drizzle-kit generate --config=drizzle.mailbox.config.ts"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "0.9.1",
+    "@mmmike/web-push": "1.5.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "@tanstack/react-query": "5.107.1",
+    "@tiptap/extension-placeholder": "3.33.1",
+    "@tiptap/pm": "3.33.1",
+    "@tiptap/react": "3.33.1",
+    "@tiptap/starter-kit": "3.33.1",
+    "aws4fetch": "1.0.20",
+    "date-fns": "4.4.0",
+    "dompurify": "3.4.17",
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.17",
+    "html-to-text": "10.0.1",
+    "lucide-react": "1.71.0",
+    "pdfjs-dist": "6.5.438",
+    "postal-mime": "4.2.1",
+    "react": "19.3.1",
+    "react-router": "8.5.1",
+    "sonner": "2.0.8",
+    "tldts": "7.4.21",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@alchemy.run/test": "2.0.0-beta.85",
+    "@effect/platform-bun": "4.1.3",
+    "@effect/platform-node": "4.1.3",
+    "@open-workspace/core": "workspace:*",
+    "@open-workspace/create": "workspace:*",
+    "@types/bun": "1.4.4",
+    "@types/html-to-text": "9.0.4",
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "ai": "7.0.166",
+    "alchemy": "2.0.0-beta.85",
+    "drizzle-kit": "0.31.11",
+    "effect": "4.1.3",
+    "openid-client": "6.8.9",
+    "playwright": "1.65.0",
+    "standardwebhooks": "1.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.7"
+  },
+  "peerDependencies": {
+    "@alchemy.run/cloudflare": "2.0.0-beta.85",
+    "@open-workspace/core": "0.3.0",
+    "alchemy": "2.0.0-beta.85",
+    "effect": "4.1.3"
+  }
+}

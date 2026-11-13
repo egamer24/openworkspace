@@ -1,0 +1,236 @@
+/* Mail workspace layout: solid panes on a tinted canvas, dense conversation rows. */
+
+/* Conversation table. */
+:root {
+  --rule: oklch(0.935 0.005 262);
+  --row-hover: oklch(0.975 0.005 262);
+  --row-active: oklch(0.955 0.02 268);
+  --row-selected: oklch(0.945 0.03 268);
+  --pane-shadow:
+    0 1px 2px oklch(0.25 0.04 266 / 0.05),
+    0 0 0 0.5px oklch(0.25 0.04 266 / 0.03);
+}
+
+.dark {
+  --rule: oklch(1 0 0 / 0.055);
+  --row-hover: oklch(1 0 0 / 0.035);
+  --row-active: oklch(0.25 0.025 268);
+  --row-selected: oklch(0.27 0.04 268);
+  --pane-shadow: 0 1px 2px oklch(0 0 0 / 0.35);
+}
+
+/* Each region is a solid card on the tinted canvas. */
+.mail-pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  box-shadow: var(--pane-shadow);
+}
+
+/* Initials tiles tinted by a per-name hue (set inline as --monogram-hue). */
+.monogram {
+  background: oklch(0.93 0.04 var(--monogram-hue));
+  color: oklch(0.4 0.1 var(--monogram-hue));
+}
+.dark .monogram {
+  background: oklch(0.32 0.05 var(--monogram-hue));
+  color: oklch(0.9 0.05 var(--monogram-hue));
+}
+
+/* Conversation rows: two lines in a narrow pane, one dense line when wide. */
+.mail-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  grid-template-areas:
+    "check from date"
+    "check subject subject";
+  column-gap: 0.5rem;
+  row-gap: 0.125rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem 0.5625rem 0.375rem;
+}
+
+.mail-columns {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  grid-template-areas: "check from date";
+  column-gap: 0.5rem;
+  align-items: center;
+  padding: 0 0.75rem 0 0.375rem;
+}
+
+.mail-columns [data-col="subject"] {
+  display: none;
+}
+
+@container mail-list (min-width: 36rem) {
+  .mail-row,
+  .mail-columns {
+    grid-template-columns: 2rem minmax(0, 9.5rem) minmax(0, 1fr) 4.5rem;
+    grid-template-areas: "check from subject date";
+    column-gap: 0.75rem;
+  }
+  .mail-row {
+    padding-block: 0;
+    min-height: 2.375rem;
+  }
+  .mail-columns [data-col="subject"] {
+    display: block;
+  }
+  .mail-columns [data-col="from-narrow"] {
+    display: none;
+  }
+}
+
+@container mail-list (max-width: calc(36rem - 0.02px)) {
+  .mail-columns [data-col="from-wide"] {
+    display: none;
+  }
+}
+
+/* Phones list conversations without the column headings. */
+@media (width < 64rem) {
+  .mail-columns {
+    display: none;
+  }
+}
+
+/* Narrow rows give the preview its own line; wide rows run it after the subject. */
+.mail-subject {
+  white-space: normal;
+  overflow: visible;
+}
+.mail-subject > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mail-dash {
+  display: none;
+}
+
+@container mail-list (min-width: 36rem) {
+  .mail-subject {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mail-subject > span {
+    display: inline;
+  }
+  .mail-dash {
+    display: inline;
+  }
+}
+
+/* Attachment type badges share the monogram treatment, tinted per file kind. */
+.file-tile-icon {
+  background: oklch(0.95 0.035 var(--file-hue));
+  color: oklch(0.5 0.13 var(--file-hue));
+}
+.dark .file-tile-icon {
+  background: oklch(0.3 0.05 var(--file-hue));
+  color: oklch(0.85 0.09 var(--file-hue));
+}
+
+/* Tiptap's default gap cursor is black, so theme it for the dark composer. */
+.ProseMirror-gapcursor::after {
+  border-top-color: var(--primary);
+}
+
+/*
+  Outgoing composer HTML lives in the app document after a strict allowlist
+  sanitizer. These rules restore editor semantics without accepting inline CSS.
+*/
+.composer-message-body {
+  overflow-wrap: anywhere;
+
+  p {
+    margin: 0;
+  }
+
+  p + p {
+    margin-top: 0.75rem;
+  }
+
+  ul,
+  ol {
+    margin: 0.5rem 0;
+    padding-left: 1.5rem;
+  }
+
+  ul {
+    list-style: disc;
+  }
+
+  ol {
+    list-style: decimal;
+  }
+
+  blockquote {
+    margin: 0.75rem 0;
+    border-left: 2px solid color-mix(in oklab, currentColor 20%, transparent);
+    padding-left: 0.75rem;
+    color: color-mix(in oklab, currentColor 68%, transparent);
+  }
+
+  a {
+    color: var(--info);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    max-height: 24rem;
+    margin: 0.75rem 0;
+    object-fit: contain;
+    border-radius: var(--radius);
+  }
+
+  pre {
+    max-width: 100%;
+    overflow: auto;
+    white-space: pre-wrap;
+  }
+
+  [data-linked-attachment-card] {
+    margin: 0.75rem 0;
+    border-block: 1px solid color-mix(in oklab, currentColor 14%, transparent);
+    padding: 0.625rem 0;
+  }
+
+  [data-linked-attachment-card] > a {
+    display: flex;
+    max-width: 100%;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.25rem 0.5rem;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  [data-linked-attachment-card] strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  [data-linked-attachment-card] span {
+    color: color-mix(in oklab, currentColor 60%, transparent);
+    font-size: 0.75rem;
+  }
+
+  [data-forwarded-message] {
+    display: block;
+    margin-top: 1rem;
+    border-top: 1px solid color-mix(in oklab, currentColor 14%, transparent);
+    padding-top: 0.75rem;
+  }
+}
+
+.mail-body {
+  overflow-wrap: anywhere;
+}

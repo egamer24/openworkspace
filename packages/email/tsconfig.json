@@ -1,0 +1,15 @@
+{
+  "extends": "../core/tsconfig.json",
+  "compilerOptions": {
+    "allowJs": true
+  },
+  "include": [
+    "alchemy",
+    "src",
+    "shared",
+    "worker",
+    "drizzle",
+    "index.ts",
+    "drizzle.mailbox.config.ts"
+  ]
+}

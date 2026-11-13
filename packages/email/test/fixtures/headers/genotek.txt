@@ -1,0 +1,74 @@
+Received: from s-h-mbx-snd-0.ru (46.243.2.181)
+        by cloudflare-email.net (cloudflare) id IEgqUUyOWjnI
+        for <user@example.com>; Sun, 25 Oct 2026 07:17:44 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; cv=none;
+	b=fjVO2W22ymfXrHz5barxFLr5+X/jvxh8W2vSBtL6gar2NbkBw7qzcMFUO7GIGJ4rT+LMWZGXh
+	nKxB7RS7Luwt7d1H3L4if/qDujAmLbNXaYTDPLWpedVYaa6RBE0fJ+azsJQ5LawnK8r+76DsreD
+	G3o19JcLuz1c1tZpfEM197zS0PMgPolqZPaWbOy6nX/tijlNohVekMcvOHPujwxi40Y9GUXEGk8
+	+/SC8M+58Kjkam0FUAFpmAZ5NinLNGdBWmww8UwUSgkpefLNh87X/nRfR0Eq9DtvQ3TCeSItKYN
+	9eXO4PMC9YyXtG42HX/PdVn3NoVyhCPv0HDQ1myT9GfQ==;
+ARC-Message-Signature: i=1; a=rsa-sha256; s=cf2024-1; d=cloudflare-email.net; c=relaxed/relaxed;
+	h=List-ID:Reply-To:To:From:Subject:Date:from:cc:resent-date:resent-from
+	:resent-to:resent-cc:in-reply-to:references:list-help:list-subscribe
+	:list-post:list-owner:list-archive; t=1792912664; x=1793517464; bh=y0uPHtDV
+	y/Ghx3QaW4WdNYoUmx2pC95eSeRJKZ+Epig=; b=UO2KuC9vALLbnfkolOFj+xHnSvPRa/TNaGl
+	/98oGDjUN/g0dnZlBc3yadWTzZ3BDnvwP7nn/28JVqwwcv0oCqfjqMdQs6w6Zw/CTEPoLHzfw8T
+	HNQFEhWiQByw3QRaWUnTGW3lbGe6KRoORhuUgpo7YzECAHSRflHM/+1dmiDTp8rNXP4gwUmy26S
+	6f/HfoTQtbUf9mnTN+BVozXSsIRPpMSc76Hdv8pfifms3VKHCnwFEv1DY3NPGQF2c4J0e1zCMML
+	BdczNhw8k3sWzTyY/olZjAv/c17uwlWQNQhSAaBLjywuBuE2evNwpKG80D6pk0x49wAy/HzVPpK
+	Cku6Vhw==;
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=genotek.ru header.s=mindbox header.b=ZBcPl2QQ;
+	dkim=pass header.d=s-h-mbx-snd-0.ru header.s=mindbox header.b=q9wLTTlE;
+	dmarc=pass header.from=genotek.ru policy.dmarc=none;
+	spf=pass (mx.cloudflare.net: domain of postmaster@s-h-mbx-snd-0.ru designates 46.243.2.181 as permitted sender) smtp.helo=s-h-mbx-snd-0.ru;
+	spf=pass (mx.cloudflare.net: domain of bounce.f90e01000000787801005893@cdp.genotek.ru designates 46.243.2.181 as permitted sender) smtp.mailfrom=bounce.f90e01000000787801005893@cdp.genotek.ru;
+	arc=none smtp.remote-ip=46.243.2.181
+Received-SPF: pass (mx.cloudflare.net: domain of bounce.f90e01000000787801005893@cdp.genotek.ru designates 46.243.2.181 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=46.243.2.181; envelope-from="bounce.f90e01000000787801005893@cdp.genotek.ru"; helo=s-h-mbx-snd-0.ru;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=genotek.ru header.s=mindbox header.b=ZBcPl2QQ;
+	dkim=pass header.d=s-h-mbx-snd-0.ru header.s=mindbox header.b=q9wLTTlE;
+	dmarc=pass header.from=genotek.ru policy.dmarc=none;
+	spf=pass (mx.cloudflare.net: domain of postmaster@s-h-mbx-snd-0.ru designates 46.243.2.181 as permitted sender) smtp.helo=s-h-mbx-snd-0.ru;
+	spf=pass (mx.cloudflare.net: domain of bounce.f90e01000000787801005893@cdp.genotek.ru designates 46.243.2.181 as permitted sender) smtp.mailfrom=bounce.f90e01000000787801005893@cdp.genotek.ru;
+	arc=none smtp.remote-ip=46.243.2.181
+X-CF-SpamH-Score: 1
+Content-Type: text/html;
+ charset="utf-8"
+Content-Transfer-Encoding: base64
+MIME-Version: 1.0
+Date: Sun, 25 Oct 2026 07:17:43 +0000
+Message-ID: <f90e01000000787801005893@cdp.genotek.ru>
+Subject: =?utf-8?B?0KHQstGP0LfRjCDQvtC90LrQvtC70L7Qs9C40Lgg0Lgg0LPQtdC90LU=?=
+ =?utf-8?B?0YLQuNC60Lg=?=
+From: "Genotek" <news@genotek.ru>
+To: <user@example.com>
+Reply-To: "Genotek" <news@genotek.ru>
+Precedence: bulk
+X-xsMessageId: f90e01000000787801005893
+X-xsMailingId: 69369
+X-Mailru-Msgtype: 69369
+List-ID: <batch69369.list-id.genotek.ru>
+Feedback-ID: 69369:2625:mindbox
+X-Mailer: mindbox.ru
+List-Unsubscribe: <https://tn-dwz.s-h-mbx-trc-0.ru/ocu/-Q4BAAAAeHgBAFiT>, <mailto:lu.f90e01000000787801005893@list-unsubscribe.s.mindbox.ru>
+List-Unsubscribe-Post: List-Unsubscribe=One-Click
+DKIM-Signature: v=1;
+ a=rsa-sha256;
+ s=mindbox;
+ d=genotek.ru;
+ c=relaxed/relaxed;
+ q=dns/txt;
+ h=From:To:Subject:Date:Message-ID:MIME-Version:Content-Type:Reply-To:List-ID:List-Unsubscribe:List-Unsubscribe-Post:Feedback-ID;
+ bh=y0uPHtDVy/Ghx3QaW4WdNYoUmx2pC95eSeRJKZ+Epig=;
+ b=ZBcPl2QQVJmeUYLl3gDqVYvDtFPHJfqJMnR3Jt5Q2xznN1IGASmEaeQqsu7xyH1klvg9XzcDCiMGQwJG8h/5g7HCWPcACuhC5ntSQipkVgimtPbFeE5M2M06JtkAdsdKDuaTtG7k8BOGV4By+qgeokhP8YpQL4T8KWK4oOIF2Es=
+DKIM-Signature: v=1;
+ a=rsa-sha256;
+ s=mindbox;
+ d=s-h-mbx-snd-0.ru;
+ c=relaxed/relaxed;
+ q=dns/txt;
+ h=From:To:Subject:Date:Message-ID:MIME-Version:Content-Type:Reply-To:List-ID:List-Unsubscribe:List-Unsubscribe-Post:Feedback-ID;
+ bh=y0uPHtDVy/Ghx3QaW4WdNYoUmx2pC95eSeRJKZ+Epig=;
+ b=q9wLTTlEfNOQiRLr5DnFWThvpqwLotTrMcgbkR3LJYtFFSUHdZWr1pj3imuR9vi96RK5H9hTE20E25sXuZaAYQAq5w0WhBV7aglOQbgWb0rH/OZP7B8GGCgLtMj3hRAzv8ujoILKVahI19zGT3Bm5pOtH2PdL1uOmqoBS6fdOY4=
