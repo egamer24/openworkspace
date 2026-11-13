@@ -56,11 +56,13 @@ Open **Folders & AI sorting**, next to the mailbox's folders (on phones, the
 gear at the end of the bottom bar), to create folders, write rules, and set how
 confident the AI must be. Mail the AI can't place stays in Inbox.
 
-The AI files only mail that starts a conversation: a reply stays wherever its
+The AI files a reply only if the conversation has no earlier mail from
+others, such as a thread you started; otherwise the reply stays wherever its
 conversation is. A reply put in Spam gets a conversation of its own, so the
-one it answers stays where it is. Marking it **Not spam** puts it back into
-that conversation, unless that conversation is in Trash or Spam; then it moves
-to Inbox on its own.
+one it answers stays where it is. When you take it out of Spam (**Not spam**,
+or moving it to Inbox from the app or a mail app), it goes back into that
+conversation and the conversation returns to Inbox, unless that conversation
+is in Trash or Spam; then it stays on its own in Inbox.
 
 ## Attachments
 
