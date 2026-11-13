@@ -75,20 +75,21 @@ page in place. Scanned images can't be translated.
 
 Turn on push notifications under **Settings → Notifications** and choose which
 mailboxes send them. On iPhone and iPad, add OpenWorkspace to the Home Screen
-first, then turn them on from the installed app. Signing out stops them on that
-device.
+first, then turn them on from the installed app. Signing out, or revoking that
+device's session under **Settings → Sessions**, stops them there; a session that
+simply expires keeps them.
 
 ## Settings
 
-| Page           | What it holds                                                                          |
-| -------------- | -------------------------------------------------------------------------------------- |
-| Profile        | Your profile photo (JPEG, PNG, WebP or GIF, up to 2 MB)                                |
-| Appearance     | Light, dark, or your device's theme                                                    |
-| Sessions       | Where you're signed in. Revoke a session to sign that browser out.                     |
-| MCP            | How to connect an AI agent ([MCP and JMAP](mcp-and-jmap.md))                           |
-| Connected apps | The apps you approved ([MCP and JMAP](mcp-and-jmap.md#connected-apps))                 |
-| Notifications  | Push notifications on this device, and which mailboxes send them                       |
-| Mail apps      | The address for mail apps ([MCP and JMAP](mcp-and-jmap.md#connect-a-jmap-mail-client)) |
+| Page           | What it holds                                                                                 |
+| -------------- | --------------------------------------------------------------------------------------------- |
+| Profile        | Your profile photo (JPEG, PNG, WebP or GIF, up to 2 MB)                                       |
+| Appearance     | Light, dark, or your device's theme                                                           |
+| Sessions       | Where you're signed in. Revoke a session to sign that browser out and stop its notifications. |
+| MCP            | How to connect an AI agent ([MCP and JMAP](mcp-and-jmap.md))                                  |
+| Connected apps | The apps you approved ([MCP and JMAP](mcp-and-jmap.md#connected-apps))                        |
+| Notifications  | Push notifications on this device, and which mailboxes send them                              |
+| Mail apps      | The address for mail apps ([MCP and JMAP](mcp-and-jmap.md#connect-a-jmap-mail-client))        |
 
 ## Administration
 

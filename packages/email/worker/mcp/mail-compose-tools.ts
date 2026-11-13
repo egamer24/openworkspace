@@ -72,7 +72,7 @@ export function registerMailComposeTools(
     {
       title: "Create attachment upload",
       description:
-        "Create a 15-minute presigned R2 PUT URL. Upload exactly the declared number of bytes to upload.uploadUrl using upload.headers, then call complete_attachment_upload with upload.id.",
+        "Create a 15-minute presigned R2 PUT URL. PUT exactly the declared size to upload.uploadUrl with upload.headers and a Content-Length header (the URL signs it; a chunked body without a length is refused with 403), then call complete_attachment_upload with upload.id.",
       inputSchema: z.object({
         mailboxId: mailboxIdSchema,
         filename: z.string().trim().min(1).max(255),

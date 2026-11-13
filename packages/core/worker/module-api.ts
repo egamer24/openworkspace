@@ -44,6 +44,9 @@ export { oidcIssuer } from "./oidc/keys";
 // The workspace's D1 database: its client, and core's tables a module joins.
 export { createDb, type Database } from "./db/client";
 
+// What a module's statement hooks return, run in core's D1 batch.
+export type { BatchStatement } from "./lib/batch";
+
 export {
   mailboxAccess,
   mailboxes,

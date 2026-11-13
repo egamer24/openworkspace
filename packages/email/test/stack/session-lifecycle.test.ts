@@ -355,6 +355,76 @@ describe("session and push ownership", () => {
     expect(await subscription.first()).toEqual({ sessionId: second.id });
   });
 
+  it("revokes around a push without a session and one now another person's", async () => {
+    const userId = await createUser("Shared Device User");
+    const otherUserId = await createUser("Next Device User");
+    const cookie = await login(userId);
+    const keptCookie = await login(userId);
+    const movedEndpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
+    const legacyEndpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
+    await bindPush(cookie, movedEndpoint);
+    // Registered before sessions were recorded: no session of its own.
+    await env.DB.prepare(
+      "INSERT INTO push_subscriptions (id, user_id, session_id, endpoint, p256dh, auth) VALUES (?, ?, NULL, ?, 'p256dh', 'auth')"
+    )
+      .bind(`psb_${crypto.randomUUID()}`, userId, legacyEndpoint)
+      .run();
+
+    const session = required(
+      await sessionForCookie(cookie),
+      "the sign-in stores a session"
+    );
+
+    // Another person signs in on the device, and the endpoint follows them.
+    await bindPush(await login(otherUserId), movedEndpoint);
+
+    const revoke = await worker.fetch(
+      new Request(`http://example.test/api/auth/sessions/${session.id}`, {
+        method: "DELETE",
+        headers: { cookie: keptCookie },
+      })
+    );
+
+    expect(revoke.status).toBe(200);
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT endpoint, user_id AS userId FROM push_subscriptions WHERE endpoint IN (?, ?) ORDER BY user_id = ?"
+        )
+          .bind(movedEndpoint, legacyEndpoint, otherUserId)
+          .all()
+      ).results
+    ).toEqual([
+      { endpoint: legacyEndpoint, userId },
+      { endpoint: movedEndpoint, userId: otherUserId },
+    ]);
+  });
+
+  it("drops a session's push when it signs out of an app (OIDC logout)", async () => {
+    const userId = await createUser("App Logout User");
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
+    const cookie = await login(userId);
+    await bindPush(cookie, endpoint);
+
+    const logout = await worker.fetch(
+      new Request("http://example.test/api/oidc/logout", {
+        method: "POST",
+        headers: { cookie, "content-type": "application/json" },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(logout.status).toBe(200);
+    expect(await sessionForCookie(cookie)).toBeNull();
+    expect(
+      await env.DB.prepare(
+        "SELECT id FROM push_subscriptions WHERE endpoint = ?"
+      )
+        .bind(endpoint)
+        .first()
+    ).toBeNull();
+  });
+
   it("drops a session's push when it signs out", async () => {
     const userId = await createUser("Sign-out User");
     const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;

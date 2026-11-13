@@ -16,7 +16,11 @@ import {
   apiError,
   createId,
 } from "@open-workspace/core/module";
-import type { Database, AppEnv } from "@open-workspace/core/module";
+import type {
+  BatchStatement,
+  Database,
+  AppEnv,
+} from "@open-workspace/core/module";
 import { and, desc, eq, isNull, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -47,9 +51,8 @@ function isPublicPushEndpoint(endpoint: string) {
 }
 
 const pushSubscriptionSchema = z.object({
-  // Only a browser's push service (Google's, Mozilla's, Apple's, Microsoft's):
-  // the Worker POSTs to the endpoint for every new message, so any other
-  // host would make it a request relay.
+  // The Worker POSTs to the endpoint for every new message, so it must be a
+  // public HTTPS URL (isPublicPushEndpoint), never a relay into the network.
   endpoint: z
     .url()
     .max(4096)
@@ -370,31 +373,34 @@ export const pushNotificationRoutes = new Hono<AppEnv>()
 
 /**
  * One session was revoked or signed out: its device stops getting
- * notifications. Rows without a session (registered before they were
- * recorded) stay until the device registers again or every session goes.
+ * notifications, in the batch that deletes the session. Rows without a
+ * session (registered before they were recorded) stay until the device
+ * registers again or every session goes.
  */
-export async function deleteSessionPushSubscriptions(
+export function deleteSessionPushSubscriptions(
   db: Database,
   session: { userId: string; sessionId: string }
-) {
-  await db
-    .delete(pushSubscriptions)
-    .where(
-      and(
-        eq(pushSubscriptions.userId, session.userId),
-        eq(pushSubscriptions.sessionId, session.sessionId)
-      )
-    );
+): BatchStatement[] {
+  return [
+    db
+      .delete(pushSubscriptions)
+      .where(
+        and(
+          eq(pushSubscriptions.userId, session.userId),
+          eq(pushSubscriptions.sessionId, session.sessionId)
+        )
+      ),
+  ];
 }
 
 /** A person's sessions were all revoked: no device of theirs gets notifications. */
-export async function deleteUserPushSubscriptions(
+export function deleteUserPushSubscriptions(
   db: Database,
   userId: string
-) {
-  await db
-    .delete(pushSubscriptions)
-    .where(eq(pushSubscriptions.userId, userId));
+): BatchStatement[] {
+  return [
+    db.delete(pushSubscriptions).where(eq(pushSubscriptions.userId, userId)),
+  ];
 }
 
 function subscriptionsForMailbox(env: Env, mailboxId: string) {

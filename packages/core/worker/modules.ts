@@ -14,6 +14,7 @@ import type { SessionCompanion } from "./auth/session";
 import type { Database } from "./db/client";
 import type { ModuleWebhookSource } from "./db/json";
 import type { AppEnv } from "./env";
+import type { BatchStatement } from "./lib/batch";
 import type { AccountApiClient } from "./mcp/account-client";
 import { coreScopeIds } from "./oidc/scopes";
 
@@ -104,19 +105,21 @@ export type WorkspaceModule = {
     mailboxDeleted?: (env: Env, mailboxId: string) => Promise<void>;
     /**
      * One browser session ended on purpose: the person or an administrator
-     * revoked it, or it signed out. Drop what the module keeps for the
-     * device on that session. Expiry and core's pruning of old sessions do
-     * not call it.
+     * revoked it, or it signed out. Returns the statements that drop what
+     * the module keeps for the device on that session; they run in the D1
+     * batch that deletes the session, so both land or neither does.
+     * Expiry and core's pruning of old sessions do not call it.
      */
     sessionRevoked?: (
       db: Database,
       session: { userId: string; sessionId: string }
-    ) => Promise<void>;
+    ) => BatchStatement[];
     /**
      * Every session of a person was revoked: they were disabled, or
-     * recovered their account. Drop what the module keeps per device.
+     * recovered their account. Returns the statements that drop what the
+     * module keeps per device, run in the revocations' D1 batch.
      */
-    sessionsRevoked?: (db: Database, userId: string) => Promise<void>;
+    sessionsRevoked?: (db: Database, userId: string) => BatchStatement[];
     /** Local demo data, created when the seeded demo workspace opens. */
     seedDemo?: (
       env: Env,
@@ -283,12 +286,21 @@ export function isMailboxEvent(event: string) {
   return Boolean(webhookEvents[event]?.mailboxes);
 }
 
+type ModuleHooks = NonNullable<WorkspaceModule["hooks"]>;
+
+/** Hooks that hand core D1 statements to run in its own batch. */
+type StatementHook = {
+  [K in keyof ModuleHooks]-?: ReturnType<
+    NonNullable<ModuleHooks[K]>
+  > extends BatchStatement[]
+    ? K
+    : never;
+}[keyof ModuleHooks];
+
+/** Runs every installed module's `hook`, in install order. */
 export async function runModuleHooks<
-  K extends keyof NonNullable<WorkspaceModule["hooks"]>,
->(
-  hook: K,
-  ...args: Parameters<NonNullable<NonNullable<WorkspaceModule["hooks"]>[K]>>
-) {
+  K extends Exclude<keyof ModuleHooks, StatementHook>,
+>(hook: K, ...args: Parameters<NonNullable<ModuleHooks[K]>>) {
   for (const module of installed) {
     // SAFETY: `hooks[hook]` is the hook named K, whose parameters are `args`;
     // TypeScript cannot call a generic K's member without widening it.
@@ -299,4 +311,22 @@ export async function runModuleHooks<
     // oxlint-disable-next-line eslint/no-await-in-loop -- hooks run in install order, and a failing one stops the rest as before
     if (run) await run(...args);
   }
+}
+
+/**
+ * Every installed module's statements for `hook`, in install order, for
+ * the caller to put in the same D1 batch as its own change.
+ */
+export function moduleHookStatements<K extends StatementHook>(
+  hook: K,
+  ...args: Parameters<NonNullable<ModuleHooks[K]>>
+): BatchStatement[] {
+  return installed.flatMap((module) => {
+    // SAFETY: as in runModuleHooks; a statement hook returns its statements.
+    const statements = module.hooks?.[hook] as
+      | ((...input: typeof args) => BatchStatement[])
+      | undefined;
+
+    return statements ? statements(...args) : [];
+  });
 }

@@ -15,7 +15,7 @@ import {
   sessions,
 } from "../db/schema";
 import { nonEmptyBatch } from "../lib/batch";
-import { runModuleHooks } from "../modules";
+import { moduleHookStatements } from "../modules";
 import {
   queueBackchannelLogouts,
   userBackchannelSessions,
@@ -61,8 +61,9 @@ function userAccessRevocations(
  * Signs a person out of everything: when they are disabled, and when they
  * recover their account (whoever had their passkey or a session must not
  * keep a way in). `alongside` runs first in the same D1 batch, so the
- * change and the revocation land together. Afterwards the modules drop
- * what they keep per device, and apps with back-channel logout are told.
+ * change and the revocation land together, and with them the modules drop
+ * what they keep per device. Afterwards apps with back-channel logout are
+ * told.
  */
 export async function revokeUserAccess(
   env: Env,
@@ -81,12 +82,12 @@ export async function revokeUserAccess(
     nonEmptyBatch([
       ...(options.alongside ?? []),
       ...userAccessRevocations(db, userId, options.keepAccessLinkId),
+      ...moduleHookStatements("sessionsRevoked", db, userId),
     ]),
     "The revocations are never empty"
   );
 
   await db.batch(statements);
-  await runModuleHooks("sessionsRevoked", db, userId);
 
   if (loggedOut.length) {
     options.defer(

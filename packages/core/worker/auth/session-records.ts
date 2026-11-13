@@ -2,7 +2,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 
 import type { Database } from "../db/client";
 import { sessions } from "../db/schema";
-import { runModuleHooks } from "../modules";
+import { moduleHookStatements } from "../modules";
 
 export async function sessionsForUser(
   db: Database,
@@ -28,18 +28,22 @@ export async function sessionsForUser(
   }));
 }
 
+/**
+ * Ends one of a person's sessions on purpose, with what the modules keep
+ * for its device in the same D1 batch; null when they have no such session.
+ */
 export async function revokeUserSession(
   db: Database,
   userId: string,
   sessionId: string
 ) {
-  const [revoked] = await db
-    .delete(sessions)
-    .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
-    .returning({ id: sessions.id });
+  const [[revoked]] = await db.batch([
+    db
+      .delete(sessions)
+      .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
+      .returning({ id: sessions.id }),
+    ...moduleHookStatements("sessionRevoked", db, { userId, sessionId }),
+  ]);
 
-  if (!revoked) return null;
-  await runModuleHooks("sessionRevoked", db, { userId, sessionId });
-
-  return revoked;
+  return revoked ?? null;
 }

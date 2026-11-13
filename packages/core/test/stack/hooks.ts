@@ -2,12 +2,17 @@ import { env as workerEnv } from "cloudflare:workers";
 
 import { poll } from "../../testing/poll.ts";
 import type { HookContext, TestHook } from "../../testing/test-hooks.ts";
+import { revokeUserAccess } from "../../worker/auth/revocation.ts";
+import { revokeUserSession } from "../../worker/auth/session-records.ts";
 import {
   consumeChallenge,
   deleteExpiredChallenges,
   recordPasskeyUse,
 } from "../../worker/auth/webauthn.ts";
 import { createDb } from "../../worker/db/client.ts";
+import type { Database } from "../../worker/db/client.ts";
+import { users } from "../../worker/db/schema.ts";
+import { installModules, workspaceModules } from "../../worker/modules.ts";
 import {
   BackchannelLogoutError,
   deliverBackchannelLogout,
@@ -70,6 +75,57 @@ const identity = {
 } satisfies Record<string, TestHook>;
 
 /**
+ * A statement that fails when it runs, after core's own deletes in the
+ * batch: the person's row inserted again, against its primary key.
+ */
+function failingStatements(db: Database, userId: string) {
+  return [db.insert(users).values({ id: userId, name: "Duplicate" })];
+}
+
+/**
+ * Runs `revoke` with a module installed whose session hooks contribute a
+ * failing statement, then puts the workspace's own modules back.
+ */
+async function withFailingModule<T>(revoke: () => Promise<T>) {
+  const modules = workspaceModules();
+
+  installModules([
+    ...modules,
+    {
+      name: "failing",
+      hooks: {
+        sessionRevoked: (db, session) => failingStatements(db, session.userId),
+        sessionsRevoked: failingStatements,
+      },
+    },
+  ]);
+
+  try {
+    return await outcome(revoke);
+  } finally {
+    installModules(modules);
+  }
+}
+
+/** Session revocations whose module statement fails, to show they are one batch. */
+const revocation = {
+  "revocation.revokeSessionWithFailingModule": (
+    { env },
+    userId: string,
+    sessionId: string
+  ) =>
+    withFailingModule(() =>
+      revokeUserSession(createDb(env.DB), userId, sessionId)
+    ),
+  "revocation.revokeAccessWithFailingModule": ({ env, ctx }, userId: string) =>
+    withFailingModule(() =>
+      revokeUserAccess(env, createDb(env.DB), userId, {
+        defer: (task) => ctx.waitUntil(task),
+      })
+    ),
+} satisfies Record<string, TestHook>;
+
+/**
  * Replaces a binding's value for every later request in this isolate, as
  * a redeploy with other declarations would. Tests put the original back.
  */
@@ -126,6 +182,7 @@ const sso = {
 
 export const coreHooks = {
   ...identity,
+  ...revocation,
   ...sso,
   /** The OIDC cleanup routes run at random; run it now. */
   "oidc.cleanupExpiredArtifacts": ({ env }) =>
