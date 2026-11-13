@@ -39,6 +39,65 @@ function incoming(input: {
   };
 }
 
+/** A classifier that puts mail mentioning "Spam offer" in Spam. */
+function spamClassifier() {
+  const decision = (spam: boolean) =>
+    JSON.stringify({
+      spam,
+      spamConfidence: spam ? 0.99 : 0.01,
+      folderId: null,
+      folderConfidence: 0,
+      reason: spam ? "Unsolicited promotion" : "A reply",
+    });
+
+  return {
+    mode: "rules" as const,
+    rules: [{ includes: "Spam offer", text: decision(true) }],
+    fallback: decision(false),
+  };
+}
+
+/** Delivers a message (a reply to `inReplyTo`, if any) and waits until it is stored. */
+async function deliverInbound(
+  mailbox: ReturnType<typeof mailboxStub>,
+  mailboxId: string,
+  delivery: { id: string; from: string; body: string; inReplyTo: string | null }
+) {
+  const rawObjectKey = `test/${delivery.id}.eml`;
+  await env.MAIL_STORAGE.put(
+    rawObjectKey,
+    [
+      `From: <${delivery.from}>`,
+      "To: me@example.test",
+      delivery.inReplyTo ? "Subject: Re: The original" : "Subject: New",
+      `Message-ID: <${delivery.id}@example.net>`,
+      ...(delivery.inReplyTo
+        ? [
+            `In-Reply-To: ${delivery.inReplyTo}`,
+            `References: ${delivery.inReplyTo}`,
+          ]
+        : []),
+      "",
+      delivery.body,
+    ].join("\r\n")
+  );
+  await mailbox.enqueueInbound({
+    id: delivery.id,
+    mailboxId,
+    rawObjectKey,
+    envelopeFrom: delivery.from,
+    envelopeTo: "me@example.test",
+    receivedAt: Date.now(),
+  });
+
+  return required(
+    await runAlarmUntil(mailboxId, () =>
+      mailbox.getEmail(inboundMessageId(delivery.id))
+    ),
+    `${delivery.id} is stored`
+  );
+}
+
 describe("mailbox conversation index", () => {
   it("paginates conversation messages newest-first without losing full-thread counts", async () => {
     const mailbox = mailboxStub(`mbx_message_pages_${crypto.randomUUID()}`);
@@ -326,6 +385,211 @@ describe("mailbox conversation index", () => {
           pushDispatch.safeParse(call.data).success
       )
     ).toHaveLength(1);
+  });
+
+  it("puts a spam reply marked Not spam back into the conversation it answers", async () => {
+    const mailboxId = `mbx_not_spam_rejoin_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const userId = "usr_not_spam_rejoin";
+    const conversationId = "conv_not_spam_rejoin_target";
+
+    await mailbox.testFake({
+      push: "capture",
+      classifier: spamClassifier(),
+    });
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          ...incoming({
+            id: "msg_not_spam_rejoin_original",
+            conversationId,
+            timelineAt: new Date(Date.now() - 60_000),
+            bodyText: "The original message.",
+          }),
+          messageIdHeader: "<not-spam-rejoin-original@example.net>",
+        },
+      ]
+    );
+    await mailbox.setMessageRead(userId, "msg_not_spam_rejoin_original", true);
+
+    const reply = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_not_spam_rejoin_${crypto.randomUUID()}`,
+      from: "colleague@example.net",
+      body: "Spam offer, as the AI wrongly thinks: the pentagon heron report.",
+      inReplyTo: "<not-spam-rejoin-original@example.net>",
+    });
+
+    expect(reply.conversationId).not.toBe(conversationId);
+    expect(await mailbox.getFolderCounts(userId, "inbox")).toEqual({
+      totalCount: 1,
+      unreadCount: 0,
+    });
+
+    expect(
+      await mailbox.markNotSpam({ emailId: reply.id, userId })
+    ).toMatchObject({ restored: true, rejoined: true, conversationId });
+
+    expect((await mailbox.getEmail(reply.id))?.conversationId).toBe(
+      conversationId
+    );
+    expect(
+      await mailbox.getConversationSnapshot(reply.conversationId)
+    ).toBeNull();
+    expect(
+      (await mailbox.getConversationSnapshot(conversationId))?.mailboxState
+    ).toBe("active");
+
+    const inbox = await mailbox.listConversations(
+      userId,
+      "inbox",
+      25,
+      null,
+      undefined
+    );
+
+    // One conversation, led by the reply, with one unread message.
+    expect(
+      inbox?.items.map((item) => [item.email.conversationId, item.email.id])
+    ).toEqual([[conversationId, reply.id]]);
+    expect(await mailbox.getFolderCounts(userId, "inbox")).toEqual({
+      totalCount: 1,
+      unreadCount: 1,
+    });
+    expect(
+      await mailbox.getConversationPageSnapshot(
+        conversationId,
+        userId,
+        10,
+        null
+      )
+    ).toMatchObject({ messageCount: 2, unreadCount: 1 });
+    expect(
+      (
+        await mailbox.listConversations(userId, "inbox", 25, null, "heron")
+      )?.items.map((item) => item.email.conversationId)
+    ).toEqual([conversationId]);
+    expect(
+      (await mailbox.listConversations(userId, "spam", 25, null, undefined))
+        ?.items
+    ).toEqual([]);
+  });
+
+  it("moves a spam reply to a conversation in Trash to Inbox on its own", async () => {
+    const mailboxId = `mbx_not_spam_trash_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const userId = "usr_not_spam_trash";
+    const conversationId = "conv_not_spam_trash_target";
+
+    await mailbox.testFake({
+      push: "capture",
+      classifier: spamClassifier(),
+    });
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          ...incoming({
+            id: "msg_not_spam_trash_original",
+            conversationId,
+            timelineAt: new Date(Date.now() - 60_000),
+            bodyText: "The original message.",
+          }),
+          messageIdHeader: "<not-spam-trash-original@example.net>",
+        },
+      ],
+      [{ id: conversationId, mailboxState: "trash" }]
+    );
+
+    const reply = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_not_spam_trash_${crypto.randomUUID()}`,
+      from: "colleague@example.net",
+      body: "Spam offer, as the AI wrongly thinks.",
+      inReplyTo: "<not-spam-trash-original@example.net>",
+    });
+
+    expect(reply.conversationId).not.toBe(conversationId);
+    expect(
+      await mailbox.markNotSpam({ emailId: reply.id, userId })
+    ).toMatchObject({
+      restored: true,
+      rejoined: false,
+      conversationId: reply.conversationId,
+    });
+    expect(
+      await mailbox.getConversationSnapshot(reply.conversationId)
+    ).toMatchObject({ mailboxState: "active", messages: [{ id: reply.id }] });
+    expect(await mailbox.getConversationSnapshot(conversationId)).toMatchObject(
+      {
+        mailboxState: "trash",
+        messages: [{ id: "msg_not_spam_trash_original" }],
+      }
+    );
+  });
+
+  it("files only new conversations into AI folders", async () => {
+    const mailboxId = `mbx_ai_folder_reply_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const conversationId = "conv_ai_folder_reply_target";
+    const folder = await mailbox.createFolder("fld_invoices", "Invoices");
+
+    if (folder.status !== "ok") throw new Error("Invoices was not created");
+
+    await mailbox.testFake({
+      push: "capture",
+      classifier: {
+        mode: "rules",
+        rules: [],
+        fallback: JSON.stringify({
+          spam: false,
+          spamConfidence: 0.01,
+          folderId: folder.folder.id,
+          folderConfidence: 0.96,
+          reason: "An invoice",
+        }),
+      },
+    });
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          ...incoming({
+            id: "msg_ai_folder_reply_original",
+            conversationId,
+            timelineAt: new Date(Date.now() - 60_000),
+            bodyText: "The original message.",
+          }),
+          messageIdHeader: "<ai-folder-reply-original@example.net>",
+        },
+      ]
+    );
+
+    const reply = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_ai_folder_reply_${crypto.randomUUID()}`,
+      from: "billing@example.net",
+      body: "Invoice attached for the original message.",
+      inReplyTo: "<ai-folder-reply-original@example.net>",
+    });
+
+    expect(reply.conversationId).toBe(conversationId);
+    expect(reply.aiClassificationJson).toMatchObject({
+      folderId: folder.folder.id,
+    });
+    expect(await mailbox.getConversationSnapshot(conversationId)).toMatchObject(
+      { mailboxState: "active", folderId: null }
+    );
+
+    const fresh = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_ai_folder_new_${crypto.randomUUID()}`,
+      from: "billing@example.net",
+      body: "A new invoice.",
+      inReplyTo: null,
+    });
+
+    expect(fresh.conversationId).not.toBe(conversationId);
+    expect(
+      await mailbox.getConversationSnapshot(fresh.conversationId)
+    ).toMatchObject({ mailboxState: "active", folderId: folder.folder.id });
   });
 
   it("does not classify inbound mail until MIME objects are stored", async () => {

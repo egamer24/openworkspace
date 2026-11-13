@@ -88,9 +88,9 @@ export function useSenderActions({
     notSpam.mutate(
       { mailboxId: mailbox.id, messageId: message.id },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
           toast.success(
-            `Moved to Inbox. Mail from ${message.fromAddress} won't be treated as spam.`
+            `${result.rejoined ? "Moved back to its conversation" : "Moved to Inbox"}. Mail from ${message.fromAddress} won't be treated as spam.`
           );
           onLeaveConversation();
         },

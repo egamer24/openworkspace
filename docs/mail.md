@@ -56,6 +56,12 @@ Open **Folders & AI sorting**, next to the mailbox's folders (on phones, the
 gear at the end of the bottom bar), to create folders, write rules, and set how
 confident the AI must be. Mail the AI can't place stays in Inbox.
 
+The AI files only mail that starts a conversation: a reply stays wherever its
+conversation is. A reply put in Spam gets a conversation of its own, so the
+one it answers stays where it is. Marking it **Not spam** puts it back into
+that conversation, unless that conversation is in Trash or Spam; then it moves
+to Inbox on its own.
+
 ## Attachments
 
 PDFs open in a built-in viewer. Word, Excel, PowerPoint, OpenDocument and RTF

@@ -51,3 +51,52 @@ export function indexInsertedEmail(sql: SqlStorage, emailId: string) {
     emailId
   );
 }
+
+/**
+ * Moves every message of conversation `fromId` into `intoId`, inside the
+ * caller's transaction: the messages, their search rows, and `intoId`'s
+ * latest message, timeline and directions, which are recomputed from its
+ * messages. `intoId` keeps its place (state and folder); `fromId` is removed.
+ * Read states belong to messages and move with them.
+ */
+export function mergeConversation(
+  sql: SqlStorage,
+  fromId: string,
+  intoId: string
+) {
+  sql.exec(
+    "update emails set conversation_id = ? where conversation_id = ?",
+    intoId,
+    fromId
+  );
+  sql.exec(
+    "update email_search set conversation_id = ? where conversation_id = ?",
+    intoId,
+    fromId
+  );
+  sql.exec(
+    `update conversations set
+       latest_email_id = (
+         select message.id from emails message
+         where message.conversation_id = conversations.id
+         order by message.timeline_at desc, message.id desc limit 1
+       ),
+       timeline_at = (
+         select max(message.timeline_at) from emails message
+         where message.conversation_id = conversations.id
+       ),
+       has_incoming = exists (
+         select 1 from emails message
+         where message.conversation_id = conversations.id
+           and message.direction = 'incoming'
+       ),
+       has_outgoing = exists (
+         select 1 from emails message
+         where message.conversation_id = conversations.id
+           and message.direction = 'outgoing'
+       )
+     where id = ?`,
+    intoId
+  );
+  sql.exec("delete from conversations where id = ?", fromId);
+}

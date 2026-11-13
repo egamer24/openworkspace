@@ -494,7 +494,12 @@ describe("reporting", () => {
           { method: "POST" }
         )
       ).body
-    ).toEqual({ ok: true, restored: true });
+    ).toEqual({
+      ok: true,
+      restored: true,
+      conversationId: "conv_msg_spam",
+      rejoined: false,
+    });
     expect(
       await workspaceFeedbackSummary("mbx_elsewhere", "spammer@junk.example")
     ).toMatchObject({ spamReports: 0, notSpam: 1, reportingMailboxes: 0 });

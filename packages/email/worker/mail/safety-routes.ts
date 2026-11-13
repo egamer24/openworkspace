@@ -372,7 +372,12 @@ export const mailSafetyRoutes = new Hono<AppEnv>()
         );
       }
 
-      return c.json({ ok: true as const, restored: result.restored });
+      return c.json({
+        ok: true as const,
+        restored: result.restored,
+        conversationId: result.conversationId,
+        rejoined: result.rejoined,
+      });
     }
   )
   .get(

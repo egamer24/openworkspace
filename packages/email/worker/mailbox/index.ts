@@ -19,6 +19,7 @@ import {
   isNull,
   lt,
   lte,
+  ne,
   or,
   sql,
 } from "drizzle-orm";
@@ -92,7 +93,7 @@ import {
   workspaceBlockPatterns,
   workspaceFeedbackSummary,
 } from "../mail/workspace-safety";
-import { indexInsertedEmail } from "./email-index";
+import { indexInsertedEmail, mergeConversation } from "./email-index";
 import {
   customFolderPredicate,
   folderAggregateJoinPredicate,
@@ -2395,12 +2396,26 @@ export class MailboxDO extends DurableObject<Env> {
         eq(conversations.mailboxState, "active")
       );
 
+      // AI sorting files new conversations only: a reply (whose threading
+      // headers the sender chose) leaves the thread where it is.
+      const startsConversation = !tx
+        .select({ id: emails.id })
+        .from(emails)
+        .where(
+          and(
+            eq(emails.conversationId, email.conversationId),
+            ne(emails.id, inserted.id)
+          )
+        )
+        .limit(1)
+        .all()[0];
+
       if (placement.state) {
         tx.update(conversations)
           .set({ mailboxState: placement.state, folderId: null })
           .where(activeConversation)
           .run();
-      } else if (trustedFolder) {
+      } else if (trustedFolder && startsConversation) {
         tx.update(conversations)
           .set({ folderId: trustedFolder.id })
           .where(and(activeConversation, isNull(conversations.folderId)))
@@ -2668,7 +2683,7 @@ export class MailboxDO extends DurableObject<Env> {
     const address = email.fromJson[0]?.address ?? "";
     const label: FeedbackLabel = "not_spam";
 
-    const restored = this.db.transaction((tx) => {
+    const outcome = this.db.transaction((tx) => {
       tx.update(emails)
         .set({ reportLabel: null })
         .where(eq(emails.conversationId, email.conversationId))
@@ -2686,7 +2701,7 @@ export class MailboxDO extends DurableObject<Env> {
         setSenderTrusted(this.state.storage.sql, address, true, Date.now());
       }
 
-      return (
+      const back =
         tx
           .update(conversations)
           .set({ mailboxState: "active" })
@@ -2697,14 +2712,81 @@ export class MailboxDO extends DurableObject<Env> {
             )
           )
           .returning({ id: conversations.id })
-          .all().length > 0
-      );
+          .all().length > 0;
+
+      // Spam that named a conversation here was kept out of it; once it is
+      // not spam, it rejoins the conversation it replies to.
+      const parentId = back
+        ? this.splitParentConversation(email.conversationId)
+        : null;
+
+      if (parentId) {
+        mergeConversation(
+          this.state.storage.sql,
+          email.conversationId,
+          parentId
+        );
+      }
+
+      return {
+        restored: back,
+        conversationId: parentId ?? email.conversationId,
+      };
     });
 
     this.recentParticipantSources = null;
     this.publishUpdate();
 
-    return { restored, address: address.includes("@") ? address : null };
+    return {
+      restored: outcome.restored,
+      conversationId: outcome.conversationId,
+      rejoined: outcome.conversationId !== email.conversationId,
+      address: address.includes("@") ? address : null,
+    };
+  }
+
+  /**
+   * The conversation the messages of `conversationId` reply to, when they
+   * were kept out of it as spam: every message's parent is in it or in that
+   * one other conversation, which is in Inbox or Archive. A thread in Trash
+   * or Spam is not brought back by mail that was not spam.
+   */
+  private splitParentConversation(conversationId: string) {
+    const messages = this.db
+      .select({
+        inReplyTo: emails.inReplyToJson,
+        references: emails.referencesJson,
+      })
+      .from(emails)
+      .where(eq(emails.conversationId, conversationId))
+      .all();
+
+    const parents = new Set<string>();
+
+    for (const message of messages) {
+      const parent = this.resolveParent(message.inReplyTo, message.references);
+
+      if (!parent) return null;
+
+      if (parent.conversationId !== conversationId) {
+        parents.add(parent.conversationId);
+      }
+    }
+
+    const [parentId, ...others] = parents;
+
+    if (!parentId || others.length) return null;
+
+    const parent = this.db
+      .select({ mailboxState: conversations.mailboxState })
+      .from(conversations)
+      .where(eq(conversations.id, parentId))
+      .all()[0];
+
+    return parent &&
+      (parent.mailboxState === "active" || parent.mailboxState === "archive")
+      ? parentId
+      : null;
   }
 
   submitOutgoing(input: NewEmail) {

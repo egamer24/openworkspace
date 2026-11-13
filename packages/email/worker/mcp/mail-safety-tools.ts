@@ -370,7 +370,7 @@ export function registerMailSafetyTools(
     {
       title: "Mark message not spam",
       description:
-        "Move an incoming message's conversation from Spam back to Inbox, clear its spam label, record the feedback, and mark the sender as trusted in this mailbox.",
+        "Move an incoming message's conversation from Spam back to Inbox, clear its spam label, record the feedback, and mark the sender as trusted in this mailbox. A reply that was kept out of its conversation as spam rejoins it (rejoined: true), and conversationId names the conversation it is in now.",
       inputSchema: messageInputSchema,
       annotations: write,
     },
