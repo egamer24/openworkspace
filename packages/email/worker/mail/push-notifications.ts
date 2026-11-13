@@ -1,5 +1,4 @@
 import {
-  isPushServiceEndpoint,
   sendPushNotification,
   topicFromString,
   WebPushError,
@@ -31,6 +30,21 @@ import {
 import { deliverJmapStateChange } from "../jmap/push";
 import { mailboxStub } from "../mailbox";
 import { getMailboxAccess } from "./access";
+import { assertProxyableRemoteUrl } from "./remote-proxy";
+
+/**
+ * Push goes to whatever push service the subscriber's browser uses, so any
+ * public HTTPS host is accepted (a self-hosted Mozilla autopush included).
+ * What is refused is what the image proxy refuses: credentials in the URL,
+ * localhost, private and internal addresses, and internal-only names.
+ */
+function isPublicPushEndpoint(endpoint: string) {
+  try {
+    return assertProxyableRemoteUrl(endpoint).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
 
 const pushSubscriptionSchema = z.object({
   // Only a browser's push service (Google's, Mozilla's, Apple's, Microsoft's):
@@ -39,10 +53,7 @@ const pushSubscriptionSchema = z.object({
   endpoint: z
     .url()
     .max(4096)
-    .refine(
-      isPushServiceEndpoint,
-      "Push endpoint must be an HTTPS URL on a browser push service"
-    ),
+    .refine(isPublicPushEndpoint, "Push endpoint must be a public HTTPS URL"),
   keys: z.object({
     p256dh: z
       .string()
@@ -527,8 +538,8 @@ async function deliverPushJob(
 
   if (!subscription) return;
 
-  // Registered before endpoints were limited to browser push services.
-  if (!isPushServiceEndpoint(subscription.endpoint)) {
+  // Registered before endpoints had to be public HTTPS URLs.
+  if (!isPublicPushEndpoint(subscription.endpoint)) {
     await removeSubscription(env, subscription.id);
 
     return;

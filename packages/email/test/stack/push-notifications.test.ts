@@ -185,7 +185,7 @@ describe("push notification jobs", () => {
     });
   });
 
-  it("drops a stored subscription whose endpoint is not a browser push service", async () => {
+  it("drops a stored subscription whose endpoint is not a public HTTPS URL", async () => {
     const { VAPID_PUBLIC_KEY } = await hooks.env("VAPID_PUBLIC_KEY");
     const { mailboxId } = await registerPushTarget();
 
@@ -204,7 +204,7 @@ describe("push notification jobs", () => {
       .bind(
         subscriptionId,
         userId,
-        "https://internal.example.test/relay",
+        "https://10.0.0.5/relay",
         VAPID_PUBLIC_KEY,
         "AAAAAAAAAAAAAAAAAAAAAA"
       )

@@ -193,15 +193,17 @@ describe("session and push ownership", () => {
     expect(owner?.userId).toBe(secondUserId);
   });
 
-  it("rejects push endpoints that are not on a browser push service", async () => {
+  it("rejects push endpoints that aren't public HTTPS URLs", async () => {
     const { VAPID_PUBLIC_KEY } = await hooks.env("VAPID_PUBLIC_KEY");
     const cookie = await login(await createUser("Relay User"));
 
     const endpoints = [
-      "https://internal.example.test/relay",
-      "https://fcm.googleapis.com.example.test/fcm/send/1",
       "http://fcm.googleapis.com/fcm/send/1",
-      "https://push.apple.com/1",
+      "https://localhost/relay",
+      "https://10.0.0.5/relay",
+      "https://[::1]/relay",
+      "https://metadata.google.internal/relay",
+      "https://user:secret@push.example.com/relay",
     ];
 
     const statuses = await Promise.all(
@@ -227,14 +229,14 @@ describe("session and push ownership", () => {
     expect(statuses).toEqual(endpoints.map(() => 400));
     expect(
       await env.DB.prepare(
-        "SELECT COUNT(*) AS count FROM push_subscriptions WHERE endpoint IN (?, ?, ?, ?)"
+        "SELECT COUNT(*) AS count FROM push_subscriptions WHERE endpoint IN (?, ?, ?, ?, ?, ?)"
       )
         .bind(...endpoints)
         .first()
     ).toMatchObject({ count: 0 });
   });
 
-  it("accepts the push services of Chromium, Firefox, Safari and Edge", async () => {
+  it("accepts browser push services and a self-hosted one", async () => {
     const cookie = await login(await createUser("Browser User"));
     const id = crypto.randomUUID();
 
@@ -248,6 +250,8 @@ describe("session and push ownership", () => {
       cookie,
       `https://wns2-par02p.notify.windows.com/w/?token=${id}`
     );
+    // A self-hosted Mozilla autopush, set in Firefox's about:config.
+    await bindPush(cookie, `https://push.example.com/wpush/v2/${id}`);
   });
 
   it("removes only the revoked session's push, as the user or an admin", async () => {
