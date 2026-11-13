@@ -5,13 +5,7 @@ import { join } from "node:path";
 
 import { startRepository } from "../../create.ts";
 
-const identity = {
-  GIT_AUTHOR_NAME: "Ada",
-  GIT_AUTHOR_EMAIL: "ada@example.test",
-  GIT_COMMITTER_NAME: "Ada",
-  GIT_COMMITTER_EMAIL: "ada@example.test",
-};
-
+// The commit needs a git identity: CI sets one in its workflow.
 describe("startRepository", () => {
   test("commits a new project, leaving .env out", async () => {
     const directory = mkdtempSync(join(tmpdir(), "create-git-"));
@@ -19,7 +13,6 @@ describe("startRepository", () => {
     writeFileSync(join(directory, ".gitignore"), ".env\n");
     writeFileSync(join(directory, ".env"), "SECRET=1\n");
     writeFileSync(join(directory, "alchemy.run.ts"), "export {};\n");
-    Object.assign(process.env, identity);
 
     expect(await startRepository(directory)).toBe("committed");
 

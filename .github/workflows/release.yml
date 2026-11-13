@@ -58,6 +58,11 @@ jobs:
 
       # Unit tests only: the stack and e2e suites deploy on Alchemy's local
       # runtime with Docker and Playwright, and run before tagging instead.
+      # create's test commits a new project, which needs a git identity.
+      - run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+
       - run: bun run test:unit
 
       - name: Publish

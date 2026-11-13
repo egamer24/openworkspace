@@ -43,4 +43,9 @@ jobs:
 
       - run: bun run typecheck
 
+      # create's test commits a new project, which needs a git identity.
+      - run: |
+          git config --global user.name "CI"
+          git config --global user.email "ci@example.invalid"
+
       - run: bun run test:unit
