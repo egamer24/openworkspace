@@ -1,0 +1,64 @@
+# Publishes @open-workspace/core, email and create to npm when a version
+# tag (v1.2.3) is pushed. npm trusts this workflow through OIDC (trusted
+# publishing): there is no npm token, and npm attaches provenance itself.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# One release at a time; a second tag waits instead of racing the first.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Lets npm exchange the workflow's OIDC token for a publish credential.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      # npm publishes: trusted publishing needs npm 11.5.1+ and Node 22.14+.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+          # Never restore a cache into a release build.
+          package-manager-cache: false
+
+      - name: Check the npm version
+        run: |
+          npm --version
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); if (a<11||(a===11&&(b<5||(b===5&&c<1)))) { console.error("Trusted publishing needs npm 11.5.1 or newer"); process.exit(1) }' "$(npm --version)"
+
+      - run: bun install --frozen-lockfile
+
+      # The tag must match every package's version before anything is checked.
+      - name: Check the tag against the package versions
+        run: bun scripts/release.ts --tag "$GITHUB_REF_NAME" --check
+
+      - run: bun run lint
+
+      - run: bun run format:check
+
+      - run: bun run typecheck
+
+      # Unit tests only: the stack and e2e suites deploy on Alchemy's local
+      # runtime with Docker and Playwright, and run before tagging instead.
+      - run: bun run test:unit
+
+      - name: Publish
+        run: bun scripts/release.ts --tag "$GITHUB_REF_NAME"

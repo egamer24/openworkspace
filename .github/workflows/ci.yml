@@ -1,0 +1,46 @@
+# Lint, format check, typecheck and unit tests on every pull request and
+# push to master. The stack and e2e suites need Docker, Playwright and
+# Alchemy's local runtime, and run locally (docs/development.md).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+# A newer push to the same branch or PR replaces the run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      # oxlint loads its TypeScript config and the vendored anti-slop rules
+      # with Node's type stripping.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run lint
+
+      - run: bun run format:check
+
+      - run: bun run typecheck
+
+      - run: bun run test:unit

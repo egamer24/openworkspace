@@ -9,3 +9,7 @@ test-results
 *.tsbuildinfo
 .DS_Store
 .saml
+.alchemy
+.astro
+exa-results
+.claude/worktrees/
