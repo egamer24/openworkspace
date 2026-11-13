@@ -1,6 +1,6 @@
 {
   "name": "@open-workspace/core",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "OpenWorkspace: a self-hosted workspace on your own Cloudflare account. Identity, SSO, administration, and the module host.",
   "keywords": [
     "alchemy",
