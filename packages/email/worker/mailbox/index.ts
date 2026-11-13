@@ -2338,9 +2338,25 @@ export class MailboxDO extends DurableObject<Env> {
     classification: EmailAiClassification | null,
     placement: InboundPlacement
   ) {
-    const email = prepareOfficePreviews(input);
+    const prepared = prepareOfficePreviews(input);
 
     const stored = this.db.transaction((tx) => {
+      // Threading trusts the sender's In-Reply-To and References, so spam
+      // that names a message here starts its own conversation instead of
+      // moving (or reviving) one with other mail. Spam may join spam.
+      const joined = placement.state
+        ? tx
+            .select({ mailboxState: conversations.mailboxState })
+            .from(conversations)
+            .where(eq(conversations.id, prepared.conversationId))
+            .all()[0]
+        : undefined;
+
+      const email =
+        joined && joined.mailboxState !== placement.state
+          ? { ...prepared, conversationId: createId("conv") }
+          : prepared;
+
       const trustedFolder = placement.folderId
         ? tx
             .select({ id: folders.id })

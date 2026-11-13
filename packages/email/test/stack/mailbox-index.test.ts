@@ -215,6 +215,119 @@ describe("mailbox conversation index", () => {
     ).toHaveLength(1);
   });
 
+  it("keeps a spam reply out of the conversation it claims to answer", async () => {
+    const mailboxId = `mbx_spam_reply_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const conversationId = "conv_spam_reply_target";
+    const now = Date.now();
+
+    const decision = (spam: boolean) =>
+      JSON.stringify({
+        spam,
+        spamConfidence: spam ? 0.99 : 0.01,
+        folderId: null,
+        folderConfidence: 0,
+        reason: spam ? "Unsolicited promotion" : "A reply",
+      });
+
+    await mailbox.testFake({
+      push: "capture",
+      classifier: {
+        mode: "rules",
+        rules: [{ includes: "Spam offer", text: decision(true) }],
+        fallback: decision(false),
+      },
+    });
+
+    // An archived conversation whose Message-ID a stranger can know.
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          ...incoming({
+            id: "msg_spam_reply_original",
+            conversationId,
+            timelineAt: new Date(now - 60_000),
+            bodyText: "The original message.",
+          }),
+          messageIdHeader: "<spam-reply-original@example.net>",
+        },
+      ],
+      [{ id: conversationId, mailboxState: "archive" }]
+    );
+
+    const deliver = async (delivery: {
+      id: string;
+      from: string;
+      body: string;
+    }) => {
+      const rawObjectKey = `test/${delivery.id}.eml`;
+      await env.MAIL_STORAGE.put(
+        rawObjectKey,
+        [
+          `From: <${delivery.from}>`,
+          "To: me@example.test",
+          "Subject: Re: Subject msg_spam_reply_original",
+          `Message-ID: <${delivery.id}@example.net>`,
+          "In-Reply-To: <spam-reply-original@example.net>",
+          "References: <spam-reply-original@example.net>",
+          "",
+          delivery.body,
+        ].join("\r\n")
+      );
+      await mailbox.enqueueInbound({
+        id: delivery.id,
+        mailboxId,
+        rawObjectKey,
+        envelopeFrom: delivery.from,
+        envelopeTo: "me@example.test",
+        receivedAt: Date.now(),
+      });
+
+      return required(
+        await runAlarmUntil(mailboxId, () =>
+          mailbox.getEmail(inboundMessageId(delivery.id))
+        ),
+        `${delivery.id} is stored`
+      );
+    };
+
+    const spam = await deliver({
+      id: `delivery_spam_reply_${crypto.randomUUID()}`,
+      from: "stranger@example.org",
+      body: "Spam offer: an unsolicited and deceptive promotion.",
+    });
+
+    expect(spam.aiClassificationJson).toMatchObject({ spam: true });
+    expect(spam.conversationId).not.toBe(conversationId);
+    expect(
+      await mailbox.getConversationSnapshot(spam.conversationId)
+    ).toMatchObject({ mailboxState: "spam" });
+    // The conversation it named is neither moved nor revived.
+    expect(await mailbox.getConversationSnapshot(conversationId)).toMatchObject(
+      { mailboxState: "archive" }
+    );
+
+    const reply = await deliver({
+      id: `delivery_real_reply_${crypto.randomUUID()}`,
+      from: "colleague@example.net",
+      body: "A real answer to the original message.",
+    });
+
+    expect(reply.conversationId).toBe(conversationId);
+    expect(await mailbox.getConversationSnapshot(conversationId)).toMatchObject(
+      { mailboxState: "active" }
+    );
+    // Only the real reply is announced.
+    expect(
+      (await mailbox.testCalls()).filter(
+        (call) =>
+          call.kind === "PUSH_NOTIFICATIONS.send" &&
+          pushDispatch.safeParse(call.data).success
+      )
+    ).toHaveLength(1);
+  });
+
   it("does not classify inbound mail until MIME objects are stored", async () => {
     const mailboxId = `mbx_ai_storage_failure_${crypto.randomUUID()}`;
     const mailbox = mailboxStub(mailboxId);
