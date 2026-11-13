@@ -416,8 +416,11 @@ describe("the generated project", () => {
       "@open-workspace/core/alchemy",
       "@open-workspace/email/alchemy",
       "alchemy",
+      "effect/Effect",
     ]);
     expect(() => transpiler.transformSync(source)).not.toThrow();
+    // The deploy prints the stack's result: only the URL, not every endpoint.
+    expect(source).toContain("return { url: workspace.url };");
     expect(source).toContain('hostname: "mail.acme.com"');
     expect(source).toContain('mailDomains: ["acme.com","acme.org"]');
     expect(source).toContain('apiKeyEnv: "ANTHROPIC_API_KEY"');

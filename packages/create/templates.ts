@@ -114,28 +114,22 @@ function aiOption(ai: ProjectAnswers["ai"]) {
 }
 
 export function alchemyRunTs(answers: ProjectAnswers) {
+  // The options sit one level deeper here, inside Effect.gen.
+  const ai = aiOption(answers.ai).replaceAll("\n", "\n  ");
+
   return `import * as Cloudflare from "@alchemy.run/cloudflare";
 import * as Alchemy from "alchemy";
+import * as Effect from "effect/Effect";
 import { OpenWorkspace, providers } from "@open-workspace/core/alchemy";
 import { Email } from "@open-workspace/email/alchemy";
 
 export default Alchemy.Stack(
   ${JSON.stringify(stackName(answers.name))},
   { providers: providers(), state: Cloudflare.state() },
-  OpenWorkspace({
-    // Required. Where the app is served: a hostname in a zone of this account.
-    // https://<hostname> is the OIDC issuer, the SAML IdP, and where passkeys work.
-    hostname: ${JSON.stringify(answers.hostname)},
-    // Mail domains, primary first. Every address is on one of them.
-    // Email() turns on Email Routing and Email Sending for each.
-    mailDomains: ${JSON.stringify(answers.mailDomains)},${aiOption(answers.ai)}
-    modules: [Email()],
-    // \`bun run dev\` serves the workspace at http://localhost:5173, where
-    // passkeys work too; the hostname above is only for the deploy.
-    dev: { port: 5173 },
+  Effect.gen(function* () {
     // Single sign-on apps can be declared here instead of in the admin UI,
     // SCIM provisioning included (the token is a secret from .env, never a
-    // plain string). Wrap this call in Effect.gen to create them first:
+    // plain string), and passed to OpenWorkspace as apps: [grafana]:
     //   const grafana = yield* OidcClient("Grafana", {
     //     name: "Grafana",
     //     redirectUris: ["https://grafana.example.com/login/generic_oauth"],
@@ -145,9 +139,24 @@ export default Alchemy.Stack(
     //       token: yield* Config.Redacted("GRAFANA_SCIM_TOKEN"),
     //     },
     //   });
-    // and pass apps: [grafana]. OpenWorkspace returns the workspace's OIDC and
-    // SAML endpoints for wiring up the other side, e.g. a Cloudflare Access
-    // login method (see @open-workspace/core's README).
+
+    const workspace = yield* OpenWorkspace({
+      // Required. Where the app is served: a hostname in a zone of this account.
+      // https://<hostname> is the OIDC issuer, the SAML IdP, and where passkeys work.
+      hostname: ${JSON.stringify(answers.hostname)},
+      // Mail domains, primary first. Every address is on one of them.
+      // Email() turns on Email Routing and Email Sending for each.
+      mailDomains: ${JSON.stringify(answers.mailDomains)},${ai}
+      modules: [Email()],
+      // \`bun run dev\` serves the workspace at http://localhost:5173, where
+      // passkeys work too; the hostname above is only for the deploy.
+      dev: { port: 5173 },
+    });
+
+    // \`workspace\` also holds the OIDC and SAML endpoints and certificate, for
+    // wiring up other resources such as a Cloudflare Access login method
+    // (https://openworkspace.dev/docs/sso). The deploy prints only the URL.
+    return { url: workspace.url };
   }),
 );
 `;

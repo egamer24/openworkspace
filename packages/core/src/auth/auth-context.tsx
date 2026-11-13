@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useEffect } from "react";
 import type { ReactNode } from "react";
 
 import type { AccessLinkKind } from "../../shared/auth";
-import { invariant } from "../../shared/invariant";
 import { api, AUTH_UNAUTHORIZED_EVENT, responseJson } from "../lib/api";
 import type { SuccessfulResponse } from "../lib/api";
 import {
@@ -31,24 +30,33 @@ type ServerRequestOptions = SuccessfulResponse<
  * The passkey ceremonies, with the browser package loaded on first use.
  *
  * The options are as the server sent them. Hono types a JSON body from
- * @simplewebauthn/server's option types, whose `extensions` hold binary PRF
- * inputs that can't cross JSON; the server never sets them, and without them
- * the body is exactly the browser package's JSON options.
+ * @simplewebauthn/server's option types, whose `extensions` may hold binary
+ * PRF inputs that can't cross JSON. The server only ever sends `credProps`
+ * (which @simplewebauthn/server adds to every registration), so that is all
+ * that is passed on.
  */
+function jsonExtensions(extensions: { credProps?: boolean } | undefined) {
+  return extensions?.credProps === undefined
+    ? undefined
+    : { credProps: extensions.credProps };
+}
+
 async function registerPasskey(options: ServerCreationOptions) {
   const { startRegistration } = await import("@simplewebauthn/browser");
-  const { extensions, ...optionsJSON } = options;
-  invariant(extensions === undefined, "The server sent passkey extensions");
+  const { extensions, ...rest } = options;
 
-  return startRegistration({ optionsJSON });
+  return startRegistration({
+    optionsJSON: { ...rest, extensions: jsonExtensions(extensions) },
+  });
 }
 
 async function authenticateWithPasskey(options: ServerRequestOptions) {
   const { startAuthentication } = await import("@simplewebauthn/browser");
-  const { extensions, ...optionsJSON } = options;
-  invariant(extensions === undefined, "The server sent passkey extensions");
+  const { extensions, ...rest } = options;
 
-  return startAuthentication({ optionsJSON });
+  return startAuthentication({
+    optionsJSON: { ...rest, extensions: jsonExtensions(extensions) },
+  });
 }
 
 type AuthState = Omit<Bootstrap, "ok" | "modules">;

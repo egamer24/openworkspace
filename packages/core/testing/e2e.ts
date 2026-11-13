@@ -27,7 +27,7 @@ export function e2eConfig(props: { port: number }) {
     // Traces and failure output stay inside the suite (gitignored).
     outputDir: "./test-results",
     use: {
-      baseURL: `http://127.0.0.1:${Number(process.env.E2E_PORT ?? props.port)}`,
+      baseURL: `http://localhost:${Number(process.env.E2E_PORT ?? props.port)}`,
       trace: "retain-on-failure",
     },
     projects: [
