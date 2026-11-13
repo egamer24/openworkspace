@@ -39,10 +39,16 @@ function r2Signer(env: Bindings, r2Key: string) {
   };
 }
 
+/**
+ * A PUT URL for exactly `size` bytes of `contentType`: both headers are
+ * signed, so R2 refuses any other length (SignatureDoesNotMatch). Clients
+ * send Content-Length on their own; browsers don't let a page set it.
+ */
 export async function signR2PutUrl(input: {
   env: Bindings;
   r2Key: string;
   contentType: string;
+  size: number;
 }) {
   const signer = r2Signer(input.env, input.r2Key);
 
@@ -50,6 +56,7 @@ export async function signR2PutUrl(input: {
     method: "PUT",
     headers: {
       "content-type": input.contentType,
+      "content-length": String(input.size),
     },
     aws: {
       allHeaders: true,

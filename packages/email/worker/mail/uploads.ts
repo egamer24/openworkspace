@@ -158,6 +158,7 @@ export async function createComposerUploadIntent(input: {
       env: input.env,
       r2Key: keys.staging,
       contentType,
+      size: input.size,
     }),
     headers: { "content-type": contentType },
     filename,

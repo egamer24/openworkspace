@@ -36,7 +36,7 @@ const discard = (input: Ids & { uploadIds: string[] }) =>
   uploads({ fn: "discard", input });
 
 describe("composer upload finalization", () => {
-  it("signs direct R2 uploads without requiring a buffered request body", async () => {
+  it("signs direct R2 uploads for exactly the declared size", async () => {
     const mailboxId = `mbx_signed_${crypto.randomUUID()}`;
     const userId = `usr_signed_${crypto.randomUUID()}`;
 
@@ -55,7 +55,8 @@ describe("composer upload finalization", () => {
       ?.split(";");
 
     expect(signedHeaders).toContain("content-type");
-    expect(signedHeaders).not.toContain("content-length");
+    // The declared size is signed, so R2 refuses an upload of any other length.
+    expect(signedHeaders).toContain("content-length");
     expect(intent.headers).toEqual({ "content-type": "text/plain" });
 
     await discard({ mailboxId, userId, uploadIds: [intent.id] });
