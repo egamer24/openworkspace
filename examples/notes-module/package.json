@@ -10,7 +10,7 @@
     "db:generate": "cd modules/notes && drizzle-kit generate"
   },
   "dependencies": {
-    "@open-workspace/core": "0.3.0",
+    "@open-workspace/core": "0.4.0",
     "@tanstack/react-query": "5.107.1",
     "drizzle-orm": "0.45.4",
     "hono": "4.13.17",

@@ -1,6 +1,6 @@
 {
   "name": "@open-workspace/email",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Team mail for OpenWorkspace: personal and shared inboxes, mailing lists, previews, safety, and AI.",
   "keywords": [
     "alchemy",
@@ -92,7 +92,7 @@
   },
   "peerDependencies": {
     "@alchemy.run/cloudflare": "2.0.0-beta.85",
-    "@open-workspace/core": "0.3.0",
+    "@open-workspace/core": "0.4.0",
     "alchemy": "2.0.0-beta.85",
     "effect": "4.1.3"
   }

@@ -37,7 +37,7 @@
     },
     "packages/core": {
       "name": "@open-workspace/core",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@ai-sdk/anthropic": "4.0.102",
         "@ai-sdk/google": "4.0.114",
@@ -106,7 +106,7 @@
     },
     "packages/create": {
       "name": "@open-workspace/create",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "bin": {
         "create-open-workspace": "./index.ts",
       },
@@ -126,7 +126,7 @@
     },
     "packages/email": {
       "name": "@open-workspace/email",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "dependencies": {
         "@hono/zod-validator": "0.9.1",
         "@mmmike/web-push": "1.5.0",
@@ -175,7 +175,7 @@
       },
       "peerDependencies": {
         "@alchemy.run/cloudflare": "2.0.0-beta.85",
-        "@open-workspace/core": "0.3.0",
+        "@open-workspace/core": "0.4.0",
         "alchemy": "2.0.0-beta.85",
         "effect": "4.1.3",
       },
