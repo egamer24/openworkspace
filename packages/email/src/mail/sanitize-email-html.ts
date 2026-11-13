@@ -166,7 +166,10 @@ function rewriteSrcset(
       if (!match) return "";
       const [, source = "", descriptor = ""] = match;
 
-      if (!isRemoteHttpUrl(source)) return trimmed;
+      // Like `src`: a candidate that can't go through the proxy is dropped,
+      // so relative and protocol-relative URLs (`//host/x.png`) never load
+      // straight from the sender's server.
+      if (!isRemoteHttpUrl(source)) return "";
       const proxied = rewriteRemoteUrl(source);
 
       return proxied ? `${proxied}${descriptor}` : "";
