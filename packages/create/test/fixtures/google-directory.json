@@ -1,0 +1,66 @@
+{
+  "users": [
+    {
+      "email": "ada@example.test",
+      "name": "Ada Moss",
+      "aliases": ["ada.moss@example.test", "ada@elsewhere.example"],
+      "suspended": false,
+      "isAdmin": true
+    },
+    {
+      "email": "Juniper@example.test",
+      "name": "Juniper Vale",
+      "aliases": [],
+      "suspended": false,
+      "isAdmin": false
+    },
+    {
+      "email": "rowan@example.test",
+      "name": "Rowan Pike",
+      "aliases": [],
+      "suspended": true,
+      "isAdmin": false
+    },
+    {
+      "email": "kit@other-company.example",
+      "name": "Kit Lark",
+      "aliases": [],
+      "suspended": false,
+      "isAdmin": false
+    }
+  ],
+  "groups": [
+    {
+      "email": "studio@example.test",
+      "name": "Studio",
+      "description": "The studio team",
+      "aliases": ["atelier@example.test"],
+      "members": [
+        "ada@example.test",
+        "juniper@example.test",
+        "kiln-crew@example.test",
+        "guest@visitor.example"
+      ],
+      "sharedInbox": false,
+      "posting": "members"
+    },
+    {
+      "email": "kiln-crew@example.test",
+      "name": "Kiln crew",
+      "description": null,
+      "aliases": [],
+      "members": ["rowan@example.test", "juniper@example.test"],
+      "sharedInbox": false,
+      "posting": null
+    },
+    {
+      "email": "help@example.test",
+      "name": "Help desk",
+      "description": null,
+      "aliases": [],
+      "members": ["*"],
+      "sharedInbox": true,
+      "posting": "anyone"
+    }
+  ]
+}
