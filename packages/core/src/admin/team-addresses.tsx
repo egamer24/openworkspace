@@ -18,6 +18,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useConfirm } from "../hooks/use-confirm";
 import { api, responseJson } from "../lib/api";
+import { clientModules } from "../modules";
 import { TeamDeliveryFields } from "./team-delivery";
 import type { AdminMailbox, AdminTeam } from "./types";
 
@@ -233,7 +234,11 @@ function AddressEditor({
       aria-label={mailbox ? `Edit ${mailbox.address}` : "New address"}
       className="bg-surface space-y-4 px-3.5 py-4"
       onKeyDown={(event) => {
-        if (event.key === "Enter" && event.target instanceof HTMLInputElement) {
+        if (
+          event.key === "Enter" &&
+          event.target instanceof HTMLInputElement &&
+          !event.target.closest("[data-module-section]")
+        ) {
           void submit(event);
         }
       }}
@@ -273,6 +278,24 @@ function AddressEditor({
         onDeliveryChange={setDelivery}
         onListPostingChange={setListPosting}
       />
+      {mailbox
+        ? clientModules().flatMap((module) =>
+            (module.teamAddress ?? []).map(({ id, Component }) => (
+              // Modules save their sections themselves, so Enter there doesn't save the address.
+              <div key={`${module.name}:${id}`} data-module-section>
+                <Component
+                  address={{
+                    mailboxId: mailbox.id,
+                    address: mailbox.address,
+                    displayName: mailbox.displayName,
+                    delivery: mailbox.delivery,
+                    teamId: team.id,
+                  }}
+                />
+              </div>
+            ))
+          )
+        : null}
       <div className="flex items-center gap-2">
         {mailbox ? (
           <Button

@@ -9,9 +9,13 @@ import type { Database } from "../db/client";
 import { mailboxes, teams, users } from "../db/schema";
 import type { AppEnv } from "../env";
 import { apiError } from "../lib/http";
-import { createId, mailboxAddressParts } from "../lib/ids";
+import {
+  createId,
+  mailboxAddressParts,
+  normalizeMailboxAddress,
+} from "../lib/ids";
 import { zValidator } from "../lib/validator";
-import { runModuleHooks } from "../modules";
+import { addressUsedByModule, runModuleHooks } from "../modules";
 import {
   deferWebhookTask,
   mailboxWebhookData,
@@ -89,6 +93,12 @@ export const mailboxAdminRoutes = new Hono<AppEnv>()
 
     if (input.teamId && !(await teamExists(db, input.teamId))) {
       return apiError(c, 400, "BAD_REQUEST", "Unknown team");
+    }
+
+    if (
+      await addressUsedByModule(c.env, normalizeMailboxAddress(input.address))
+    ) {
+      return apiError(c, 409, "CONFLICT", "Mailbox address is already in use");
     }
 
     const id = createId("mbx");

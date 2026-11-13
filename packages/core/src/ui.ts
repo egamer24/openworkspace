@@ -12,7 +12,7 @@
  */
 
 // The contract.
-export type { ClientModule } from "./modules";
+export type { ClientModule, TeamAddress } from "./modules";
 
 // UI components.
 export * from "./components/ui/alert-dialog";

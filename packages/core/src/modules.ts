@@ -5,7 +5,7 @@ import type { ComponentType } from "react";
 import modules from "virtual:open-workspace/modules";
 
 import type { WebhookEventDeclaration } from "../shared/webhooks";
-import type { WorkspacePermission } from "../shared/workspace";
+import type { MailboxDelivery, WorkspacePermission } from "../shared/workspace";
 
 /**
  * A module's part of the browser app. A module's client entry default-exports
@@ -47,6 +47,17 @@ export type ClientModule = {
     Component: ComponentType;
   }[];
   /**
+   * Sections in the editor of a team's saved address, under Administration →
+   * Teams, e.g. a shared inbox's signature. Only people who can manage teams
+   * see them; each section saves through the module's own routes, guarded
+   * with `requirePermission("manage_teams")`.
+   */
+  teamAddress?: {
+    /** Unique among every module's team address sections. */
+    id: string;
+    Component: ComponentType<{ address: TeamAddress }>;
+  }[];
+  /**
    * Webhook events the module sends, offered in the webhook editor before
    * core's: the same declaration as its `WorkspaceModule.webhookEvents`.
    */
@@ -86,6 +97,16 @@ export type ClientModule = {
    * device's push subscription. Sign-out goes ahead even if it fails.
    */
   beforeSignOut?: () => Promise<void>;
+};
+
+/** A team's address, as a module's `teamAddress` section gets it. */
+export type TeamAddress = {
+  mailboxId: string;
+  address: string;
+  displayName: string;
+  /** A shared inbox, or a mailing list that copies mail to members. */
+  delivery: MailboxDelivery;
+  teamId: string;
 };
 
 /** The modules built into this app, in the order they were listed. */

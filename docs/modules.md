@@ -123,6 +123,12 @@ const ownNotes = new Hono<AppEnv>()
   everyday ones `byDefault`.
 - Permissions are what an administrator can grant a member. Guard their
   routes with `requirePermission(id)`, under `/api/admin/<section>`.
+- A `teamAddress` section on `ClientModule` adds settings to a team's address
+  under **Administration → Teams**, such as a shared inbox's signature. It
+  saves through your own routes; guard them with
+  `requirePermission("manage_teams")`.
+- If your module routes extra addresses (aliases, say), implement
+  `hooks.addressInUse`. Core then refuses to create a mailbox at one of them.
 - Register MCP tools through `tool(scope)`, and implement them by calling your
   own routes through `api`, so a token only sees what its scopes allow.
 - Declare webhook events once in `shared/`, on both the server and client

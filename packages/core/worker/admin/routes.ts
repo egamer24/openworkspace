@@ -49,9 +49,9 @@ import {
 import type { AppEnv } from "../env";
 import { randomToken, hashToken } from "../lib/crypto";
 import { apiError } from "../lib/http";
-import { createId } from "../lib/ids";
+import { createId, normalizeMailboxAddress } from "../lib/ids";
 import { zValidator } from "../lib/validator";
-import { workspacePermissions } from "../modules";
+import { addressUsedByModule, workspacePermissions } from "../modules";
 import {
   clientBackchannelSessions,
   queueBackchannelLogouts,
@@ -528,6 +528,12 @@ export const adminRoutes = new Hono<AppEnv>()
 
       if (!mailDomainAllowed(input.email)) {
         return apiError(c, 400, "BAD_REQUEST", mailDomainRefusal());
+      }
+
+      if (
+        await addressUsedByModule(c.env, normalizeMailboxAddress(input.email))
+      ) {
+        return apiError(c, 409, "CONFLICT", "Email address is already in use");
       }
 
       const admin = c.get("user");
