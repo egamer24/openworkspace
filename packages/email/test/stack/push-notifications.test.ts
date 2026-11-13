@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 
 import { required } from "@open-workspace/core/shared";
+import { internet } from "@open-workspace/core/testing";
 import type { MailboxPushJob } from "@open-workspace/email/shared/mail.ts";
 import { z } from "zod";
 
@@ -65,7 +66,7 @@ async function registerPushTarget() {
     z.object({ mailboxes: z.array(z.looseObject({ id: z.string() })) })
   );
 
-  const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+  const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
 
   const registration = await worker.fetch(
     new Request("http://example.test/api/notifications/subscriptions", {
@@ -85,9 +86,37 @@ async function registerPushTarget() {
 
   const [first] = body.mailboxes;
 
+  const subscription = required(
+    await env.DB.prepare(
+      "SELECT id, session_id AS sessionId FROM push_subscriptions WHERE endpoint = ?"
+    )
+      .bind(endpoint)
+      .first<{ id: string; sessionId: string }>(),
+    "the device's subscription is stored"
+  );
+
   return {
     mailboxId: required(first, "the push admin has a mailbox").id,
     endpoint,
+    subscriptionId: subscription.id,
+    sessionId: subscription.sessionId,
+  };
+}
+
+function deliverJob(
+  mailboxId: string,
+  targetSubscriptionId: string
+): MailboxPushJob {
+  return {
+    type: "deliver",
+    mailboxId,
+    conversationId: "conv_push_deliver",
+    messageId: `msg_${crypto.randomUUID()}`,
+    occurredAt: Date.now(),
+    sender: "Sender",
+    subject: "Delivered",
+    targetSubscriptionId,
+    mailboxDisplayName: "Mailbox",
   };
 }
 
@@ -112,15 +141,22 @@ describe("push notification jobs", () => {
     expect(outcomes).toEqual([{ ack: true, retry: false }]);
   });
 
-  it("fans out to a device after its sign-in session expires", async () => {
-    const { mailboxId } = await registerPushTarget();
-    await env.DB.prepare("UPDATE sessions SET expires_at = ?")
-      .bind(Date.now() - 1)
+  it("keeps fanning out to devices whose session expired, and to unbound ones", async () => {
+    const expired = await registerPushTarget();
+    const unbound = await registerPushTarget();
+    await env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?")
+      .bind(Date.now() - 1, expired.sessionId)
+      .run();
+    // A row registered before subscriptions were bound to a session.
+    await env.DB.prepare(
+      "UPDATE push_subscriptions SET session_id = NULL WHERE id = ?"
+    )
+      .bind(unbound.subscriptionId)
       .run();
 
     const queued = await consumePushJob({
       type: "dispatch",
-      mailboxId,
+      mailboxId: expired.mailboxId,
       conversationId: "conv_push_dispatch",
       messageId: "msg_push_dispatch",
       occurredAt: Date.now(),
@@ -131,32 +167,64 @@ describe("push notification jobs", () => {
     expect(queued.ack).toBe(1);
     expect(queued.retry).toBe(0);
     expect(queued.sent).toHaveLength(1);
-    expect(queued.sent[0]).toEqual([
-      {
-        body: expect.objectContaining({
-          type: "deliver",
-          mailboxId,
-          messageId: "msg_push_dispatch",
-          targetSubscriptionId: expect.any(String),
-          mailboxDisplayName: expect.any(String),
-        }),
-      },
-    ]);
+
+    const targets = (queued.sent[0] ?? []).map(({ body }) =>
+      body.type === "deliver" ? body.targetSubscriptionId : null
+    );
+
+    expect(targets.toSorted()).toEqual(
+      [expired.subscriptionId, unbound.subscriptionId].toSorted()
+    );
+    expect(queued.sent[0]?.[0]).toEqual({
+      body: expect.objectContaining({
+        type: "deliver",
+        mailboxId: expired.mailboxId,
+        messageId: "msg_push_dispatch",
+        mailboxDisplayName: expect.any(String),
+      }),
+    });
+  });
+
+  it("drops a stored subscription whose endpoint is not a browser push service", async () => {
+    const { VAPID_PUBLIC_KEY } = await hooks.env("VAPID_PUBLIC_KEY");
+    const { mailboxId } = await registerPushTarget();
+
+    const userId = required(
+      await env.DB.prepare(
+        "SELECT id FROM users WHERE name = 'Push Admin' LIMIT 1"
+      ).first<{ id: string }>(),
+      "the push admin exists"
+    ).id;
+
+    const subscriptionId = `push_${crypto.randomUUID()}`;
+    await env.DB.prepare(`
+      INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth)
+      VALUES (?, ?, ?, ?, ?)
+    `)
+      .bind(
+        subscriptionId,
+        userId,
+        "https://internal.example.test/relay",
+        VAPID_PUBLIC_KEY,
+        "AAAAAAAAAAAAAAAAAAAAAA"
+      )
+      .run();
+
+    internet.reset();
+
+    const queued = await consumePushJob(deliverJob(mailboxId, subscriptionId));
+
+    expect(queued.ack).toBe(1);
+    expect(internet.requests).toEqual([]);
+    expect(
+      await env.DB.prepare("SELECT id FROM push_subscriptions WHERE id = ?")
+        .bind(subscriptionId)
+        .first()
+    ).toBeNull();
   });
 
   it("keeps a subscription after a local delivery error", async () => {
-    const { mailboxId, endpoint } = await registerPushTarget();
-
-    const subscription = await env.DB.prepare(
-      "SELECT id FROM push_subscriptions WHERE endpoint = ?"
-    )
-      .bind(endpoint)
-      .first<{ id: string }>();
-
-    const { id: subscriptionId } = required(
-      subscription,
-      "the device's subscription is stored"
-    );
+    const { mailboxId, subscriptionId } = await registerPushTarget();
 
     const queued = await consumePushJob(
       {

@@ -20,6 +20,7 @@ import { deleteMailboxStorage } from "./mail/mailbox-deletion";
 import { consumeOfficePreviews } from "./mail/office-preview-queue";
 import {
   consumePushNotifications,
+  deleteSessionPushSubscriptions,
   deleteUserPushSubscriptions,
   pushNotificationRoutes,
 } from "./mail/push-notifications";
@@ -79,6 +80,7 @@ export function email(): WorkspaceModule {
     webhookSources: { [EMAIL_WEBHOOK_SOURCE]: emailWebhookData },
     hooks: {
       mailboxDeleted: deleteMailboxStorage,
+      sessionRevoked: deleteSessionPushSubscriptions,
       sessionsRevoked: deleteUserPushSubscriptions,
       seedDemo: (env) => seedEmailDemo(env),
     },

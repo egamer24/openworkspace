@@ -32,7 +32,11 @@ export const mailboxNotificationPreferences = sqliteTable(
   ]
 );
 
-/** Browsers that get new-mail notifications, one row per device. */
+/**
+ * Browsers that get new-mail notifications, one row per device, bound to
+ * the session that last registered it. Rows from before sessions were
+ * recorded have none and are removed only with all of a person's sessions.
+ */
 export const pushSubscriptions = sqliteTable(
   "push_subscriptions",
   {
@@ -40,6 +44,13 @@ export const pushSubscriptions = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    /**
+     * Not a foreign key: expiry and core's pruning of old sessions must not
+     * take the device's notifications with them. Re-registering moves the
+     * row to the new session; only revoking or signing out of this one
+     * removes it (the `sessionRevoked` hook).
+     */
+    sessionId: text("session_id"),
     endpoint: text("endpoint").notNull(),
     p256dh: text("p256dh").notNull(),
     auth: text("auth").notNull(),
@@ -53,6 +64,7 @@ export const pushSubscriptions = sqliteTable(
   (table) => [
     uniqueIndex("push_subscriptions_endpoint_unique").on(table.endpoint),
     index("push_subscriptions_user_idx").on(table.userId),
+    index("push_subscriptions_session_idx").on(table.sessionId),
   ]
 );
 

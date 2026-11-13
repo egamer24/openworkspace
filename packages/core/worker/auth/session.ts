@@ -23,6 +23,7 @@ import type { BatchStatements } from "../lib/batch";
 import { hashToken, randomToken } from "../lib/crypto";
 import { createId } from "../lib/ids";
 import { cloudflareClientIp } from "../lib/request";
+import { runModuleHooks } from "../modules";
 import {
   DEV_SESSION_COOKIE,
   SESSION_COOKIE,
@@ -394,6 +395,10 @@ export async function destroySession(
         eq(sessions.userId, identity.userId)
       )
     );
+  await runModuleHooks("sessionRevoked", db, {
+    userId: identity.userId,
+    sessionId: identity.sessionId,
+  });
   clearAuthCookies(c);
 }
 

@@ -103,6 +103,16 @@ export type WorkspaceModule = {
     /** An address was deleted; remove what the module stored for it. */
     mailboxDeleted?: (env: Env, mailboxId: string) => Promise<void>;
     /**
+     * One browser session ended on purpose: the person or an administrator
+     * revoked it, or it signed out. Drop what the module keeps for the
+     * device on that session. Expiry and core's pruning of old sessions do
+     * not call it.
+     */
+    sessionRevoked?: (
+      db: Database,
+      session: { userId: string; sessionId: string }
+    ) => Promise<void>;
+    /**
      * Every session of a person was revoked: they were disabled, or
      * recovered their account. Drop what the module keeps per device.
      */

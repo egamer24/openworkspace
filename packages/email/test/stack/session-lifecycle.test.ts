@@ -14,12 +14,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const authState = z.looseObject({ authenticated: z.boolean() });
 
-async function createUser(name: string) {
+async function createUser(name: string, role: "admin" | "member" = "member") {
   const userId = `usr_${crypto.randomUUID()}`;
   await env.DB.prepare(
-    "INSERT INTO users (id, name, role, status) VALUES (?, ?, 'member', 'active')"
+    "INSERT INTO users (id, name, role, status) VALUES (?, ?, ?, 'active')"
   )
-    .bind(userId, name)
+    .bind(userId, name, role)
     .run();
 
   return userId;
@@ -180,7 +180,7 @@ describe("session and push ownership", () => {
   it("atomically transfers an endpoint to the currently authenticated account", async () => {
     const firstUserId = await createUser("First Push User");
     const secondUserId = await createUser("Second Push User");
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     await bindPush(await login(firstUserId), endpoint);
     await bindPush(await login(secondUserId), endpoint);
 
@@ -193,50 +193,174 @@ describe("session and push ownership", () => {
     expect(owner?.userId).toBe(secondUserId);
   });
 
-  it("keeps account push after session revoke; the device drops it before logout", async () => {
-    const userId = await createUser("Push Lifecycle User");
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
-    const firstCookie = await login(userId);
-    await bindPush(firstCookie, endpoint);
+  it("rejects push endpoints that are not on a browser push service", async () => {
+    const { VAPID_PUBLIC_KEY } = await hooks.env("VAPID_PUBLIC_KEY");
+    const cookie = await login(await createUser("Relay User"));
 
-    const firstSession = required(
-      await sessionForCookie(firstCookie),
-      "the first sign-in stores a session"
+    const endpoints = [
+      "https://internal.example.test/relay",
+      "https://fcm.googleapis.com.example.test/fcm/send/1",
+      "http://fcm.googleapis.com/fcm/send/1",
+      "https://push.apple.com/1",
+    ];
+
+    const statuses = await Promise.all(
+      endpoints.map(async (endpoint) => {
+        const response = await worker.fetch(
+          new Request("http://example.test/api/notifications/subscriptions", {
+            method: "PUT",
+            headers: { cookie, "content-type": "application/json" },
+            body: JSON.stringify({
+              endpoint,
+              keys: {
+                p256dh: VAPID_PUBLIC_KEY,
+                auth: "AAAAAAAAAAAAAAAAAAAAAA",
+              },
+            }),
+          })
+        );
+
+        return response.status;
+      })
     );
 
+    expect(statuses).toEqual(endpoints.map(() => 400));
+    expect(
+      await env.DB.prepare(
+        "SELECT COUNT(*) AS count FROM push_subscriptions WHERE endpoint IN (?, ?, ?, ?)"
+      )
+        .bind(...endpoints)
+        .first()
+    ).toMatchObject({ count: 0 });
+  });
+
+  it("accepts the push services of Chromium, Firefox, Safari and Edge", async () => {
+    const cookie = await login(await createUser("Browser User"));
+    const id = crypto.randomUUID();
+
+    await bindPush(cookie, `https://fcm.googleapis.com/fcm/send/${id}`);
+    await bindPush(
+      cookie,
+      `https://updates.push.services.mozilla.com/wpush/v2/${id}`
+    );
+    await bindPush(cookie, `https://web.push.apple.com/${id}`);
+    await bindPush(
+      cookie,
+      `https://wns2-par02p.notify.windows.com/w/?token=${id}`
+    );
+  });
+
+  it("removes only the revoked session's push, as the user or an admin", async () => {
+    const userId = await createUser("Push Lifecycle User");
+    const adminCookie = await login(await createUser("Session Admin", "admin"));
+
+    const devices = await Promise.all(
+      ["laptop", "phone", "tablet"].map(async (device) => {
+        const cookie = await login(userId, { userAgent: device });
+        const endpoint = `https://fcm.googleapis.com/fcm/send/${device}-${crypto.randomUUID()}`;
+        await bindPush(cookie, endpoint);
+
+        const session = required(
+          await sessionForCookie(cookie),
+          "each sign-in stores a session"
+        );
+
+        return { cookie, endpoint, sessionId: session.id };
+      })
+    );
+
+    const laptop = required(devices[0], "the laptop signed in");
+    const phone = required(devices[1], "the phone signed in");
+    const tablet = required(devices[2], "the tablet signed in");
+
+    expect(
+      await env.DB.prepare(
+        "SELECT session_id AS sessionId FROM push_subscriptions WHERE endpoint = ?"
+      )
+        .bind(laptop.endpoint)
+        .first()
+    ).toEqual({ sessionId: laptop.sessionId });
+
     const revoke = await worker.fetch(
-      new Request(`http://example.test/api/auth/sessions/${firstSession.id}`, {
+      new Request(`http://example.test/api/auth/sessions/${laptop.sessionId}`, {
         method: "DELETE",
-        headers: { cookie: firstCookie },
+        headers: { cookie: tablet.cookie },
       })
     );
 
     expect(revoke.status).toBe(200);
-    expect(
-      await env.DB.prepare(
-        "SELECT id FROM push_subscriptions WHERE endpoint = ?"
+
+    const adminRevoke = await worker.fetch(
+      new Request(
+        `http://example.test/api/admin/users/${userId}/sessions/${phone.sessionId}`,
+        { method: "DELETE", headers: { cookie: adminCookie } }
       )
-        .bind(endpoint)
-        .first()
-    ).toBeTruthy();
-
-    // What the mail module's client does before sign-out.
-    const secondCookie = await login(userId);
-
-    const unsubscribe = await worker.fetch(
-      new Request("http://example.test/api/notifications/subscriptions", {
-        method: "DELETE",
-        headers: { cookie: secondCookie, "content-type": "application/json" },
-        body: JSON.stringify({ endpoint }),
-      })
     );
 
-    expect(unsubscribe.status).toBe(200);
+    expect(adminRevoke.status).toBe(200);
+
+    const remaining = await env.DB.prepare(
+      "SELECT endpoint FROM push_subscriptions WHERE user_id = ?"
+    )
+      .bind(userId)
+      .all();
+
+    expect(remaining.results).toEqual([{ endpoint: tablet.endpoint }]);
+  });
+
+  it("keeps a device's push when its session expires, is replaced or pruned", async () => {
+    const userId = await createUser("Long-lived Push User");
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
+    const firstCookie = await login(userId);
+    await bindPush(firstCookie, endpoint);
+
+    const first = required(
+      await sessionForCookie(firstCookie),
+      "the first sign-in stores a session"
+    );
+
+    await env.DB.prepare("UPDATE sessions SET expires_at = ? WHERE id = ?")
+      .bind(Date.now() - 1, first.id)
+      .run();
+
+    // A fresh sign-in on the device deletes its previous session row.
+    const secondCookie = await login(userId, { cookie: firstCookie });
+
+    const second = required(
+      await sessionForCookie(secondCookie),
+      "the second sign-in stores a session"
+    );
+
+    const subscription = env.DB.prepare(
+      "SELECT session_id AS sessionId FROM push_subscriptions WHERE endpoint = ?"
+    ).bind(endpoint);
+
+    expect(await subscription.first()).toEqual({ sessionId: first.id });
+
+    // What the app does on every start: the row follows the new session.
+    await bindPush(secondCookie, endpoint);
+
+    expect(await subscription.first()).toEqual({ sessionId: second.id });
+
+    for (let index = 0; index < 10; index += 1) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- each sign-in must land after the last, so the tenth evicts the device's session
+      await login(userId);
+    }
+
+    expect(await sessionForCookie(secondCookie)).toBeNull();
+    expect(await subscription.first()).toEqual({ sessionId: second.id });
+  });
+
+  it("drops a session's push when it signs out", async () => {
+    const userId = await createUser("Sign-out User");
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
+    const cookie = await login(userId);
+    await bindPush(cookie, endpoint);
 
     const logout = await worker.fetch(
       new Request("http://example.test/api/auth/logout", {
         method: "POST",
-        headers: { cookie: secondCookie },
+        headers: { cookie },
       })
     );
 

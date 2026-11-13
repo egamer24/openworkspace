@@ -2,6 +2,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 
 import type { Database } from "../db/client";
 import { sessions } from "../db/schema";
+import { runModuleHooks } from "../modules";
 
 export async function sessionsForUser(
   db: Database,
@@ -37,5 +38,8 @@ export async function revokeUserSession(
     .where(and(eq(sessions.id, sessionId), eq(sessions.userId, userId)))
     .returning({ id: sessions.id });
 
-  return revoked ?? null;
+  if (!revoked) return null;
+  await runModuleHooks("sessionRevoked", db, { userId, sessionId });
+
+  return revoked;
 }

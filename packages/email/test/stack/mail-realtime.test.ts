@@ -327,7 +327,7 @@ describe("mailbox realtime", () => {
 describe("notification preferences", () => {
   it("binds a push registration to the current account", async () => {
     const { VAPID_PUBLIC_KEY } = await hooks.env("VAPID_PUBLIC_KEY");
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
 
     const create = await worker.fetch(
       new Request("http://example.test/api/notifications/subscriptions", {
@@ -374,7 +374,7 @@ describe("notification preferences", () => {
         method: "PUT",
         headers: { cookie: session.cookie, "content-type": "application/json" },
         body: JSON.stringify({
-          endpoint: `https://push.example.test/${crypto.randomUUID()}`,
+          endpoint: `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`,
           keys: { p256dh: "not-a-p256-key", auth: "too-short" },
         }),
       })
@@ -388,7 +388,7 @@ describe("notification preferences", () => {
     const expiredTokenHash = `expired_${crypto.randomUUID()}`;
     const expiredSessionId = `ses_${crypto.randomUUID()}`;
     const pushSubscriptionId = `push_${crypto.randomUUID()}`;
-    const endpoint = `https://push.example.test/${crypto.randomUUID()}`;
+    const endpoint = `https://fcm.googleapis.com/fcm/send/${crypto.randomUUID()}`;
     const now = Date.now();
     await env.DB.prepare(`
       INSERT INTO sessions (id, user_id, token_hash, expires_at, created_at)

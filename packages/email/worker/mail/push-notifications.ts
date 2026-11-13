@@ -1,4 +1,5 @@
 import {
+  isPushServiceEndpoint,
   sendPushNotification,
   topicFromString,
   WebPushError,
@@ -32,12 +33,15 @@ import { mailboxStub } from "../mailbox";
 import { getMailboxAccess } from "./access";
 
 const pushSubscriptionSchema = z.object({
+  // Only a browser's push service (Google's, Mozilla's, Apple's, Microsoft's):
+  // the Worker POSTs to the endpoint for every new message, so any other
+  // host would make it a request relay.
   endpoint: z
     .url()
     .max(4096)
     .refine(
-      (value) => new URL(value).protocol === "https:",
-      "Push endpoint must use HTTPS"
+      isPushServiceEndpoint,
+      "Push endpoint must be an HTTPS URL on a browser push service"
     ),
   keys: z.object({
     p256dh: z
@@ -306,11 +310,16 @@ export const pushNotificationRoutes = new Hono<AppEnv>()
     async (c) => {
       const input = c.req.valid("json");
       const now = new Date();
+      // Bound to this session, so revoking or signing out of it ends the
+      // device's notifications. The app registers again on every start, so
+      // after a new sign-in on the device the row follows the new session.
+      const sessionId = c.get("sessionId");
       await createDb(c.env.DB)
         .insert(pushSubscriptions)
         .values({
           id: createId("push"),
           userId: c.get("user").id,
+          sessionId,
           endpoint: input.endpoint,
           p256dh: input.keys.p256dh,
           auth: input.keys.auth,
@@ -321,6 +330,7 @@ export const pushNotificationRoutes = new Hono<AppEnv>()
           target: pushSubscriptions.endpoint,
           set: {
             userId: c.get("user").id,
+            sessionId,
             p256dh: input.keys.p256dh,
             auth: input.keys.auth,
             updatedAt: now,
@@ -346,6 +356,25 @@ export const pushNotificationRoutes = new Hono<AppEnv>()
       return c.json({ ok: true as const });
     }
   );
+
+/**
+ * One session was revoked or signed out: its device stops getting
+ * notifications. Rows without a session (registered before they were
+ * recorded) stay until the device registers again or every session goes.
+ */
+export async function deleteSessionPushSubscriptions(
+  db: Database,
+  session: { userId: string; sessionId: string }
+) {
+  await db
+    .delete(pushSubscriptions)
+    .where(
+      and(
+        eq(pushSubscriptions.userId, session.userId),
+        eq(pushSubscriptions.sessionId, session.sessionId)
+      )
+    );
+}
 
 /** A person's sessions were all revoked: no device of theirs gets notifications. */
 export async function deleteUserPushSubscriptions(
@@ -497,6 +526,13 @@ async function deliverPushJob(
   const subscription = await targetSubscription(env, job);
 
   if (!subscription) return;
+
+  // Registered before endpoints were limited to browser push services.
+  if (!isPushServiceEndpoint(subscription.endpoint)) {
+    await removeSubscription(env, subscription.id);
+
+    return;
+  }
 
   const suppressed = await mailboxStub(env, job.mailboxId).shouldSuppressPush(
     job.messageId,
