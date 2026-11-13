@@ -499,6 +499,7 @@ describe("reporting", () => {
       restored: true,
       conversationId: "conv_msg_spam",
       rejoined: false,
+      folder: "inbox",
     });
     expect(
       await workspaceFeedbackSummary("mbx_elsewhere", "spammer@junk.example")
@@ -528,5 +529,64 @@ describe("reporting", () => {
     expect((await conversationState("conv_msg_bulk_spam")).mailboxState).toBe(
       "spam"
     );
+  });
+});
+
+describe("replies from split-off spam", () => {
+  it("names the conversation a reply took the split-off message back to", async () => {
+    const box = mailbox(mailboxId);
+    const parentId = "<split-reply-original@example.net>";
+
+    // A reply the AI put in Spam was kept out of the conversation it answers.
+    await box.seedMailbox(
+      [],
+      [
+        incoming("msg_split_reply_original", {
+          conversationId: "conv_split_reply_target",
+          fromJson: [{ address: "colleague@partner.example", name: null }],
+          messageIdHeader: parentId,
+          timelineAt: new Date(Date.now() - 60_000),
+        }),
+        incoming("msg_split_reply_spam", {
+          conversationId: "conv_split_reply_spam",
+          fromJson: [{ address: "colleague@partner.example", name: null }],
+          messageIdHeader: "<split-reply-answer@example.net>",
+          inReplyToJson: [parentId],
+          referencesJson: [parentId],
+          splitFromConversationId: "conv_split_reply_target",
+        }),
+      ],
+      [{ id: "conv_split_reply_spam", mailboxState: "spam" }]
+    );
+
+    const sent = await api("/api/mail/messages/msg_split_reply_spam/replies", {
+      method: "POST",
+      json: {
+        requestId: crypto.randomUUID(),
+        mailboxId,
+        mode: "reply",
+        cc: [],
+        bcc: [],
+        bodyText: "Not spam at all; answering here.",
+      },
+    });
+
+    expect(sent.status).toBe(201);
+    expect(sent.body).toMatchObject({
+      conversationId: "conv_split_reply_target",
+      detached: false,
+    });
+    expect(
+      await box.getConversationSnapshot("conv_split_reply_spam")
+    ).toBeNull();
+    expect(
+      (await box.getConversation("conv_split_reply_target")).map(
+        (email) => email.id
+      )
+    ).toEqual([
+      "msg_split_reply_original",
+      "msg_split_reply_spam",
+      z.string().parse(sent.body.messageId),
+    ]);
   });
 });

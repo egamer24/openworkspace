@@ -237,6 +237,19 @@ function retryDelay(attempts: number) {
   );
 }
 
+/**
+ * The folder a conversation is listed in, as the app names it: its custom
+ * folder or Inbox while active, else Archive, Spam or Trash.
+ */
+function conversationFolder(place: {
+  mailboxState: MailboxState;
+  folderId: string | null;
+}) {
+  if (place.mailboxState !== "active") return place.mailboxState;
+
+  return place.folderId ?? "inbox";
+}
+
 /** Whether a delivery has been retried for as long as it may be. */
 function isPastRetryAge(job: PendingInbound, now: number) {
   return now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS;
@@ -2763,7 +2776,20 @@ export class MailboxDO extends DurableObject<Env> {
           ) ?? email.conversationId)
         : email.conversationId;
 
-      return { restored: back, conversationId };
+      const place = tx
+        .select({
+          mailboxState: conversations.mailboxState,
+          folderId: conversations.folderId,
+        })
+        .from(conversations)
+        .where(eq(conversations.id, conversationId))
+        .all()[0];
+
+      return {
+        restored: back,
+        conversationId,
+        folder: place ? conversationFolder(place) : "inbox",
+      };
     });
 
     this.recentParticipantSources = null;
@@ -2773,6 +2799,7 @@ export class MailboxDO extends DurableObject<Env> {
       restored: outcome.restored,
       conversationId: outcome.conversationId,
       rejoined: outcome.conversationId !== email.conversationId,
+      folder: outcome.folder,
       address: address.includes("@") ? address : null,
     };
   }

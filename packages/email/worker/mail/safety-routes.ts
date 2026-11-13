@@ -377,6 +377,7 @@ export const mailSafetyRoutes = new Hono<AppEnv>()
         restored: result.restored,
         conversationId: result.conversationId,
         rejoined: result.rejoined,
+        folder: result.folder,
       });
     }
   )

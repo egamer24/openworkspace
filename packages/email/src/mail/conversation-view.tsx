@@ -182,7 +182,12 @@ export function ConversationView({
   function handleSent(result: SentReply) {
     setReplySelection(null);
 
-    if (result.detached) onOpenConversation(result.conversationId);
+    // A detached reply starts its own conversation, and a reply from mail kept
+    // out of its conversation as spam takes it back there: either way the
+    // open one is not where the reply is (it may be gone).
+    if (result.detached || result.conversationId !== conversationId) {
+      onOpenConversation(result.conversationId);
+    }
   }
 
   async function resend(message: MessageDetail) {
