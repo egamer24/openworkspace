@@ -6,6 +6,7 @@ import type { NewEmail } from "@open-workspace/email/worker/mailbox/schema.ts";
 import { z } from "zod";
 
 import { runAlarmUntil } from "./mailbox-helpers.ts";
+import { pollUntil } from "./poll.ts";
 import {
   env,
   hooks,
@@ -329,6 +330,92 @@ describe("mailbox conversation index", () => {
         (call) => call.kind === "console.error"
       )
     ).toHaveLength(2);
+  });
+
+  it("counts an attempt before parsing, so a delivery that kills the mailbox expires", async () => {
+    const mailboxId = `mbx_inbound_killed_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const deliveryId = `delivery_inbound_killed_${crypto.randomUUID()}`;
+    const rawObjectKey = `test/${deliveryId}.eml`;
+    await env.MAIL_STORAGE.put(
+      rawObjectKey,
+      [
+        "From: Sender <sender@example.net>",
+        "To: me@example.test",
+        "Subject: Kills the mailbox",
+        `Message-ID: <${deliveryId}@example.net>`,
+        "",
+        "Processing this message never finishes.",
+      ].join("\r\n")
+    );
+    // Processing ends past parsing with the object restarted, as when the
+    // runtime kills it for CPU or memory: no catch runs.
+    await mailbox.testFake({ classifier: { mode: "abort" } });
+    await mailbox.enqueueInbound({
+      id: deliveryId,
+      mailboxId,
+      rawObjectKey,
+      envelopeFrom: "sender@example.net",
+      envelopeTo: "me@example.test",
+      receivedAt: Date.now(),
+    });
+
+    const pending = z.object({
+      attempts: z.number(),
+      next_attempt_at: z.number(),
+    });
+
+    // The alarm fails with the object; the attempt it counted remains.
+    const attempted = required(
+      await pollUntil(
+        async () => {
+          await hooks.runAlarm(mailboxId).catch(() => false);
+
+          const [row] = await hooks.mailboxRows(
+            mailboxId,
+            pending,
+            "select attempts, next_attempt_at from pending_inbound where id = ?",
+            deliveryId
+          );
+
+          return row && row.attempts > 0 ? row : null;
+        },
+        { failure: "The killed attempt was not recorded" }
+      ),
+      "the killed attempt is recorded"
+    );
+
+    // Backed off behind newer mail, not picked first on the next wake.
+    expect(attempted.next_attempt_at).toBeGreaterThan(Date.now());
+    expect(await mailbox.getEmail(inboundMessageId(deliveryId))).toBeNull();
+
+    // A day later the message is stored as unreadable without another parse.
+    await hooks.mailboxSql(
+      mailboxId,
+      "update pending_inbound set received_at = ?, next_attempt_at = 0 where id = ?",
+      Date.now() - 24 * 60 * 60 * 1000 - 1,
+      deliveryId
+    );
+
+    const stored = required(
+      await runAlarmUntil(mailboxId, () =>
+        mailbox.getEmail(inboundMessageId(deliveryId))
+      ),
+      "the expired delivery is stored"
+    );
+
+    expect(stored).toMatchObject({
+      subject: "(unreadable message)",
+      bodyText: expect.stringContaining("did not finish within 24 hours"),
+      rawMimeR2Key: rawObjectKey,
+    });
+    expect(
+      await hooks.mailboxSql(
+        mailboxId,
+        "select id from pending_inbound where id = ?",
+        deliveryId
+      )
+    ).toEqual([]);
   });
 
   it("searches every email in the selected folder and reactivates replied-to conversations", async () => {

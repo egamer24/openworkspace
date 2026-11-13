@@ -21,7 +21,8 @@ export type MailboxFakes = {
   /**
    * The classification model: `rules` answers with the text of the first
    * rule whose `includes` is in the prompt (else `fallback`), `unavailable`
-   * is a model whose calls fail, and `throw` fails before any model exists.
+   * is a model whose calls fail, `throw` fails before any model exists, and
+   * `abort` restarts the object, as a mailbox killed mid-delivery is.
    */
   classifier?:
     | {
@@ -31,7 +32,8 @@ export type MailboxFakes = {
         fallback: string;
       }
     | { mode: "unavailable" }
-    | { mode: "throw" };
+    | { mode: "throw" }
+    | { mode: "abort" };
 };
 
 /** The queues a mailbox's fakes stand in front of. */
@@ -55,6 +57,9 @@ export type MailboxCall =
 const testStackEnv = z.object({ TEST_HOOKS: z.string().optional() });
 
 const NO_BACKLOG: QueueMetrics = { backlogCount: 0, backlogBytes: 0 };
+
+/** The isolate's own `console.error`, which `alarm` stands in for while it runs. */
+const isolateConsoleError = console.error;
 
 const FAKES_KEY = "test:fakes";
 const CALLS_KEY = "test:calls";
@@ -139,6 +144,14 @@ export class MailboxDO extends EmailMailboxDO {
 
     if (!fake) return super.classificationModel();
     this.record({ kind: "classificationModel", data: null });
+
+    if (fake.mode === "abort") {
+      // No `finally` runs past an abort; the isolate lives on for other objects.
+      console.error = isolateConsoleError;
+      this.ctx.abort("Killed while processing an inbound delivery");
+
+      return Promise.reject(new Error("The mailbox was killed"));
+    }
 
     if (fake.mode === "throw") {
       return Promise.reject(

@@ -231,6 +231,11 @@ function retryDelay(attempts: number) {
   );
 }
 
+/** Whether a delivery has been retried for as long as it may be. */
+function isPastRetryAge(job: PendingInbound, now: number) {
+  return now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS;
+}
+
 function stringListJson(values: string[]) {
   return JSON.stringify([...new Set(values)]);
 }
@@ -784,7 +789,7 @@ export class MailboxDO extends DurableObject<Env> {
     now: number,
     cause: unknown
   ) {
-    if (now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS) {
+    if (isPastRetryAge(job, now)) {
       this.db.delete(pendingInbound).where(eq(pendingInbound.id, job.id)).run();
       console.error(
         `Stopped retrying notification for inbound delivery ${job.id}`,
@@ -3188,14 +3193,20 @@ export class MailboxDO extends DurableObject<Env> {
   async alarm() {
     const now = Date.now();
     await this.finishImport();
-    await this.processInboundJobs(now);
+    // Cheap maintenance runs first, so a delivery that keeps failing (or
+    // keeps getting the alarm killed) cannot hold it back.
     await dispatchOfficePreviewJobs(
       this.state.storage.sql,
       this.bindings,
       this.state.id.name ?? "unknown-mailbox"
     );
     await this.processObjectDeletionJobs(now);
-    await this.scheduleRemainingWork();
+
+    try {
+      await this.processInboundJobs(now);
+    } finally {
+      await this.scheduleRemainingWork();
+    }
   }
 
   /**
@@ -3243,6 +3254,16 @@ export class MailboxDO extends DurableObject<Env> {
 
       return;
     }
+
+    if (job.attempts > 0 && isPastRetryAge(job, now)) {
+      // Earlier attempts ended without an outcome (the alarm was killed
+      // mid-parse, say); this message is not parsed again.
+      await this.storeExpiredInbound(job, now);
+
+      return;
+    }
+
+    await this.recordInboundAttempt(job, now);
 
     try {
       const rawMime = await readInboundRawMime(this.bindings, job);
@@ -3295,6 +3316,9 @@ export class MailboxDO extends DurableObject<Env> {
           this.db
             .update(pendingInbound)
             .set({
+              // The model failed, not the delivery: the attempt recorded
+              // before parsing is given back.
+              attempts: job.attempts,
               aiAttempts,
               nextAttemptAt: new Date(now + retryDelay(aiAttempts)),
             })
@@ -3347,7 +3371,7 @@ export class MailboxDO extends DurableObject<Env> {
         return;
       }
 
-      if (now - job.receivedAt.getTime() >= MAX_INBOUND_RETRY_AGE_MS) {
+      if (isPastRetryAge(job, now)) {
         const fallback = prepareUnprocessableInboundEmail({
           job,
           reason: "Message processing remained unavailable for 24 hours",
@@ -3383,6 +3407,44 @@ export class MailboxDO extends DurableObject<Env> {
         .run();
       console.error(`Could not ingest inbound delivery ${job.id}`, error);
     }
+  }
+
+  /**
+   * Counts an attempt and backs the delivery off before it is parsed, and
+   * makes that durable: when parsing gets the alarm killed (CPU or memory),
+   * no catch runs, and the delivery must not stay first in line.
+   */
+  private async recordInboundAttempt(job: PendingInbound, now: number) {
+    const attempts = job.attempts + 1;
+    const nextAttemptAt = now + retryDelay(attempts);
+    this.db
+      .update(pendingInbound)
+      .set({ attempts, nextAttemptAt: new Date(nextAttemptAt) })
+      .where(eq(pendingInbound.id, job.id))
+      .run();
+    // The retry's wake, in case this alarm never gets to schedule it.
+    await this.scheduleAlarm(nextAttemptAt);
+    await this.state.storage.sync();
+  }
+
+  /** Stores a delivery that was tried for 24 hours as an unreadable message, without parsing it. */
+  private async storeExpiredInbound(job: PendingInbound, now: number) {
+    const raw = await this.bindings.MAIL_STORAGE.head(job.rawObjectKey);
+
+    const fallback = prepareUnprocessableInboundEmail({
+      job,
+      reason: "Message processing did not finish within 24 hours",
+      rawMimeR2Key: raw ? job.rawObjectKey : null,
+    });
+
+    const stored = await this.insertEmail(fallback);
+
+    if (!stored) {
+      throw new Error("Expired inbound fallback was not persisted");
+    }
+
+    await this.finishStoredInbound(job, stored, now, true);
+    console.error(`Stored fallback for expired inbound delivery ${job.id}`);
   }
 
   private async processObjectDeletionJobs(now: number) {
