@@ -1,6 +1,8 @@
 # Deploys openworkspace.dev (apps/landing: the landing page and the docs
 # built from docs/) when either changes on master. The Cloudflare API token
-# may deploy Workers and attach routes on the openworkspace.dev zone only.
+# (an account token) may deploy Workers, attach routes on the
+# openworkspace.dev zone, and use the Secrets Store, where Alchemy's state
+# store keeps the token it reads state with.
 name: Landing
 
 on:
