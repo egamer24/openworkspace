@@ -104,7 +104,9 @@ bun run build:site
 bun run preview:site
 ```
 
-`bun run deploy` in `apps/landing` deploys the site.
+Pushes to `master` that change the site or `docs/` deploy it
+(`.github/workflows/landing.yml`); `bun run deploy` in `apps/landing` deploys
+it by hand.
 
 ## Release
 

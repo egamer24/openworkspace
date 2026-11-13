@@ -1,0 +1,44 @@
+# Deploys openworkspace.dev (apps/landing: the landing page and the docs
+# built from docs/) when either changes on master. The Cloudflare API token
+# may deploy Workers and attach routes on the openworkspace.dev zone only.
+name: Landing
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "apps/landing/**"
+      - "docs/**"
+      - "packages/core/src/theme.css"
+      - "bun.lock"
+      - ".github/workflows/landing.yml"
+  workflow_dispatch:
+
+# Deploys run one after another; a newer push waits for the one in progress.
+concurrency:
+  group: landing
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+
+      - run: bun install --frozen-lockfile
+
+      - name: Deploy
+        working-directory: apps/landing
+        run: bun run deploy --yes --no-input
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
