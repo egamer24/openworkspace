@@ -489,6 +489,7 @@ export function ReaderPane({ mail }: { mail: MailController }) {
   const senderActions = useSenderActions({
     mailbox,
     onLeaveConversation: mail.closeConversation,
+    onOpenConversation: (id) => mail.openConversation(id, "inbox"),
   });
 
   useSenderIntelFill(mailbox?.id, conversationId, conversationMessages);

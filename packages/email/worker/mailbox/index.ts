@@ -16,6 +16,7 @@ import {
   desc,
   eq,
   inArray,
+  isNotNull,
   isNull,
   lt,
   lte,
@@ -179,6 +180,10 @@ const INBOUND_ALARM_BATCH_SIZE = 1;
 const OBJECT_DELETION_ALARM_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 60 * 60 * 1000;
 const MAX_INBOUND_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Attempts a delivery may end without an outcome (alarm killed) before it is stored unparsed. */
+const MAX_UNFINISHED_INBOUND_ATTEMPTS = 3;
+
 const ALARM_WAKE_DELAY_MS = 1000;
 const PRESENCE_TTL_MS = 60_000;
 const AI_CONFIGURATION_ID = "default";
@@ -440,6 +445,11 @@ export class MailboxDO extends DurableObject<Env> {
   private writtenCounts: InboxCounts | null = null;
   /** The D1 bookmark after that write; realtime messages pass it on. */
   private countsBookmark: string | null = null;
+  /**
+   * The wake this alarm set before parsing a delivery, for when it is killed
+   * mid-parse; replaced by the real next wake once the attempt finishes.
+   */
+  private attemptAlarmAt: number | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -1263,7 +1273,25 @@ export class MailboxDO extends DurableObject<Env> {
   }
 
   jmapMoveEmails(emailIds: string[], target: string) {
-    const moved = jmapMoveEmails(this.state.storage.sql, emailIds, target);
+    const moved = this.db.transaction(() => {
+      const known = jmapMoveEmails(this.state.storage.sql, emailIds, target);
+
+      if (known) {
+        // Mail kept out of a conversation as spam rejoins it once moved out of Junk.
+        this.rejoinSplitConversations(
+          this.db
+            .selectDistinct({ id: emails.conversationId })
+            .from(emails)
+            .where(
+              sql`${emails.id} in (select cast(value as text) from json_each(${stringListJson(emailIds)}))`
+            )
+            .all()
+            .map((row) => row.id)
+        );
+      }
+
+      return known;
+    });
 
     if (moved) this.publishUpdate();
 
@@ -1860,6 +1888,10 @@ export class MailboxDO extends DurableObject<Env> {
       return result.length > 0;
     });
 
+    // An alarm finishing meanwhile may have dropped its own wake (see
+    // `scheduleRemainingWork`) before it could see this row.
+    if (queued) await this.scheduleAlarm(alarmAt);
+
     return { messageId, queued };
   }
 
@@ -2353,9 +2385,15 @@ export class MailboxDO extends DurableObject<Env> {
             .all()[0]
         : undefined;
 
+      // The conversation it named is recorded, so the message rejoins it
+      // when it leaves Spam (rejoinSplitConversations).
       const email =
         joined && joined.mailboxState !== placement.state
-          ? { ...prepared, conversationId: createId("conv") }
+          ? {
+              ...prepared,
+              conversationId: createId("conv"),
+              splitFromConversationId: prepared.conversationId,
+            }
           : prepared;
 
       const trustedFolder = placement.folderId
@@ -2396,14 +2434,17 @@ export class MailboxDO extends DurableObject<Env> {
         eq(conversations.mailboxState, "active")
       );
 
-      // AI sorting files new conversations only: a reply (whose threading
-      // headers the sender chose) leaves the thread where it is.
+      // AI sorting files only the first incoming message of a conversation:
+      // a reply to received mail (whose threading headers the sender chose)
+      // leaves the thread where it is. Replies to a thread this mailbox
+      // started are filed like new mail.
       const startsConversation = !tx
         .select({ id: emails.id })
         .from(emails)
         .where(
           and(
             eq(emails.conversationId, email.conversationId),
+            eq(emails.direction, "incoming"),
             ne(emails.id, inserted.id)
           )
         )
@@ -2715,23 +2756,14 @@ export class MailboxDO extends DurableObject<Env> {
           .all().length > 0;
 
       // Spam that named a conversation here was kept out of it; once it is
-      // not spam, it rejoins the conversation it replies to.
-      const parentId = back
-        ? this.splitParentConversation(email.conversationId)
-        : null;
+      // not spam, it rejoins that conversation.
+      const conversationId = back
+        ? (this.rejoinSplitConversations([email.conversationId]).get(
+            email.conversationId
+          ) ?? email.conversationId)
+        : email.conversationId;
 
-      if (parentId) {
-        mergeConversation(
-          this.state.storage.sql,
-          email.conversationId,
-          parentId
-        );
-      }
-
-      return {
-        restored: back,
-        conversationId: parentId ?? email.conversationId,
-      };
+      return { restored: back, conversationId };
     });
 
     this.recentParticipantSources = null;
@@ -2746,46 +2778,130 @@ export class MailboxDO extends DurableObject<Env> {
   }
 
   /**
-   * The conversation the messages of `conversationId` reply to, when they
-   * were kept out of it as spam: every message's parent is in it or in that
-   * one other conversation, which is in Inbox or Archive. A thread in Trash
-   * or Spam is not brought back by mail that was not spam.
+   * Puts mail kept out of a conversation as spam (#25) back into it, once
+   * its own conversation has left Spam: by Not spam, a move in the app or
+   * over JMAP, or a reply sent from here. Call it inside the transaction
+   * that moved `conversationIds`; only those now in Inbox or Archive that
+   * hold a message marked with `split_from_conversation_id` are touched, so
+   * conversations threaded elsewhere (an import's, say) are never merged.
+   *
+   * The marked message names the conversation it was kept out of. When that
+   * conversation is gone, the message's own threading headers are resolved
+   * again. The conversation rejoins its target when the target is in Inbox
+   * or Archive; a target in Trash or Spam is not brought back by it, and the
+   * conversation stays where it was moved. Either way the decision is final
+   * and the mark is cleared.
+   *
+   * The rescued message is placed as a legitimate reply would be: moved to
+   * Inbox (or a custom folder), the target becomes active and takes that
+   * folder (else keeps its own). Moved to Archive, the target stays where it
+   * is. Returns, for each merged conversation, the one its messages are in.
    */
-  private splitParentConversation(conversationId: string) {
-    const messages = this.db
+  private rejoinSplitConversations(conversationIds: string[]) {
+    const merged = new Map<string, string>();
+
+    if (!conversationIds.length) return merged;
+
+    const marked = this.db
       .select({
+        emailId: emails.id,
+        conversationId: conversations.id,
+        mailboxState: conversations.mailboxState,
+        folderId: conversations.folderId,
+        splitFrom: emails.splitFromConversationId,
         inReplyTo: emails.inReplyToJson,
         references: emails.referencesJson,
       })
       .from(emails)
-      .where(eq(emails.conversationId, conversationId))
+      .innerJoin(conversations, eq(conversations.id, emails.conversationId))
+      .where(
+        and(
+          sql`${conversations.id} in (select cast(value as text) from json_each(${stringListJson(conversationIds)}))`,
+          inArray(conversations.mailboxState, ["active", "archive"]),
+          isNotNull(emails.splitFromConversationId)
+        )
+      )
       .all();
 
-    const parents = new Set<string>();
+    const groups = new Map<string, typeof marked>();
 
-    for (const message of messages) {
-      const parent = this.resolveParent(message.inReplyTo, message.references);
-
-      if (!parent) return null;
-
-      if (parent.conversationId !== conversationId) {
-        parents.add(parent.conversationId);
-      }
+    for (const row of marked) {
+      groups.set(row.conversationId, [
+        ...(groups.get(row.conversationId) ?? []),
+        row,
+      ]);
     }
 
-    const [parentId, ...others] = parents;
+    for (const [conversationId, rows] of groups) {
+      const targets = new Set(
+        rows.map((row) => this.splitTarget(conversationId, row))
+      );
 
-    if (!parentId || others.length) return null;
+      const [target, ...others] = targets;
 
-    const parent = this.db
-      .select({ mailboxState: conversations.mailboxState })
-      .from(conversations)
-      .where(eq(conversations.id, parentId))
-      .all()[0];
+      this.db
+        .update(emails)
+        .set({ splitFromConversationId: null })
+        .where(
+          and(
+            eq(emails.conversationId, conversationId),
+            isNotNull(emails.splitFromConversationId)
+          )
+        )
+        .run();
 
-    return parent &&
-      (parent.mailboxState === "active" || parent.mailboxState === "archive")
-      ? parentId
+      if (!target || others.length) continue;
+      const [moved] = rows;
+
+      if (!moved) continue;
+      mergeConversation(this.state.storage.sql, conversationId, target);
+
+      if (moved.mailboxState === "active") {
+        this.db
+          .update(conversations)
+          .set({
+            mailboxState: "active",
+            folderId: moved.folderId ?? sql`${conversations.folderId}`,
+          })
+          .where(eq(conversations.id, target))
+          .run();
+      }
+
+      merged.set(conversationId, target);
+    }
+
+    return merged;
+  }
+
+  /**
+   * The conversation a marked message rejoins, or null: the one it was kept
+   * out of, else (when that one is gone) its parent's, while that
+   * conversation is in Inbox or Archive.
+   */
+  private splitTarget(
+    conversationId: string,
+    row: { splitFrom: string | null; inReplyTo: string[]; references: string[] }
+  ) {
+    const placeOf = (id: string) =>
+      this.db
+        .select({ mailboxState: conversations.mailboxState })
+        .from(conversations)
+        .where(eq(conversations.id, id))
+        .all()[0];
+
+    let targetId = row.splitFrom;
+    let target = targetId ? placeOf(targetId) : undefined;
+
+    if (!target) {
+      const parent = this.resolveParent(row.inReplyTo, row.references);
+      targetId = parent?.conversationId ?? null;
+      target = targetId ? placeOf(targetId) : undefined;
+    }
+
+    return targetId &&
+      targetId !== conversationId &&
+      (target?.mailboxState === "active" || target?.mailboxState === "archive")
+      ? targetId
       : null;
   }
 
@@ -2830,6 +2946,9 @@ export class MailboxDO extends DurableObject<Env> {
         indexInsertedEmail(this.state.storage.sql, email.id);
         insertOfficePreviewJobs(this.state.storage.sql, email);
         recordCorrespondents(this.state.storage.sql, email);
+        // A reply sent from here brings its conversation out of Spam, and
+        // mail kept out of a conversation as spam rejoins it.
+        this.rejoinSplitConversations([email.conversationId]);
 
         const inserted = tx
           .select()
@@ -3016,11 +3135,12 @@ export class MailboxDO extends DurableObject<Env> {
     const targetPredicate =
       update.folderId === undefined ? "" : "and c.has_incoming = 1";
 
-    // Keep the source-folder guard in the update itself so a stale shared
-    // selection cannot overwrite a teammate's newer move.
-    const result = this.state.storage.sql
-      .exec<{ id: string }>(
-        `
+    const result = this.db.transaction(() => {
+      // Keep the source-folder guard in the update itself so a stale shared
+      // selection cannot overwrite a teammate's newer move.
+      const moved = this.state.storage.sql
+        .exec<{ id: string }>(
+          `
       update conversations as c
       set ${assignments.join(", ")}
       where c.id in (
@@ -3030,11 +3150,17 @@ export class MailboxDO extends DurableObject<Env> {
         ${targetPredicate}
       returning id
     `,
-        ...values,
-        candidatesJson,
-        ...membership.bindings
-      )
-      .toArray();
+          ...values,
+          candidatesJson,
+          ...membership.bindings
+        )
+        .toArray();
+
+      // Mail kept out of a conversation as spam rejoins it once moved out of Spam.
+      this.rejoinSplitConversations(moved.map((row) => row.id));
+
+      return moved;
+    });
 
     if (result.length) this.publishUpdate();
 
@@ -3357,7 +3483,22 @@ export class MailboxDO extends DurableObject<Env> {
     if (job.attempts > 0 && isPastRetryAge(job, now)) {
       // Earlier attempts ended without an outcome (the alarm was killed
       // mid-parse, say); this message is not parsed again.
-      await this.storeExpiredInbound(job, now);
+      await this.storeUnparsedInbound(
+        job,
+        now,
+        "Message processing did not finish within 24 hours"
+      );
+
+      return;
+    }
+
+    if (job.unfinishedAttempts >= MAX_UNFINISHED_INBOUND_ATTEMPTS) {
+      // Processing it got the alarm killed every time: other mail goes first.
+      await this.storeUnparsedInbound(
+        job,
+        now,
+        `Message processing did not finish in ${MAX_UNFINISHED_INBOUND_ATTEMPTS} attempts`
+      );
 
       return;
     }
@@ -3418,6 +3559,7 @@ export class MailboxDO extends DurableObject<Env> {
               // The model failed, not the delivery: the attempt recorded
               // before parsing is given back.
               attempts: job.attempts,
+              unfinishedAttempts: job.unfinishedAttempts,
               aiAttempts,
               nextAttemptAt: new Date(now + retryDelay(aiAttempts)),
             })
@@ -3500,6 +3642,8 @@ export class MailboxDO extends DurableObject<Env> {
         .update(pendingInbound)
         .set({
           attempts,
+          // This attempt ended with a failure, not a killed alarm.
+          unfinishedAttempts: job.unfinishedAttempts,
           nextAttemptAt: new Date(now + retryDelay(attempts)),
         })
         .where(eq(pendingInbound.id, job.id))
@@ -3511,39 +3655,68 @@ export class MailboxDO extends DurableObject<Env> {
   /**
    * Counts an attempt and backs the delivery off before it is parsed, and
    * makes that durable: when parsing gets the alarm killed (CPU or memory),
-   * no catch runs, and the delivery must not stay first in line.
+   * no catch runs, and the delivery must not stay first in line. The
+   * attempt also counts as unfinished until a path with an outcome gives
+   * that back (storing deletes the row; a failure restores the count).
    */
   private async recordInboundAttempt(job: PendingInbound, now: number) {
     const attempts = job.attempts + 1;
     const nextAttemptAt = now + retryDelay(attempts);
     this.db
       .update(pendingInbound)
-      .set({ attempts, nextAttemptAt: new Date(nextAttemptAt) })
+      .set({
+        attempts,
+        unfinishedAttempts: job.unfinishedAttempts + 1,
+        nextAttemptAt: new Date(nextAttemptAt),
+      })
       .where(eq(pendingInbound.id, job.id))
       .run();
     // The retry's wake, in case this alarm never gets to schedule it.
     await this.scheduleAlarm(nextAttemptAt);
+    this.attemptAlarmAt = nextAttemptAt;
     await this.state.storage.sync();
   }
 
-  /** Stores a delivery that was tried for 24 hours as an unreadable message, without parsing it. */
-  private async storeExpiredInbound(job: PendingInbound, now: number) {
-    const raw = await this.bindings.MAIL_STORAGE.head(job.rawObjectKey);
+  /**
+   * Stores a delivery that is not parsed again as an unreadable message,
+   * with a link to its raw MIME. The delivery is backed off first, so a
+   * failure here (R2 or storage) waits its turn behind newer mail.
+   */
+  private async storeUnparsedInbound(
+    job: PendingInbound,
+    now: number,
+    reason: string
+  ) {
+    await this.recordInboundAttempt(job, now);
 
-    const fallback = prepareUnprocessableInboundEmail({
-      job,
-      reason: "Message processing did not finish within 24 hours",
-      rawMimeR2Key: raw ? job.rawObjectKey : null,
-    });
+    try {
+      // Without an answer from R2 the link is kept: a missing object only
+      // makes the download fail.
+      const raw = await this.bindings.MAIL_STORAGE.head(job.rawObjectKey).then(
+        (object) => object !== null,
+        () => true
+      );
 
-    const stored = await this.insertEmail(fallback);
+      const fallback = prepareUnprocessableInboundEmail({
+        job,
+        reason,
+        rawMimeR2Key: raw ? job.rawObjectKey : null,
+      });
 
-    if (!stored) {
-      throw new Error("Expired inbound fallback was not persisted");
+      const stored = await this.insertEmail(fallback);
+
+      if (!stored) {
+        throw new Error("Unparsed inbound fallback was not persisted");
+      }
+
+      await this.finishStoredInbound(job, stored, now, true);
+      console.error(`Stored fallback for unparsed inbound delivery ${job.id}`);
+    } catch (error) {
+      console.error(
+        `Could not store unparsed inbound delivery ${job.id}`,
+        error
+      );
     }
-
-    await this.finishStoredInbound(job, stored, now, true);
-    console.error(`Stored fallback for expired inbound delivery ${job.id}`);
   }
 
   private async processObjectDeletionJobs(now: number) {
@@ -3600,7 +3773,8 @@ export class MailboxDO extends DurableObject<Env> {
     }
   }
 
-  private async scheduleRemainingWork() {
+  /** When the earliest pending job (inbound, object deletion, Office preview) is due, or null. */
+  private nextDueWork() {
     const nextInbound = this.db
       .select({ nextAttemptAt: pendingInbound.nextAttemptAt })
       .from(pendingInbound)
@@ -3627,13 +3801,39 @@ export class MailboxDO extends DurableObject<Env> {
         : [{ nextAttemptAt: new Date(officePreviewAttempt) }]),
     ].flatMap((job) => (job ? [job.nextAttemptAt.getTime()] : []));
 
-    const nextAttemptAt =
-      attemptTimes.length > 0 ? Math.min(...attemptTimes) : null;
+    return attemptTimes.length > 0 ? Math.min(...attemptTimes) : null;
+  }
 
-    if (nextAttemptAt !== null) {
-      await this.scheduleAlarm(
-        Math.max(Date.now() + ALARM_WAKE_DELAY_MS, nextAttemptAt)
-      );
+  /**
+   * Schedules the next wake for the work left. A wake set only for a parse
+   * that might never finish (`recordInboundAttempt`) is replaced by the real
+   * next due time, or removed when nothing is due, so a stored message does
+   * not cause an empty wake. Any other alarm is only moved earlier.
+   */
+  private async scheduleRemainingWork() {
+    const { attemptAlarmAt } = this;
+    this.attemptAlarmAt = null;
+    const current = await this.state.storage.getAlarm();
+    // Read after the await, so nothing changes between the read and the write.
+    const nextAttemptAt = this.nextDueWork();
+
+    const wakeAt =
+      nextAttemptAt === null
+        ? null
+        : Math.max(Date.now() + ALARM_WAKE_DELAY_MS, nextAttemptAt);
+
+    const ownWake =
+      current !== null &&
+      current === attemptAlarmAt &&
+      // Imported mail waits for this alarm to be announced.
+      !this.state.storage.kv.get<boolean>(IMPORT_PENDING_KEY);
+
+    if (ownWake) {
+      await (wakeAt === null
+        ? this.state.storage.deleteAlarm()
+        : this.state.storage.setAlarm(wakeAt));
+    } else if (wakeAt !== null) {
+      await this.scheduleAlarm(wakeAt);
     }
   }
 
@@ -3696,6 +3896,15 @@ export class MailboxDO extends DurableObject<Env> {
   /**
    * Message-ID is intentionally non-unique. Ordered header arrays decide which
    * locally known copy is the parent; References fall back newest-to-oldest.
+   *
+   * Anyone can send mail that copies a Message-ID, so among the copies of
+   * one Message-ID:
+   * 1. a message this mailbox sent comes first: its Message-ID is the one
+   *    the counterparty's reply names, and a stranger's copy of it must not
+   *    take that reply (into Spam, say);
+   * 2. then a copy whose conversation is outside Spam and Trash, so a copy
+   *    in Spam is picked only when every copy is in Spam or Trash;
+   * 3. then the newest.
    */
   resolveParent(inReplyTo: string[], references: string[]) {
     const candidates = [...new Set([...inReplyTo, ...references])];
@@ -3703,30 +3912,33 @@ export class MailboxDO extends DurableObject<Env> {
     if (!candidates.length) return null;
 
     const rows = this.db
-      .select()
+      .select({ email: emails, mailboxState: conversations.mailboxState })
       .from(emails)
+      .leftJoin(conversations, eq(conversations.id, emails.conversationId))
       .where(inArray(emails.messageIdHeader, candidates))
       .orderBy(desc(emails.timelineAt))
       .all();
 
+    const rank = (row: (typeof rows)[number]) =>
+      (row.email.direction === "outgoing" ? 0 : 2) +
+      (row.mailboxState === "spam" || row.mailboxState === "trash" ? 1 : 0);
+
     const byMessageId = new Map<string, (typeof rows)[number]>();
 
+    // Rows are newest first, so a later row replaces a kept one only when it ranks better.
     for (const row of rows) {
-      if (row.messageIdHeader && !byMessageId.has(row.messageIdHeader)) {
-        byMessageId.set(row.messageIdHeader, row);
-      }
+      const messageId = row.email.messageIdHeader;
+
+      if (!messageId) continue;
+      const kept = byMessageId.get(messageId);
+
+      if (!kept || rank(row) < rank(kept)) byMessageId.set(messageId, row);
     }
 
-    for (const messageId of inReplyTo) {
+    for (const messageId of [...inReplyTo, ...references.toReversed()]) {
       const row = byMessageId.get(messageId);
 
-      if (row) return row;
-    }
-
-    for (const messageId of references.toReversed()) {
-      const row = byMessageId.get(messageId);
-
-      if (row) return row;
+      if (row) return row.email;
     }
 
     return null;

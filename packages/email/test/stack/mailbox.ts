@@ -16,8 +16,8 @@ export type MailboxFakes = {
   push?: "capture";
   /** Webhook events are recorded instead of queued. */
   webhooks?: "capture";
-  /** Writes or deletes in the mail bucket fail; reads still work. */
-  mailStorage?: { put?: "fail"; delete?: "fail" };
+  /** Writes, deletes or `head` checks in the mail bucket fail; reads still work. */
+  mailStorage?: { put?: "fail"; delete?: "fail"; head?: "fail" };
   /**
    * The classification model: `rules` answers with the text of the first
    * rule whose `includes` is in the prompt (else `fallback`), `unavailable`
@@ -48,6 +48,7 @@ export type MailboxCall =
       data: { reasoning: AiModel["reasoning"]; prompt: string };
     }
   | { kind: "MAIL_STORAGE.put"; data: string }
+  | { kind: "MAIL_STORAGE.head"; data: string }
   | { kind: "MAIL_STORAGE.delete"; data: string | string[] }
   // The bindings are `Queue<unknown>`: a body is whatever the module sent.
   | { kind: `${FakedQueue}.send`; data: unknown }
@@ -257,7 +258,15 @@ export class MailboxDO extends EmailMailboxDO {
     const real = env.MAIL_STORAGE;
 
     const bucket: R2Bucket = {
-      head: (key) => real.head(key),
+      head: (key) => {
+        if (this.fakes().mailStorage?.head === "fail") {
+          this.record({ kind: "MAIL_STORAGE.head", data: key });
+
+          return Promise.reject(new Error("R2 unavailable"));
+        }
+
+        return real.head(key);
+      },
       get: (key: string, options?: R2GetOptions) => real.get(key, options),
       put: (
         key: string,

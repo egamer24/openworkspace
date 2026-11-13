@@ -23,10 +23,13 @@ type SenderDialogKind = "unsubscribe" | "block";
 export function useSenderActions({
   mailbox,
   onLeaveConversation,
+  onOpenConversation,
 }: {
   mailbox?: Mailbox;
   /** Called after an action moved the open conversation out of the current folder. */
   onLeaveConversation: () => void;
+  /** Called with the conversation a message rejoined (Not spam), to open it instead. */
+  onOpenConversation: (conversationId: string) => void;
 }) {
   const [dialog, setDialog] = useState<{
     kind: SenderDialogKind;
@@ -92,7 +95,9 @@ export function useSenderActions({
           toast.success(
             `${result.rejoined ? "Moved back to its conversation" : "Moved to Inbox"}. Mail from ${message.fromAddress} won't be treated as spam.`
           );
-          onLeaveConversation();
+
+          if (result.rejoined) onOpenConversation(result.conversationId);
+          else onLeaveConversation();
         },
         onError: (error) => toast.error(error.message),
       }

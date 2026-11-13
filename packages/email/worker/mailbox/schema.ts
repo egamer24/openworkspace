@@ -64,6 +64,12 @@ export const pendingInbound = sqliteTable(
     receivedAt: integer("received_at", { mode: "timestamp_ms" }).notNull(),
     attempts: integer("attempts").notNull().default(0),
     aiAttempts: integer("ai_attempts").notNull().default(0),
+    /**
+     * Attempts that ended without an outcome: counted before parsing and
+     * given back when the attempt stores the message or records a failure,
+     * so only attempts whose alarm was killed (CPU, memory) remain.
+     */
+    unfinishedAttempts: integer("unfinished_attempts").notNull().default(0),
     nextAttemptAt: integer("next_attempt_at", {
       mode: "timestamp_ms",
     }).notNull(),
@@ -186,6 +192,11 @@ export const emails = sqliteTable(
     }).$type<EmailScreening>(),
     /** Set to "spam" when someone in this mailbox reported the message; only its presence is read. */
     reportLabel: text("report_label", { enum: ["spam"] }),
+    /**
+     * The conversation this spam message named but was kept out of (#25).
+     * It rejoins that conversation when it leaves Spam; cleared then.
+     */
+    splitFromConversationId: text("split_from_conversation_id"),
     attachmentsJson: text("attachments_json", { mode: "json" })
       .$type<StoredAttachment[]>()
       .notNull()

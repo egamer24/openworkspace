@@ -15,6 +15,13 @@
       "when": 1794379791382,
       "tag": "0001_mute_jack_flag",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794581335782,
+      "tag": "0002_good_komodo",
+      "breakpoints": true
     }
   ]
 }

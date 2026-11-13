@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 
 import { required } from "@open-workspace/core/shared";
 import { inboundMessageId } from "@open-workspace/email/worker/mail/inbound.ts";
+import type { MailboxState } from "@open-workspace/email/worker/mailbox/folder-model.ts";
 import type { NewEmail } from "@open-workspace/email/worker/mailbox/schema.ts";
 import { z } from "zod";
 
@@ -57,11 +58,20 @@ function spamClassifier() {
   };
 }
 
-/** Delivers a message (a reply to `inReplyTo`, if any) and waits until it is stored. */
+/**
+ * Delivers a message (a reply to `inReplyTo`, if any) and waits until it is
+ * stored. Its Message-ID is `<id@example.net>` unless `messageId` says.
+ */
 async function deliverInbound(
   mailbox: ReturnType<typeof mailboxStub>,
   mailboxId: string,
-  delivery: { id: string; from: string; body: string; inReplyTo: string | null }
+  delivery: {
+    id: string;
+    from: string;
+    body: string;
+    inReplyTo: string | null;
+    messageId?: string;
+  }
 ) {
   const rawObjectKey = `test/${delivery.id}.eml`;
   await env.MAIL_STORAGE.put(
@@ -70,7 +80,7 @@ async function deliverInbound(
       `From: <${delivery.from}>`,
       "To: me@example.test",
       delivery.inReplyTo ? "Subject: Re: The original" : "Subject: New",
-      `Message-ID: <${delivery.id}@example.net>`,
+      `Message-ID: ${delivery.messageId ?? `<${delivery.id}@example.net>`}`,
       ...(delivery.inReplyTo
         ? [
             `In-Reply-To: ${delivery.inReplyTo}`,
@@ -96,6 +106,61 @@ async function deliverInbound(
     ),
     `${delivery.id} is stored`
   );
+}
+
+/** A message's split marker: the conversation it was kept out of as spam. */
+async function splitMarker(mailboxId: string, emailId: string) {
+  const [row] = await hooks.mailboxRows(
+    mailboxId,
+    z.object({ split_from_conversation_id: z.string().nullable() }),
+    "select split_from_conversation_id from emails where id = ?",
+    emailId
+  );
+
+  return required(row, `${emailId} exists`).split_from_conversation_id;
+}
+
+/**
+ * A mailbox with one conversation (in `mailboxState`) and a reply to it that
+ * the AI put in Spam, so it was kept out of it in a conversation of its own.
+ */
+async function splitSpamReply(name: string, mailboxState: MailboxState) {
+  const mailboxId = `mbx_${name}_${crypto.randomUUID()}`;
+  const mailbox = mailboxStub(mailboxId);
+  const conversationId = `conv_${name}_target`;
+  const messageIdHeader = `<${name}-original@example.net>`;
+
+  await mailbox.testFake({ push: "capture", classifier: spamClassifier() });
+  await mailbox.seedMailbox(
+    [],
+    [
+      {
+        ...incoming({
+          id: `msg_${name}_original`,
+          conversationId,
+          timelineAt: new Date(Date.now() - 60_000),
+          bodyText: "The original message.",
+        }),
+        messageIdHeader,
+      },
+    ],
+    [{ id: conversationId, mailboxState }]
+  );
+
+  const reply = await deliverInbound(mailbox, mailboxId, {
+    id: `delivery_${name}_${crypto.randomUUID()}`,
+    from: "colleague@example.net",
+    body: "Spam offer, as the AI wrongly thinks.",
+    inReplyTo: messageIdHeader,
+  });
+
+  expect(reply.conversationId).not.toBe(conversationId);
+  expect(
+    await mailbox.getConversationSnapshot(reply.conversationId)
+  ).toMatchObject({ mailboxState: "spam" });
+  expect(await splitMarker(mailboxId, reply.id)).toBe(conversationId);
+
+  return { mailboxId, mailbox, conversationId, reply };
 }
 
 describe("mailbox conversation index", () => {
@@ -527,6 +592,192 @@ describe("mailbox conversation index", () => {
     );
   });
 
+  it("brings an archived conversation to Inbox when a spam reply rejoins it", async () => {
+    const userId = "usr_not_spam_archive";
+
+    const { mailboxId, mailbox, conversationId, reply } = await splitSpamReply(
+      "not_spam_archive",
+      "archive"
+    );
+
+    expect(
+      await mailbox.markNotSpam({ emailId: reply.id, userId })
+    ).toMatchObject({ restored: true, rejoined: true, conversationId });
+    expect(await mailbox.getConversationSnapshot(conversationId)).toMatchObject(
+      { mailboxState: "active", messages: [{}, { id: reply.id }] }
+    );
+    expect(await splitMarker(mailboxId, reply.id)).toBeNull();
+  });
+
+  it("puts a split-off reply back when its conversation is moved out of Spam", async () => {
+    const web = await splitSpamReply("move_to_inbox", "active");
+
+    expect(
+      await web.mailbox.bulkUpdateConversations(
+        [web.reply.conversationId],
+        "spam",
+        { mailboxState: "active" }
+      )
+    ).toBe(1);
+    expect((await web.mailbox.getEmail(web.reply.id))?.conversationId).toBe(
+      web.conversationId
+    );
+    expect(
+      await web.mailbox.getConversationSnapshot(web.reply.conversationId)
+    ).toBeNull();
+    expect(await splitMarker(web.mailboxId, web.reply.id)).toBeNull();
+
+    const jmap = await splitSpamReply("jmap_out_of_junk", "archive");
+
+    expect(await jmap.mailbox.jmapMoveEmails([jmap.reply.id], "inbox")).toBe(
+      true
+    );
+    expect(
+      await jmap.mailbox.getConversationSnapshot(jmap.conversationId)
+    ).toMatchObject({
+      mailboxState: "active",
+      messages: [{}, { id: jmap.reply.id }],
+    });
+  });
+
+  it("puts a split-off conversation back with every message in it", async () => {
+    const userId = "usr_split_thread";
+
+    const { mailboxId, mailbox, conversationId, reply } = await splitSpamReply(
+      "split_thread",
+      "active"
+    );
+
+    // Spam answering the spam joins it.
+    const followUp = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_split_thread_follow_up_${crypto.randomUUID()}`,
+      from: "other@example.org",
+      body: "Spam offer, once more.",
+      inReplyTo: required(reply.messageIdHeader, "the reply has a Message-ID"),
+    });
+
+    expect(followUp.conversationId).toBe(reply.conversationId);
+    expect(await splitMarker(mailboxId, followUp.id)).toBeNull();
+
+    expect(
+      await mailbox.markNotSpam({ emailId: reply.id, userId })
+    ).toMatchObject({ rejoined: true, conversationId });
+    expect(
+      (await mailbox.getConversation(conversationId)).map((email) => email.id)
+    ).toEqual([`msg_split_thread_original`, reply.id, followUp.id]);
+  });
+
+  it("does not merge an imported spam thread into the conversation it names", async () => {
+    const mailboxId = `mbx_import_not_spam_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const userId = "usr_import_not_spam";
+    const now = Date.now();
+
+    // Gmail split this reply off; the import keeps Gmail's threads.
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          ...incoming({
+            id: "msg_import_not_spam_original",
+            conversationId: "conv_import_not_spam_target",
+            timelineAt: new Date(now - 60_000),
+            bodyText: "The original message.",
+          }),
+          messageIdHeader: "<import-not-spam-original@example.net>",
+        },
+        {
+          ...incoming({
+            id: "msg_import_not_spam_reply",
+            conversationId: "conv_imp_not_spam",
+            timelineAt: new Date(now - 30_000),
+            bodyText: "An imported reply in Spam.",
+          }),
+          inReplyToJson: ["<import-not-spam-original@example.net>"],
+          referencesJson: ["<import-not-spam-original@example.net>"],
+        },
+      ],
+      [{ id: "conv_imp_not_spam", mailboxState: "spam" }]
+    );
+
+    expect(
+      await mailbox.markNotSpam({
+        emailId: "msg_import_not_spam_reply",
+        userId,
+      })
+    ).toMatchObject({
+      restored: true,
+      rejoined: false,
+      conversationId: "conv_imp_not_spam",
+    });
+    expect(
+      await mailbox.getConversationSnapshot("conv_imp_not_spam")
+    ).toMatchObject({
+      mailboxState: "active",
+      messages: [{ id: "msg_import_not_spam_reply" }],
+    });
+  });
+
+  it("threads a reply to a sent message into its conversation, not into spam that copied its Message-ID", async () => {
+    const mailboxId = `mbx_message_id_spoof_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const conversationId = "conv_message_id_spoof_sent";
+    const sentMessageId = "<message-id-spoof-sent@example.test>";
+
+    await mailbox.testFake({ push: "capture", classifier: spamClassifier() });
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          id: "msg_message_id_spoof_sent",
+          conversationId,
+          direction: "outgoing",
+          messageIdHeader: sentMessageId,
+          fromJson: [{ address: "me@example.test", name: null }],
+          toJson: [{ address: "colleague@example.net", name: null }],
+          subject: "The original",
+          preview: "A question.",
+          bodyText: "A question.",
+          timelineAt: new Date(Date.now() - 60_000),
+          transportState: "submitted",
+        },
+      ]
+    );
+
+    // A stranger's spam that copies the sent message's Message-ID.
+    const spoof = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_message_id_spoof_${crypto.randomUUID()}`,
+      from: "stranger@example.org",
+      body: "Spam offer: an unsolicited and deceptive promotion.",
+      inReplyTo: null,
+      messageId: sentMessageId,
+    });
+
+    expect(spoof.conversationId).not.toBe(conversationId);
+    expect(
+      await mailbox.getConversationSnapshot(spoof.conversationId)
+    ).toMatchObject({ mailboxState: "spam" });
+
+    const reply = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_message_id_spoof_reply_${crypto.randomUUID()}`,
+      from: "colleague@example.net",
+      body: "The answer to your question.",
+      inReplyTo: sentMessageId,
+    });
+
+    expect(reply.conversationId).toBe(conversationId);
+    expect(await mailbox.getConversationSnapshot(conversationId)).toMatchObject(
+      { mailboxState: "active" }
+    );
+    expect(
+      (await mailbox.testCalls()).filter(
+        (call) =>
+          call.kind === "PUSH_NOTIFICATIONS.send" &&
+          pushDispatch.safeParse(call.data).success
+      )
+    ).toHaveLength(1);
+  });
+
   it("files only new conversations into AI folders", async () => {
     const mailboxId = `mbx_ai_folder_reply_${crypto.randomUUID()}`;
     const mailbox = mailboxStub(mailboxId);
@@ -589,6 +840,38 @@ describe("mailbox conversation index", () => {
     expect(fresh.conversationId).not.toBe(conversationId);
     expect(
       await mailbox.getConversationSnapshot(fresh.conversationId)
+    ).toMatchObject({ mailboxState: "active", folderId: folder.folder.id });
+
+    // The first mail received in a thread this mailbox started is filed too.
+    await mailbox.seedMailbox(
+      [],
+      [
+        {
+          id: "msg_ai_folder_sent",
+          conversationId: "conv_ai_folder_sent",
+          direction: "outgoing",
+          messageIdHeader: "<ai-folder-sent@example.test>",
+          fromJson: [{ address: "me@example.test", name: null }],
+          toJson: [{ address: "billing@example.net", name: null }],
+          subject: "Our order",
+          preview: "Please send the invoice.",
+          bodyText: "Please send the invoice.",
+          timelineAt: new Date(Date.now() - 60_000),
+          transportState: "submitted",
+        },
+      ]
+    );
+
+    const answer = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_ai_folder_sent_reply_${crypto.randomUUID()}`,
+      from: "billing@example.net",
+      body: "The invoice you asked for.",
+      inReplyTo: "<ai-folder-sent@example.test>",
+    });
+
+    expect(answer.conversationId).toBe("conv_ai_folder_sent");
+    expect(
+      await mailbox.getConversationSnapshot("conv_ai_folder_sent")
     ).toMatchObject({ mailboxState: "active", folderId: folder.folder.id });
   });
 
@@ -742,6 +1025,8 @@ describe("mailbox conversation index", () => {
       next_attempt_at: z.number(),
     });
 
+    const attemptedAfter = Date.now();
+
     // The alarm fails with the object; the attempt it counted remains.
     const attempted = required(
       await pollUntil(
@@ -762,8 +1047,11 @@ describe("mailbox conversation index", () => {
       "the killed attempt is recorded"
     );
 
-    // Backed off behind newer mail, not picked first on the next wake.
-    expect(attempted.next_attempt_at).toBeGreaterThan(Date.now());
+    // Backed off behind newer mail (5 s at least), not picked first on the
+    // next wake.
+    expect(attempted.next_attempt_at).toBeGreaterThanOrEqual(
+      attemptedAfter + 5000
+    );
     expect(await mailbox.getEmail(inboundMessageId(deliveryId))).toBeNull();
 
     // A day later the message is stored as unreadable without another parse.
@@ -793,6 +1081,195 @@ describe("mailbox conversation index", () => {
         deliveryId
       )
     ).toEqual([]);
+  });
+
+  it("stores a delivery whose processing was killed three times as unreadable", async () => {
+    const mailboxId = `mbx_inbound_killed_thrice_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const deliveryId = `delivery_inbound_killed_thrice_${crypto.randomUUID()}`;
+    const rawObjectKey = `test/${deliveryId}.eml`;
+    await env.MAIL_STORAGE.put(
+      rawObjectKey,
+      [
+        "From: Sender <sender@example.net>",
+        "To: me@example.test",
+        "Subject: Kills the mailbox",
+        `Message-ID: <${deliveryId}@example.net>`,
+        "",
+        "Processing this message never finishes.",
+      ].join("\r\n")
+    );
+    await mailbox.testFake({ classifier: { mode: "abort" } });
+    await mailbox.enqueueInbound({
+      id: deliveryId,
+      mailboxId,
+      rawObjectKey,
+      envelopeFrom: "sender@example.net",
+      envelopeTo: "me@example.test",
+      receivedAt: Date.now(),
+    });
+
+    const pending = z.object({ unfinished_attempts: z.number() });
+
+    // Each killed attempt is made due again at once.
+    await pollUntil(
+      async () => {
+        await hooks.runAlarm(mailboxId).catch(() => false);
+
+        const [row] = await hooks.mailboxRows(
+          mailboxId,
+          pending,
+          "select unfinished_attempts from pending_inbound where id = ?",
+          deliveryId
+        );
+
+        if (row && row.unfinished_attempts >= 3) return true;
+        await hooks.mailboxSql(
+          mailboxId,
+          "update pending_inbound set next_attempt_at = 0 where id = ?",
+          deliveryId
+        );
+
+        return false;
+      },
+      { failure: "Three killed attempts were not recorded" }
+    );
+
+    const killed = (await mailbox.testCalls()).filter(
+      (call) => call.kind === "classificationModel"
+    ).length;
+
+    await hooks.mailboxSql(
+      mailboxId,
+      "update pending_inbound set next_attempt_at = 0 where id = ?",
+      deliveryId
+    );
+
+    const stored = required(
+      await runAlarmUntil(mailboxId, () =>
+        mailbox.getEmail(inboundMessageId(deliveryId))
+      ),
+      "the delivery is stored"
+    );
+
+    expect(stored).toMatchObject({
+      subject: "(unreadable message)",
+      bodyText: expect.stringContaining("did not finish in 3 attempts"),
+      rawMimeR2Key: rawObjectKey,
+    });
+    // Not parsed (nor classified) again.
+    expect(
+      (await mailbox.testCalls()).filter(
+        (call) => call.kind === "classificationModel"
+      )
+    ).toHaveLength(killed);
+  });
+
+  it("does not count a failed attempt as unfinished", async () => {
+    const mailboxId = `mbx_inbound_failed_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const deliveryId = `delivery_inbound_failed_${crypto.randomUUID()}`;
+    const rawObjectKey = `test/${deliveryId}.eml`;
+    await env.MAIL_STORAGE.put(
+      rawObjectKey,
+      [
+        "From: Sender <sender@example.net>",
+        "To: me@example.test",
+        "Subject: R2 is down",
+        `Message-ID: <${deliveryId}@example.net>`,
+        "MIME-Version: 1.0",
+        "Content-Type: text/html; charset=utf-8",
+        "",
+        "<p>The body cannot be stored.</p>",
+      ].join("\r\n")
+    );
+    await mailbox.testFake({ mailStorage: { put: "fail" } });
+    await mailbox.enqueueInbound({
+      id: deliveryId,
+      mailboxId,
+      rawObjectKey,
+      envelopeFrom: "sender@example.net",
+      envelopeTo: "me@example.test",
+      receivedAt: Date.now(),
+    });
+
+    expect(await hooks.runAlarm(mailboxId)).toBe(true);
+    expect(
+      await hooks.mailboxRows(
+        mailboxId,
+        z.object({ attempts: z.number(), unfinished_attempts: z.number() }),
+        "select attempts, unfinished_attempts from pending_inbound where id = ?",
+        deliveryId
+      )
+    ).toEqual([{ attempts: 1, unfinished_attempts: 0 }]);
+  });
+
+  it("stores an expired delivery without blocking newer mail when R2 cannot be checked", async () => {
+    const mailboxId = `mbx_inbound_expired_head_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+    const expiredId = `delivery_inbound_expired_${crypto.randomUUID()}`;
+    const expiredKey = `test/${expiredId}.eml`;
+    await env.MAIL_STORAGE.put(
+      expiredKey,
+      [
+        "From: Sender <sender@example.net>",
+        "To: me@example.test",
+        "Subject: Never finished",
+        `Message-ID: <${expiredId}@example.net>`,
+        "",
+        "Tried for a day.",
+      ].join("\r\n")
+    );
+    await mailbox.testFake({
+      push: "capture",
+      mailStorage: { head: "fail" },
+      classifier: spamClassifier(),
+    });
+    // Tried before and queued a day ago, so it is first in line.
+    await hooks.mailboxSql(
+      mailboxId,
+      `insert into pending_inbound
+         (id, raw_object_key, envelope_from, envelope_to, received_at, attempts, next_attempt_at)
+       values (?, ?, 'sender@example.net', 'me@example.test', ?, 1, 0)`,
+      expiredId,
+      expiredKey,
+      Date.now() - 24 * 60 * 60 * 1000 - 1
+    );
+
+    const newer = await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_inbound_newer_${crypto.randomUUID()}`,
+      from: "colleague@example.net",
+      body: "Newer mail.",
+      inReplyTo: null,
+    });
+
+    expect(newer.subject).toBe("New");
+    expect(await mailbox.getEmail(inboundMessageId(expiredId))).toMatchObject({
+      subject: "(unreadable message)",
+      rawMimeR2Key: expiredKey,
+    });
+  });
+
+  it("leaves no alarm behind once a delivery is stored", async () => {
+    const mailboxId = `mbx_inbound_alarm_${crypto.randomUUID()}`;
+    const mailbox = mailboxStub(mailboxId);
+
+    await mailbox.testFake({ push: "capture", classifier: spamClassifier() });
+    await deliverInbound(mailbox, mailboxId, {
+      id: `delivery_inbound_alarm_${crypto.randomUUID()}`,
+      from: "colleague@example.net",
+      body: "Nothing else to do.",
+      inReplyTo: null,
+    });
+
+    // The wake set before parsing (5 s later) is removed; the alarm that
+    // stored the message may still be finishing.
+    expect(
+      await pollUntil(async () => (await mailbox.testAlarm()) === null, {
+        timeoutMs: 3000,
+        failure: "An alarm remained after the delivery was stored",
+      })
+    ).toBe(true);
   });
 
   it("searches every email in the selected folder and reactivates replied-to conversations", async () => {
