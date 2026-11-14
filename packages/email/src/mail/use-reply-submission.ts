@@ -1,6 +1,13 @@
+import type { RefObject } from "react";
+
+import type { ComposerContent, ComposerEditorHandle } from "./composer-editor";
 import type { ValidatedComposerRecipients } from "./composer-recipients";
 import { isUploadedAsset } from "./composer-session";
-import type { ComposerSession, ComposerSessionPhase } from "./composer-session";
+import type {
+  ComposerAsset,
+  ComposerSession,
+  ComposerSessionPhase,
+} from "./composer-session";
 import { notifyOutboundResult } from "./outbound-notification";
 import type { Mailbox, MessageDetail, ReplyAction } from "./types";
 import { resolveComposerAttachmentPlan } from "./use-composer-attachment-preflight";
@@ -17,9 +24,9 @@ type ReplySubmissionInput = {
   parent: MessageDetail;
   action?: ReplyAction;
   recipients: ValidatedComposerRecipients;
-  body: string;
-  /** Asks the Worker to append the mailbox's signature (ReplySignature). */
-  includeSignature: boolean;
+  editor: RefObject<ComposerEditorHandle | null>;
+  /** Attachments, and the inline images still in the editor. */
+  activeAssets: readonly ComposerAsset[];
   uploadLimitError: string | null;
   uploadsPending: boolean;
   uploadsFailed: boolean;
@@ -58,7 +65,11 @@ function replySubmissionValidationError(input: ReplySubmissionInput) {
 
   if (input.uploadsFailed) return "Retry or remove failed attachments";
 
-  if (!input.body.trim()) return "Add text to the reply before sending";
+  const content = input.editor.current?.content();
+
+  if (!content || !hasAuthoredContent(content)) {
+    return "Add text to the reply before sending";
+  }
 
   return null;
 }
@@ -71,11 +82,19 @@ async function prepareReplySubmission(
     throw new Error("Reply is no longer available");
   }
 
-  const submittedAssets = input.session
-    .getSnapshot()
-    .assets.filter(isUploadedAsset);
+  let content = input.editor.current?.content();
 
-  if (submittedAssets.length) {
+  if (!content || !hasAuthoredContent(content)) {
+    throw new Error("Add text to the reply before sending");
+  }
+
+  const activeIds = new Set(input.activeAssets.map((asset) => asset.id));
+
+  const assets = input.session
+    .getSnapshot()
+    .assets.filter((asset) => activeIds.has(asset.id));
+
+  if (assets.length) {
     await resolveComposerAttachmentPlan(
       input.session,
       {
@@ -85,26 +104,41 @@ async function prepareReplySubmission(
         mode: input.action.mode,
         cc: input.recipients.cc,
         bcc: input.recipients.bcc,
-        bodyText: input.body,
+        bodyText: content.bodyText,
+        bodyHtml: content.bodyHtml,
       },
-      submittedAssets,
+      assets,
       signal
     );
+    // Freeze the link cards final preflight chose, as the compose window does.
+    input.editor.current?.reconcileAssets();
+    content = input.editor.current?.content() ?? content;
   }
 
-  const uploadedAttachments = submittedAssets.map((asset) => ({
-    uploadId: asset.uploadId,
-    disposition: "attachment" as const,
-  }));
+  const linkedDocumentAssetIds = new Set(content.linkedAssetIds);
+  const submittedAssets = assets.filter(isUploadedAsset);
+
+  const uploadedAttachments = submittedAssets.map((asset) => {
+    const linkedInline =
+      asset.intent === "inline" && linkedDocumentAssetIds.has(asset.id);
+
+    return {
+      uploadId: asset.uploadId,
+      disposition: linkedInline ? ("attachment" as const) : asset.intent,
+      // JSON leaves an undefined content ID out.
+      contentId: (!linkedInline && asset.contentId) || undefined,
+    };
+  });
 
   const command: MailSendDraft = {
     kind: "reply",
     mailboxId: input.mailbox.id,
     cc: input.recipients.cc,
     bcc: input.recipients.bcc,
-    bodyText: input.body,
-    includeSignature: input.includeSignature,
+    bodyText: content.bodyText,
+    bodyHtml: content.bodyHtml,
     uploadedAttachments,
+    storedImages: content.storedImages,
     parentEmailId: input.parent.id,
     mode: input.action.mode,
   };
@@ -114,4 +148,12 @@ async function prepareReplySubmission(
     command,
     submissionKey: JSON.stringify(command),
   };
+}
+
+function hasAuthoredContent(content: ComposerContent) {
+  return Boolean(
+    content.bodyText.trim() ||
+    content.inlineAssetIds.length ||
+    content.storedImages.length
+  );
 }

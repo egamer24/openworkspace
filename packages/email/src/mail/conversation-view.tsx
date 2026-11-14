@@ -97,7 +97,9 @@ export function ConversationView({
     if (!replySelection) return;
     const region = replyRegion.current;
     region?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-    region?.querySelector("textarea")?.focus({ preventScroll: true });
+    region
+      ?.querySelector<HTMLElement>("[data-composer-editor-content]")
+      ?.focus({ preventScroll: true });
   }, [replySelection]);
 
   useEffect(() => {

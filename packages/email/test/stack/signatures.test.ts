@@ -165,7 +165,7 @@ describe("signatures", () => {
       },
     ]);
     expect(await storedHtml(fromPersonal.bodyHtmlR2Key)).toContain(
-      `<div data-signature><br><p>Ana</p><p><img src="cid:${logo}"`
+      `<div data-rich-content><br><p>Ana</p><p><img src="cid:${logo}"`
     );
 
     // A team inbox's signature, with {name} for whoever sends.
@@ -220,8 +220,8 @@ describe("signatures", () => {
       { contentId: teamLogo, disposition: "inline" },
     ]);
 
-    // A reply as the web app's plain-text reply box sends it: the Worker
-    // appends the team signature, its image inline.
+    // A reply as the web app's editor sends it: the signature is in the body,
+    // its image a reference to the stored copy, which the Worker sends inline.
     await mailbox(teamId).seedMailbox(
       [],
       [
@@ -250,9 +250,10 @@ describe("signatures", () => {
           mode: "reply",
           cc: [],
           bcc: [],
-          bodyText: "Following up",
+          bodyText: "Following up\n\nAna Admin\n\nSupport",
+          bodyHtml: `<p>Following up</p><p></p><p>Ana Admin</p><p>Support <img src="cid:${teamLogo}" alt="logo.png"></p>`,
           attachments: [],
-          includeSignature: true,
+          storedImages: [{ ownerId: teamId, contentId: teamLogo }],
         },
       }
     );
@@ -271,6 +272,41 @@ describe("signatures", () => {
     expect(await storedHtml(replied.bodyHtmlR2Key)).toContain(
       `<img src="cid:${teamLogo}"`
     );
+
+    // Only the sender's own and the sending address's images can be used.
+    const borrowed = await call(cookie, "/api/mail/messages", {
+      method: "POST",
+      json: {
+        requestId: crypto.randomUUID(),
+        mailboxId: personalId,
+        to: ["someone@example.net"],
+        subject: "Borrowed",
+        bodyText: "Hi",
+        bodyHtml: `<p>Hi <img src="cid:${teamLogo}"></p>`,
+        storedImages: [{ ownerId: teamId, contentId: teamLogo }],
+      },
+    });
+
+    expect(borrowed.status).toBe(400);
+    await borrowed.json();
+
+    // Saving again keeps a stored image by its content id, without an upload.
+    const kept = await call(cookie, `/api/mail/team-signatures/${teamId}`, {
+      method: "PUT",
+      json: {
+        html: `<p>{name}</p><p>Support team <img src="cid:${teamLogo}"></p>`,
+        text: "{name}\n\nSupport team",
+        images: [{ contentId: teamLogo }],
+      },
+    });
+
+    expect(kept.status).toBe(200);
+    expect(await kept.json()).toMatchObject({
+      signature: { images: [{ contentId: teamLogo, size: 8 }] },
+    });
+    expect(await signatureKeys(teamId)).toEqual([
+      `signatures/${teamId}/${teamLogo}`,
+    ]);
 
     // The list carries the signature each mailbox sends with.
     const list = await readJson(

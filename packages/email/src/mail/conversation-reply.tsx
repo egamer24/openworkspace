@@ -9,11 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupText,
-  InputGroupTextarea,
+  useAuth,
 } from "@open-workspace/core/ui";
 import {
   Check,
@@ -31,6 +27,8 @@ import type { DragEvent } from "react";
 
 import { normalizeExternalEmailAddress } from "../../shared/mail";
 import { ComposerAttachmentList } from "./composer-attachment-list";
+import { ComposerEditor } from "./composer-editor";
+import type { ComposerContent, ComposerEditorHandle } from "./composer-editor";
 import {
   recipientsWithPendingInput,
   validateComposerRecipients,
@@ -39,7 +37,7 @@ import type { RecipientFieldValue } from "./composer-recipients";
 import { useComposerSession } from "./composer-session";
 import { RecipientCombobox } from "./recipient-combobox";
 import { ReplyToWarning } from "./reply-to-warning";
-import { ReplySignature } from "./signature-preview";
+import { messageSignatureHtml } from "./signature";
 import type {
   Mailbox,
   MessageDetail,
@@ -74,6 +72,14 @@ function recipientAddressSet(value: RecipientFieldValue) {
   return new Set(recipientAddresses(value).map(normalizeExternalEmailAddress));
 }
 
+const EMPTY_CONTENT: ComposerContent = {
+  bodyHtml: "",
+  bodyText: "",
+  inlineAssetIds: [],
+  linkedAssetIds: [],
+  storedImages: [],
+};
+
 export function ConversationReply({
   mailbox,
   parent,
@@ -89,16 +95,24 @@ export function ConversationReply({
   onCancel: () => void;
   onSent: (result: SentReply) => void;
 }) {
+  const form = useRef<HTMLFormElement>(null);
+  const editor = useRef<ComposerEditorHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const inlineFileInput = useRef<HTMLInputElement>(null);
   const initialAction = findAction(parent, mode);
   const fieldsSource = `${mode}\0${parent.id}`;
-  const [body, setBody] = useState("");
+  const { user } = useAuth();
 
-  // Shown under the box and appended by the Worker, unless removed.
-  const [signatureRemoved, setSignatureRemoved] = useState(false);
+  // The signature that applies, as editable content above the quoted text
+  // the Worker adds; the box opens empty, so it is only ever added once.
+  // oxlint-disable-next-line react/hook-use-state -- read once, when the editor is created; nothing sets it
+  const [initialHtml] = useState(() =>
+    mailbox ? messageSignatureHtml(mailbox, "reply", user?.name ?? "") : ""
+  );
 
-  const signature = mailbox?.signature?.useOnReply ? mailbox.signature : null;
-  const includeSignature = Boolean(signature) && !signatureRemoved;
+  // Updated as the person edits; untouched until then.
+  const [content, setContent] = useState<ComposerContent>(EMPTY_CONTENT);
+  const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
   const [cc, setCc] = useState(() => recipientField(initialAction?.cc ?? []));
   const [bcc, setBcc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
   const [showCc, setShowCc] = useState(Boolean(initialAction?.cc.length));
@@ -114,7 +128,13 @@ export function ConversationReply({
   }
 
   const { session, snapshot } = useComposerSession(mailbox?.id ?? "");
-  const activeAssets = snapshot.assets;
+
+  // Attachments, and the inline images still in the text.
+  const activeAssets = snapshot.assets.filter(
+    (asset) =>
+      asset.intent === "attachment" || documentAssetIds.includes(asset.id)
+  );
+
   const uploadLimitError = session.limitError();
 
   const uploadsPending = activeAssets.some(
@@ -139,7 +159,8 @@ export function ConversationReply({
       mode: action?.mode ?? mode,
       cc: recipients.cc,
       bcc: recipients.bcc,
-      bodyText: body,
+      bodyText: content.bodyText,
+      bodyHtml: content.bodyHtml || undefined,
     },
     activeAssets,
     snapshot.phase === "editing" && Boolean(mailbox && action)
@@ -152,14 +173,12 @@ export function ConversationReply({
     parent,
     action,
     recipients,
-    body,
-    includeSignature,
+    editor,
+    activeAssets,
     uploadLimitError,
     uploadsPending,
     uploadsFailed,
     onSuccess: (result) => {
-      setBody("");
-      setSignatureRemoved(false);
       setBcc(EMPTY_RECIPIENT_FIELD);
       onSent(result);
     },
@@ -193,7 +212,7 @@ export function ConversationReply({
 
   async function cancel() {
     if (
-      (body.trim() || activeAssets.length > 0) &&
+      (content.bodyText.trim() || activeAssets.length > 0) &&
       !(await confirm({
         title: "Discard this reply?",
         description:
@@ -223,6 +242,7 @@ export function ConversationReply({
       {confirmDialog}
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- files can be dropped anywhere on the form */}
       <form
+        ref={form}
         className="animate-rise border-input bg-surface focus-within:border-ring/60 focus-within:ring-ring/12 overflow-hidden rounded-lg border shadow-sm transition-shadow focus-within:ring-3"
         aria-busy={busy}
         onDragOver={(event) => {
@@ -364,92 +384,106 @@ export function ConversationReply({
           </div>
         )}
 
-        <InputGroup className="min-h-24 rounded-none border-0 bg-transparent shadow-none has-[[data-slot=input-group-control]:focus-visible]:ring-0 dark:bg-transparent">
-          <InputGroupTextarea
-            className="min-h-28 px-3.5 pt-3 text-[0.9375rem] leading-[1.65]"
-            value={body}
-            disabled={busy}
-            onChange={(event) => setBody(event.target.value)}
-            onKeyDown={(event) => {
-              if (
-                !busy &&
-                (event.metaKey || event.ctrlKey) &&
-                event.key === "Enter" &&
-                (body.trim() || activeAssets.length > 0)
-              ) {
-                event.preventDefault();
-                void submission.submit();
-              }
-            }}
+        <div className="flex h-64 flex-col">
+          <ComposerEditor
+            ref={editor}
+            session={session}
+            initialHtml={initialHtml}
+            label="Reply"
             placeholder={
               action.mode === "reply_all"
                 ? "Reply to everyone"
                 : `Reply to ${action.to.join(", ")}`
             }
+            onChange={setContent}
+            onAssetsChange={setDocumentAssetIds}
+            onAddInlineFiles={(files, position) => {
+              const assets = session.addFiles(files, "inline");
+
+              if (assets) editor.current?.insertAssets(assets, position);
+            }}
+            onAddAttachmentFiles={(files) => {
+              session.addFiles(files, "attachment");
+            }}
+            onChooseInlineImage={() => inlineFileInput.current?.click()}
+            onSubmitShortcut={() => form.current?.requestSubmit()}
+            dragging={false}
+            disabled={busy}
           />
-          {signature && !signatureRemoved ? (
-            <ReplySignature
-              signature={signature}
-              disabled={busy}
-              onRemove={() => setSignatureRemoved(true)}
-            />
-          ) : null}
-          <InputGroupAddon
-            align="block-end"
-            className="border-border border-t px-2 py-1.5"
+        </div>
+        <div className="border-border text-muted-foreground flex items-center gap-2 border-t px-2 py-1.5 text-sm">
+          <input
+            ref={fileInput}
+            className="sr-only"
+            type="file"
+            multiple
+            disabled={busy}
+            onChange={(event) => {
+              session.addFiles(
+                Array.from(event.target.files ?? []),
+                "attachment"
+              );
+              event.target.value = "";
+            }}
+          />
+          <input
+            ref={inlineFileInput}
+            className="sr-only"
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            multiple
+            tabIndex={-1}
+            aria-hidden
+            disabled={busy}
+            onChange={(event) => {
+              const assets = session.addFiles(
+                Array.from(event.target.files ?? []),
+                "inline"
+              );
+
+              if (assets) editor.current?.insertAssets(assets);
+              event.target.value = "";
+            }}
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={busy}
+            onClick={() => fileInput.current?.click()}
           >
-            <input
-              ref={fileInput}
-              className="sr-only"
-              type="file"
-              multiple
-              disabled={busy}
-              onChange={(event) => {
-                session.addFiles(
-                  Array.from(event.target.files ?? []),
-                  "attachment"
-                );
-                event.target.value = "";
-              }}
-            />
-            <InputGroupButton
-              size="icon-sm"
-              disabled={busy}
-              onClick={() => fileInput.current?.click()}
-            >
-              <Paperclip />
-              <span className="sr-only">Add attachments</span>
-            </InputGroupButton>
-            <InputGroupText
-              className={cn(
-                "min-w-0 flex-1 text-xs",
-                (uploadLimitError || snapshot.planError) && "text-destructive"
-              )}
-            >
-              {uploadLimitError ||
-                (activeAssets.length > 0 && snapshot.planError ? (
-                  "Could not check attachment delivery"
-                ) : activeAssets.length ? (
-                  `${activeAssets.length} attachment${activeAssets.length === 1 ? "" : "s"}`
-                ) : (
-                  <span className="hidden sm:inline">Ctrl + Enter to send</span>
-                ))}
-            </InputGroupText>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={
-                busy ||
-                Boolean(uploadLimitError) ||
-                uploadsPending ||
-                uploadsFailed
-              }
-            >
-              {busy ? <LoaderCircle className="animate-spin" /> : <Send />}
-              Send
-            </Button>
-          </InputGroupAddon>
-        </InputGroup>
+            <Paperclip />
+            <span className="sr-only">Add attachments</span>
+          </Button>
+          <span
+            className={cn(
+              "min-w-0 flex-1 text-xs",
+              (uploadLimitError || snapshot.planError) && "text-destructive"
+            )}
+          >
+            {uploadLimitError ||
+              (activeAssets.length > 0 && snapshot.planError ? (
+                "Could not check attachment delivery"
+              ) : activeAssets.length ? (
+                `${activeAssets.length} attachment${activeAssets.length === 1 ? "" : "s"}`
+              ) : (
+                <span className="hidden sm:inline">Ctrl + Enter to send</span>
+              ))}
+          </span>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={
+              busy ||
+              Boolean(uploadLimitError) ||
+              uploadsPending ||
+              uploadsFailed
+            }
+          >
+            {busy ? <LoaderCircle className="animate-spin" /> : <Send />}
+            Send
+          </Button>
+        </div>
 
         <ComposerAttachmentList
           uploads={activeAssets}

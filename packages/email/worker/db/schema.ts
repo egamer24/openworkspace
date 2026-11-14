@@ -11,6 +11,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import type { RichImage } from "../../shared/rich-content";
+
 /** D1 tables of the mail module; core's tables are in @open-workspace/core. */
 
 export const mailboxNotificationPreferences = sqliteTable(
@@ -51,9 +53,7 @@ export const signatures = sqliteTable(
     html: text("html").notNull(),
     /** The editor's plain-text version, for text bodies. */
     text: text("text").notNull(),
-    images: text("images", { mode: "json" })
-      .$type<SignatureImage[]>()
-      .notNull(),
+    images: text("images", { mode: "json" }).$type<RichImage[]>().notNull(),
     useOnNew: integer("use_on_new", { mode: "boolean" })
       .notNull()
       .default(true),
@@ -73,14 +73,6 @@ export const signatures = sqliteTable(
     ),
   ]
 );
-
-/** An inline image of a signature, sent as a `cid:` attachment. */
-export type SignatureImage = {
-  contentId: string;
-  filename: string;
-  contentType: string;
-  size: number;
-};
 
 /**
  * Browsers that get new-mail notifications, one row per device, bound to

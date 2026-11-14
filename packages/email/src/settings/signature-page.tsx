@@ -54,6 +54,7 @@ export function SignatureSettings() {
             saved={saved.data.signature}
             uploadMailboxId={uploadMailbox?.id}
             label="Your signature"
+            placeholder="Your name, role, phone…"
             onSave={save}
           />
         )}

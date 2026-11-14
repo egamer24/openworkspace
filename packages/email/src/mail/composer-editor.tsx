@@ -27,6 +27,7 @@ import type {
 } from "./composer-session";
 import { ComposerToolbar } from "./composer-toolbar";
 import { isInlineComposerImage } from "./composer-upload-client";
+import { StoredImage } from "./rich-content";
 
 export type { ComposerContent } from "./composer-editor-document";
 
@@ -36,8 +37,6 @@ export type ComposerEditorHandle = {
   insertAssets: (assets: ComposerAssetRecord[], position?: number) => void;
   reconcileAssets: () => void;
   removeAsset: (assetId: string) => boolean;
-  /** Adds `html` after everything else, leaving the cursor where it is. */
-  appendHtml: (html: string) => void;
   focus: () => void;
 };
 
@@ -116,6 +115,7 @@ export const ComposerEditor = forwardRef<
       Placeholder.configure({ placeholder }),
       // Read once, when the editor is created: pass a stable function.
       ComposerAsset.configure({ session, onAssetsChanged: onAssetsChange }),
+      StoredImage,
     ],
     content: initialHtml,
     editorProps: {
@@ -224,7 +224,8 @@ export const ComposerEditor = forwardRef<
   });
 
   useEffect(() => {
-    editor.setEditable(!disabled);
+    // Not an edit: no update event, so onChange only follows the person.
+    editor.setEditable(!disabled, false);
   }, [disabled, editor]);
 
   useEffect(
@@ -258,11 +259,6 @@ export const ComposerEditor = forwardRef<
         editor.view.dispatch(transaction);
 
         return true;
-      },
-      appendHtml: (html) => {
-        editor.commands.insertContentAt(editor.state.doc.content.size, html, {
-          updateSelection: false,
-        });
       },
       focus: () => editor.commands.focus(),
     }),

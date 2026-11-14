@@ -13,27 +13,23 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { z } from "zod";
 
-import { isComposerInlineImageContentType } from "../../shared/mail";
 import { MAIL_ORGANIZE_SCOPE, MAIL_READ_SCOPE } from "../../shared/permissions";
 import { signatures } from "../db/schema";
 import { accessibleMailbox } from "./access";
+import {
+  deleteRichImages,
+  isEmptyRichContent,
+  storeRichImages,
+} from "./rich-content";
 import { signatureSchema } from "./schemas";
 import {
-  deleteSignatureImages,
   loadSignature,
   ownerColumn,
   ownerId,
-  signatureImageKey,
+  signatureImagePrefix,
 } from "./signatures";
 import type { Signature, SignatureOwner } from "./signatures";
-import {
-  copyStoredAttachmentToMessage,
-  loadComposerUpload,
-  UploadValidationError,
-} from "./uploads";
-
-/** A signature image goes out with every message, so it stays small. */
-const MAX_SIGNATURE_IMAGE_BYTES = 1_000_000;
+import { UploadValidationError } from "./uploads";
 
 function signatureView(owner: SignatureOwner, signature: Signature | null) {
   return {
@@ -50,71 +46,31 @@ function signatureView(owner: SignatureOwner, signature: Signature | null) {
 
 /**
  * Saves the HTML as given (the editor's own output; recipients sanitize mail
- * on display) and copies its images from composer uploads to the owner's
- * signature prefix. Images no longer in the signature are deleted.
+ * on display), with its images stored under the owner's signature prefix
+ * (rich-content.ts). Images no longer in the signature are deleted.
  */
 async function saveSignature(
   c: Context<AppEnv>,
   owner: SignatureOwner,
   input: z.infer<typeof signatureSchema>
 ) {
-  const id = ownerId(owner);
+  const prefix = signatureImagePrefix(ownerId(owner));
   const db = createDb(c.env.DB);
 
-  const wanted = input.images.filter((image) =>
-    input.html.includes(`cid:${image.contentId}`)
-  );
-
-  if (!input.text.trim() && !wanted.length) {
+  if (isEmptyRichContent(input)) {
     await db.delete(signatures).where(ownerColumn(owner));
-    await deleteSignatureImages(c.env.MAIL_STORAGE, id);
+    await deleteRichImages(c.env.MAIL_STORAGE, prefix);
 
     return null;
   }
 
-  const { uploadMailboxId } = input;
-
-  if (wanted.length && !uploadMailboxId) {
-    throw new UploadValidationError("uploadMailboxId is required for images");
-  }
-
-  const images = await Promise.all(
-    wanted.map(async (image) => {
-      // Upload keys carry the uploader's id, so only their own uploads load.
-      const upload = await loadComposerUpload({
-        env: c.env,
-        mailboxId: uploadMailboxId ?? "",
-        userId: c.get("user").id,
-        uploadId: image.uploadId,
-      });
-
-      if (!isComposerInlineImageContentType(upload.contentType)) {
-        throw new UploadValidationError(
-          "Signature images must be PNG, JPEG, GIF, or WebP"
-        );
-      }
-
-      if (upload.size > MAX_SIGNATURE_IMAGE_BYTES) {
-        throw new UploadValidationError(
-          "Signature images are limited to 1 MB each"
-        );
-      }
-
-      await copyStoredAttachmentToMessage({
-        env: c.env,
-        sourceKey: upload.r2Key,
-        destinationKey: signatureImageKey(id, image.contentId),
-        contentType: upload.contentType,
-      });
-
-      return {
-        contentId: image.contentId,
-        filename: upload.filename,
-        contentType: upload.contentType,
-        size: upload.size,
-      };
-    })
-  );
+  const images = await storeRichImages({
+    env: c.env,
+    userId: c.get("user").id,
+    prefix,
+    previous: (await loadSignature(c.env, owner))?.images ?? [],
+    content: input,
+  });
 
   const signature = {
     html: input.html,
@@ -134,9 +90,9 @@ async function saveSignature(
       set: values,
     });
 
-  await deleteSignatureImages(
+  await deleteRichImages(
     c.env.MAIL_STORAGE,
-    id,
+    prefix,
     new Set(images.map((image) => image.contentId))
   );
 
@@ -226,7 +182,9 @@ export const signatureRoutes = new Hono<AppEnv>()
         (can(c, "manage_teams") && (await isTeamAddress(c.env, owner)));
 
       const object = allowed
-        ? await c.env.MAIL_STORAGE.get(signatureImageKey(owner, contentId))
+        ? await c.env.MAIL_STORAGE.get(
+            `${signatureImagePrefix(owner)}${contentId}`
+          )
         : null;
 
       if (!object) return apiError(c, 404, "NOT_FOUND", "Image not found");

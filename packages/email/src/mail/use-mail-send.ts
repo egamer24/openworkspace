@@ -3,6 +3,7 @@ import type { SuccessfulResponse } from "@open-workspace/core/ui";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import type { ReplyActionMode } from "../../shared/mail";
+import type { StoredImageRef } from "../../shared/rich-content";
 import { mailApi } from "../lib/mail-api";
 import type { SubmittedComposerUpload } from "./composer-session";
 import { scheduleMailboxRefresh } from "./mail-query-cache";
@@ -16,9 +17,9 @@ type MessageContent = {
   mailboxId: string;
   bodyText: string;
   bodyHtml?: string;
-  /** The Worker appends the signature; the plain-text reply box asks for it. */
-  includeSignature?: boolean;
   uploadedAttachments?: SubmittedComposerUpload[];
+  /** Saved images the body shows by `cid:`, e.g. the signature's. */
+  storedImages?: StoredImageRef[];
 };
 
 type MailSendInput =
@@ -87,7 +88,7 @@ export function useMailSend() {
         bodyText: input.bodyText,
         bodyHtml: input.bodyHtml,
         attachments: input.uploadedAttachments ?? [],
-        includeSignature: input.includeSignature,
+        storedImages: input.storedImages ?? [],
       };
 
       if (input.kind === "reply") {

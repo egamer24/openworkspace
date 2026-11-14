@@ -1,155 +1,99 @@
-import { Button, Switch } from "@open-workspace/core/ui";
+import { Button, Switch, useAddressSection } from "@open-workspace/core/ui";
 import type { SuccessfulResponse } from "@open-workspace/core/ui";
 import { useMutation } from "@tanstack/react-query";
 import { LoaderCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { mailApi } from "../lib/mail-api";
-import { ComposerEditor } from "../mail/composer-editor";
-import type { ComposerEditorHandle } from "../mail/composer-editor";
-import { useComposerSession } from "../mail/composer-session";
-import { signatureEditorHtml } from "../mail/signature-content";
+import { signatureImageUrl } from "../mail/signature";
+import { RichContentEditor } from "./rich-content-editor";
+import type {
+  RichContentEditorHandle,
+  RichContentValue,
+} from "./rich-content-editor";
 
 export type SavedSignature = SuccessfulResponse<
   Awaited<ReturnType<typeof mailApi.api.mail.signature.$get>>
 >["signature"];
 
-export type SignatureBody = {
-  html: string;
-  text: string;
-  images: { uploadId: string; contentId: string }[];
-  uploadMailboxId?: string;
+export type SignatureBody = RichContentValue & {
   useOnNew: boolean;
   useOnReply: boolean;
 };
 
 /**
- * A signature in the composer's own editor, so it looks as it will once
- * sent. `uploadMailboxId` is a mailbox the editor can upload images through.
+ * A signature: its text and images in the shared rich content editor, and
+ * the switches for new messages and for replies and forwards. With a Save
+ * button of its own, or, inside an address editor (`section`), saved by
+ * the editor's "Save address" through `useAddressSection`.
  */
 export function SignatureEditor({
   saved,
   uploadMailboxId,
   label,
+  placeholder,
+  section = false,
   onSave,
 }: {
   saved: SavedSignature;
   uploadMailboxId: string | undefined;
   label: string;
+  placeholder: string;
+  section?: boolean;
   onSave: (body: SignatureBody) => Promise<void>;
 }) {
-  const editor = useRef<ComposerEditorHandle>(null);
-  const inlineFileInput = useRef<HTMLInputElement>(null);
-  const { session, snapshot } = useComposerSession(uploadMailboxId ?? "");
-  const [initialHtml, setInitialHtml] = useState<string | null>(null);
-  const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
+  const editor = useRef<RichContentEditorHandle>(null);
+  const [edited, setEdited] = useState(false);
   const [useOnNew, setUseOnNew] = useState(saved?.useOnNew ?? true);
   const [useOnReply, setUseOnReply] = useState(saved?.useOnReply ?? true);
 
-  const save = useMutation({
-    mutationFn: onSave,
-    onSuccess: () => toast.success("Signature saved"),
-    onError: (error) => {
-      toast.error(
-        error instanceof Error ? error.message : "Signature wasn't saved"
-      );
-    },
+  const [savedSwitches, setSavedSwitches] = useState({
+    useOnNew: saved?.useOnNew ?? true,
+    useOnReply: saved?.useOnReply ?? true,
   });
 
-  const saving = save.isPending;
-  const restoring = useRef(false);
+  const dirty =
+    edited ||
+    useOnNew !== savedSwitches.useOnNew ||
+    useOnReply !== savedSwitches.useOnReply;
 
-  useEffect(() => {
-    if (restoring.current) return;
-    restoring.current = true;
-    void (
-      saved
-        ? signatureEditorHtml(session, saved.ownerId, saved.html)
-        : Promise.resolve("")
-    ).then(setInitialHtml);
-  }, [session, saved]);
+  async function save() {
+    const value = editor.current?.value();
 
-  const uploading = snapshot.assets.some(
-    (asset) =>
-      documentAssetIds.includes(asset.id) && asset.status !== "uploaded"
-  );
-
-  function addImages(files: File[], position?: number) {
-    if (!uploadMailboxId) {
-      toast.error("You need a mailbox you can send from to add images");
-
-      return;
-    }
-
-    const assets = session.addFiles(files, "inline");
-
-    if (assets) editor.current?.insertAssets(assets, position);
+    if (!value) return;
+    await onSave({ ...value, useOnNew, useOnReply });
+    setEdited(false);
+    setSavedSwitches({ useOnNew, useOnReply });
   }
 
-  function submit() {
-    const content = editor.current?.content();
+  // Inside an address editor, its "Save address" saves this; elsewhere a no-op.
+  useAddressSection({
+    dirty,
+    save: () =>
+      save().catch((error: Error) => {
+        throw new Error(`Signature: ${error.message}`, { cause: error });
+      }),
+  });
 
-    if (!content || saving || uploading) return;
-
-    const images = content.inlineAssetIds.flatMap((assetId) => {
-      const asset = session.getAsset(assetId);
-
-      return asset?.uploadId && asset.contentId
-        ? [{ uploadId: asset.uploadId, contentId: asset.contentId }]
-        : [];
-    });
-
-    save.mutate({
-      html: content.bodyHtml,
-      text: content.bodyText,
-      images,
-      uploadMailboxId,
-      useOnNew,
-      useOnReply,
-    });
-  }
-
-  if (initialHtml === null) {
-    return (
-      <div className="text-muted-foreground flex items-center gap-2 py-5 text-sm">
-        <LoaderCircle className="size-4 animate-spin" /> Loading signature…
-      </div>
-    );
-  }
+  const saveNow = useMutation({
+    mutationFn: save,
+    onSuccess: () => toast.success("Signature saved"),
+    onError: (error) => toast.error(error.message),
+  });
 
   return (
     <div className="space-y-3">
-      <div className="border-input bg-background focus-within:ring-ring/40 flex h-56 flex-col overflow-hidden rounded-lg border focus-within:ring-2">
-        <ComposerEditor
-          ref={editor}
-          session={session}
-          initialHtml={initialHtml}
-          label={label}
-          placeholder="Your name, role, phone…"
-          onChange={() => {}}
-          onAssetsChange={setDocumentAssetIds}
-          onAddInlineFiles={addImages}
-          onAddAttachmentFiles={() => {
-            toast.error("Only images can go in a signature");
-          }}
-          onChooseInlineImage={() => inlineFileInput.current?.click()}
-          onSubmitShortcut={submit}
-          dragging={false}
-          disabled={saving}
-        />
-      </div>
-      <input
-        ref={inlineFileInput}
-        className="sr-only"
-        type="file"
-        accept="image/png,image/jpeg,image/gif,image/webp"
-        tabIndex={-1}
-        aria-hidden
-        onChange={(event) => {
-          addImages(Array.from(event.target.files ?? []));
-          event.target.value = "";
-        }}
+      <RichContentEditor
+        ref={editor}
+        saved={saved}
+        imageUrl={signatureImageUrl}
+        uploadMailboxId={uploadMailboxId}
+        label={label}
+        placeholder={placeholder}
+        disabled={saveNow.isPending}
+        onEdit={() => setEdited(true)}
+        onSubmitShortcut={section ? undefined : () => saveNow.mutate()}
       />
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <label className="flex items-center gap-2 text-sm">
@@ -160,16 +104,18 @@ export function SignatureEditor({
           <Switch checked={useOnReply} onCheckedChange={setUseOnReply} />
           Replies and forwards
         </label>
-        <Button
-          type="button"
-          size="sm"
-          className="ml-auto"
-          disabled={saving || uploading}
-          onClick={submit}
-        >
-          {saving && <LoaderCircle className="animate-spin" />}
-          Save
-        </Button>
+        {section ? null : (
+          <Button
+            type="button"
+            size="sm"
+            className="ml-auto"
+            disabled={saveNow.isPending || !dirty}
+            onClick={() => saveNow.mutate()}
+          >
+            {saveNow.isPending && <LoaderCircle className="animate-spin" />}
+            Save
+          </Button>
+        )}
       </div>
     </div>
   );

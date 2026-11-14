@@ -25,15 +25,13 @@ Under **Teams** you create team addresses. Each one is either:
   mailbox.
 
 Each shared inbox can have one signature, set in its address's editor under
-**Teams**: everyone sending from it gets the same one, with `{name}` replaced
-by the sender's name. A shared inbox without one adds no signature. Your own
-signature, under **Settings → Signature**, goes on mail from your own
-addresses. Both can hold images and can be left off new messages or off
-replies and forwards. A new message or forward opens with the
-signature already in it, so you can change or delete it for that message. A
-reply shows it, with its images, under the reply box: it's added when you
-send, and you can remove it for that reply but not edit it. API callers ask for
-it with `includeSignature: true`.
+**Teams** and saved with **Save address**: everyone sending from it gets the
+same one, with `{name}` replaced by the sender's name. A shared inbox without
+one adds no signature. Your own signature, under **Settings → Signature**,
+goes on mail from your own addresses. Both can hold images and can be left
+off new messages or off replies and forwards. A new message, reply or forward
+opens with the signature already in it, so you can change or delete it for
+that message. API callers ask for it with `includeSignature: true`.
 
 The Everyone team includes everyone, at `all@`. You also use teams to choose
 who can sign in to each [single sign-on app](sso.md).

@@ -6,7 +6,6 @@ import {
   composerAttachmentLimitError,
   isComposerInlineImageContentType,
 } from "../../shared/mail";
-import type { SignatureImage } from "../db/schema";
 import type { StoredAttachment } from "../mailbox/model";
 import type { Email, NewEmail } from "../mailbox/schema";
 import {
@@ -19,6 +18,7 @@ import {
   textWithQuotedContext,
 } from "./outbound-content";
 import { address, replyThreadHeaders } from "./rfc";
+import type { InlineImage } from "./rich-content";
 import type { composeSchema } from "./schemas";
 import {
   copyStoredAttachmentToMessage,
@@ -29,11 +29,15 @@ import {
 
 const DOWNLOAD_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
-export type OutgoingMessageInput = z.infer<typeof composeSchema> & {
+// Stored image references are resolved to `inlineImages` by the routes.
+export type OutgoingMessageInput = Omit<
+  z.infer<typeof composeSchema>,
+  "storedImages"
+> & {
   /** Set by the route from the authenticated session. */
   userId: string;
-  /** The appended signature's images (signatures.ts), sent inline like composer images. */
-  signatureImages?: (SignatureImage & { r2Key: string })[];
+  /** Saved images (rich-content.ts) the body uses, sent inline like composer images. */
+  inlineImages?: InlineImage[];
 };
 
 type PreparedAttachment = StoredAttachment & {
@@ -52,7 +56,7 @@ type OutgoingAttachmentDraft = Pick<
   | "mailboxId"
   | "subject"
   | "userId"
-  | "signatureImages"
+  | "inlineImages"
 >;
 
 export async function discardPreparedObjects(env: Env, storageKeys: string[]) {
@@ -184,7 +188,7 @@ async function loadPreparedComposerAttachments(input: {
 
   const uploads = input.compose.attachments;
 
-  const signatureImages = (input.compose.signatureImages ?? []).map(
+  const savedImages = (input.compose.inlineImages ?? []).map(
     (image, offset) => {
       const id = `att_${uploads.length + offset + 1}`;
 
@@ -249,7 +253,7 @@ async function loadPreparedComposerAttachments(input: {
     })
   );
 
-  return [...uploaded, ...signatureImages];
+  return [...uploaded, ...savedImages];
 }
 
 function planOutgoingAttachments(input: {

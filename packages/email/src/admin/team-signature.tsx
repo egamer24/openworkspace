@@ -8,8 +8,19 @@ import { mailboxesQuery } from "../mail/mail-queries";
 import { SignatureEditor } from "../settings/signature-editor";
 import type { SignatureBody } from "../settings/signature-editor";
 
-/** A shared inbox's signature, in its editor under Administration → Teams. */
+/**
+ * A shared inbox's signature, in its address editor under Administration →
+ * Teams. It follows the delivery chosen in the form: switched to a mailing
+ * list, it hides and is no longer saved with "Save address".
+ */
 export function TeamSignature({ address }: { address: TeamAddress }) {
+  // Mailing lists copy mail to members; only shared inboxes send replies.
+  return address.delivery === "inbox" ? (
+    <TeamSignatureSection address={address} />
+  ) : null;
+}
+
+function TeamSignatureSection({ address }: { address: TeamAddress }) {
   const client = useQueryClient();
   const mailboxes = useQuery(mailboxesQuery());
   const param = { mailboxId: address.mailboxId };
@@ -23,7 +34,6 @@ export function TeamSignature({ address }: { address: TeamAddress }) {
       ),
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: 0,
-    enabled: address.delivery === "inbox",
   });
 
   // Images upload through a mailbox the administrator can send from.
@@ -45,9 +55,6 @@ export function TeamSignature({ address }: { address: TeamAddress }) {
     await client.invalidateQueries({ queryKey: mailboxesQuery().queryKey });
   }
 
-  // Mailing lists copy mail to members; only shared inboxes send replies.
-  if (address.delivery !== "inbox") return null;
-
   return (
     <div className="space-y-2">
       <h3 className="text-sm leading-none font-medium">Signature</h3>
@@ -68,6 +75,8 @@ export function TeamSignature({ address }: { address: TeamAddress }) {
           saved={saved.data.signature}
           uploadMailboxId={uploadMailbox?.id}
           label={`Signature for ${address.address}`}
+          placeholder={`{name}, ${address.displayName}…`}
+          section
           onSave={save}
         />
       )}

@@ -135,17 +135,30 @@ export const outboundAttachmentSchema = z
     }
   });
 
-export const signatureSchema = z.object({
-  /** Stored as given; empty text with no images removes the signature. */
+/** Saved rich content from the composer's editor (rich-content.ts). */
+export const richContentFields = {
+  /** Stored as given; no text and no image deletes the content. */
   html: z.string().max(20_000),
   text: z.string().max(10_000),
-  /** The composer uploads behind the `cid:` images in `html`. */
+  /**
+   * Its `cid:` images: a new composer upload (`uploadId`), or one it already
+   * had, kept under its content id.
+   */
   images: z
-    .array(z.object({ uploadId: uploadIdSchema, contentId: contentIdSchema }))
+    .array(
+      z.object({
+        contentId: contentIdSchema,
+        uploadId: uploadIdSchema.optional(),
+      })
+    )
     .max(10)
     .default([]),
-  /** The mailbox the images were uploaded through (uploads are per mailbox). */
+  /** The mailbox new images were uploaded through (uploads are per mailbox). */
   uploadMailboxId: z.string().min(1).max(80).optional(),
+};
+
+export const signatureSchema = z.object({
+  ...richContentFields,
   useOnNew: z.boolean().default(true),
   useOnReply: z.boolean().default(true),
 });
@@ -154,9 +167,23 @@ export const outboundMessageContentFields = {
   bodyText: z.string().max(500_000).default(""),
   /**
    * Appends the signature that applies: the team address's, or the sender's
-   * own for their own mailbox. The web app always asks.
+   * own for their own mailbox. For API and MCP callers; the web app puts the
+   * signature in its editor instead.
    */
   includeSignature: z.boolean().optional(),
+  /**
+   * Saved images (a signature's) the body shows by `cid:`, sent inline
+   * without uploading them again.
+   */
+  storedImages: z
+    .array(
+      z.object({
+        ownerId: z.string().min(1).max(80),
+        contentId: contentIdSchema,
+      })
+    )
+    .max(MAX_COMPOSER_ATTACHMENT_COUNT)
+    .default([]),
   bodyHtml: z.string().max(1_000_000).optional(),
   attachments: z
     .array(outboundAttachmentSchema)

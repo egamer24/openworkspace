@@ -1,15 +1,16 @@
 import { createDb } from "@open-workspace/core/module";
 import { eq } from "drizzle-orm";
 
+import type { RichImage, StoredImageRef } from "../../shared/rich-content";
 import { signatureHtmlWithName } from "../../shared/signature";
 import { signatures } from "../db/schema";
-import type { SignatureImage } from "../db/schema";
-import { escapeHtml } from "./outbound-content";
+import { appendRichContent, referencedStoredImages } from "./rich-content";
+import type { InlineImage } from "./rich-content";
 
 export type Signature = {
   html: string;
   text: string;
-  images: SignatureImage[];
+  images: RichImage[];
   useOnNew: boolean;
   useOnReply: boolean;
 };
@@ -30,13 +31,9 @@ export function signatureOwner(
   return mailbox.ownerUserId === senderId ? { userId: senderId } : null;
 }
 
-/** The R2 key prefix of an owner's signature images; never expires. */
+/** The R2 prefix of an owner's signature images (rich-content.ts); never expires. */
 export function signatureImagePrefix(owner: string) {
   return `signatures/${owner}/`;
-}
-
-export function signatureImageKey(owner: string, contentId: string) {
-  return `${signatureImagePrefix(owner)}${contentId}`;
 }
 
 export function ownerId(owner: SignatureOwner) {
@@ -81,61 +78,40 @@ export function withSenderName(
 
 /**
  * The message with the signature appended, if it applies to this kind of
- * message. A text-only body gets an HTML part too, so images can show.
+ * message, and the signature images to send inline.
  */
 export function appendSignature<
   T extends { bodyText: string; bodyHtml?: string },
 >(
   input: T,
-  signature: Signature | null,
+  signature: (Signature & { ownerId: string }) | null,
   kind: "new" | "reply",
   senderName: string
-): T & { bodyHtml?: string; signatureImages: SignatureImage[] } {
+): T & { bodyHtml?: string; inlineImages: InlineImage[] } {
   const applies =
     signature && (kind === "new" ? signature.useOnNew : signature.useOnReply);
 
-  if (!applies) return { ...input, signatureImages: [] };
+  if (!applies) return { ...input, inlineImages: [] };
 
-  const { html, text } = withSenderName(signature, senderName);
-  const body = input.bodyText.trimEnd();
-
-  const bodyHtml =
-    input.bodyHtml ??
-    (body ? `<div style="white-space:pre-wrap">${escapeHtml(body)}</div>` : "");
-
-  return {
-    ...input,
-    bodyText: body ? `${body}\n\n${text}` : text,
-    bodyHtml: `${bodyHtml}<div data-signature><br>${html}</div>`,
-    signatureImages: signature.images.filter((image) =>
-      html.includes(`cid:${image.contentId}`)
-    ),
-  };
-}
-
-/** Deletes an owner's signature images except `keep` (content ids). */
-export async function deleteSignatureImages(
-  bucket: R2Bucket,
-  owner: string,
-  keep: ReadonlySet<string> = new Set()
-) {
-  const prefix = signatureImagePrefix(owner);
-  // ponytail: one page; a signature holds far fewer than 1000 images.
-  const page = await bucket.list({ prefix, limit: 1000 });
-
-  const stale = page.objects
-    .map((object) => object.key)
-    .filter((key) => !keep.has(key.slice(prefix.length)));
-
-  if (stale.length) await bucket.delete(stale);
+  return appendRichContent(
+    input,
+    { ...withSenderName(signature, senderName), images: signature.images },
+    signatureImagePrefix(signature.ownerId)
+  );
 }
 
 /**
- * Appends the signature that applies when an API or MCP caller asks
- * (`includeSignature`). The web app puts it in the editor instead.
+ * The message as it is sent: signature images the web composer put in its
+ * body by reference (`storedImages`), and the signature that applies when an
+ * API or MCP caller asks for one (`includeSignature`), all to send inline.
  */
 export async function withSignature<
-  T extends { bodyText: string; bodyHtml?: string; includeSignature?: boolean },
+  T extends {
+    bodyText: string;
+    bodyHtml?: string;
+    includeSignature?: boolean;
+    storedImages: StoredImageRef[];
+  },
 >(input: {
   env: Env;
   sender: { id: string; name: string };
@@ -143,24 +119,58 @@ export async function withSignature<
   kind: "new" | "reply";
   message: T;
 }) {
-  const owner = input.message.includeSignature
-    ? signatureOwner(input.mailbox, input.sender.id)
-    : null;
+  const { message, sender, mailbox } = input;
+  const owner = signatureOwner(mailbox, sender.id);
 
-  if (!owner) return { ...input.message, signatureImages: [] };
+  // The sender's own signature, and the team signature of the address they
+  // send from: the only saved images a message may refer to.
+  const owners: SignatureOwner[] = [{ userId: sender.id }];
 
-  const signed = appendSignature(
-    input.message,
-    await loadSignature(input.env, owner),
-    input.kind,
-    input.sender.name
+  if (mailbox.ownerUserId === null) owners.push({ mailboxId: mailbox.id });
+
+  const needed = owners.filter(
+    (candidate) =>
+      message.storedImages.some((ref) => ref.ownerId === ownerId(candidate)) ||
+      (message.includeSignature &&
+        owner &&
+        ownerId(owner) === ownerId(candidate))
   );
 
+  const loaded = await Promise.all(
+    needed.map(async (candidate) => {
+      const signature = await loadSignature(input.env, candidate);
+
+      return signature && { ...signature, ownerId: ownerId(candidate) };
+    })
+  );
+
+  const sources = loaded.flatMap((signature) =>
+    signature
+      ? [
+          {
+            ownerId: signature.ownerId,
+            prefix: signatureImagePrefix(signature.ownerId),
+            images: signature.images,
+          },
+        ]
+      : []
+  );
+
+  const referenced = referencedStoredImages(message.storedImages, sources);
+
+  const appended =
+    message.includeSignature && owner
+      ? appendSignature(
+          message,
+          loaded.find((signature) => signature?.ownerId === ownerId(owner)) ??
+            null,
+          input.kind,
+          sender.name
+        )
+      : { ...message, inlineImages: [] };
+
   return {
-    ...signed,
-    signatureImages: signed.signatureImages.map((image) => ({
-      ...image,
-      r2Key: signatureImageKey(ownerId(owner), image.contentId),
-    })),
+    ...appended,
+    inlineImages: [...referenced, ...appended.inlineImages],
   };
 }

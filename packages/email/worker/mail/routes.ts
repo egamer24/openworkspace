@@ -1688,15 +1688,15 @@ export const mailRoutes = new Hono<AppEnv>()
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
 
-      const input = await withSignature({
-        env: c.env,
-        sender: c.get("user"),
-        mailbox: access,
-        kind: "new",
-        message: body,
-      });
-
       try {
+        const input = await withSignature({
+          env: c.env,
+          sender: c.get("user"),
+          mailbox: access,
+          kind: "new",
+          message: body,
+        });
+
         const submission = await submitOutgoing({
           env: c.env,
           requestUrl: c.req.url,
@@ -1734,15 +1734,15 @@ export const mailRoutes = new Hono<AppEnv>()
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
 
-      const input = await withSignature({
-        env: c.env,
-        sender: c.get("user"),
-        mailbox: access,
-        kind: "reply",
-        message: body,
-      });
-
       try {
+        const input = await withSignature({
+          env: c.env,
+          sender: c.get("user"),
+          mailbox: access,
+          kind: "reply",
+          message: body,
+        });
+
         const context = await resolveReplyContext({
           env: c.env,
           mailboxId: input.mailboxId,
@@ -1765,7 +1765,7 @@ export const mailRoutes = new Hono<AppEnv>()
             bodyText: input.bodyText,
             bodyHtml: input.bodyHtml,
             attachments: input.attachments,
-            signatureImages: input.signatureImages,
+            inlineImages: input.inlineImages,
           },
           conversationId: context.detached
             ? createId("conv")
@@ -1799,15 +1799,15 @@ export const mailRoutes = new Hono<AppEnv>()
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
 
-      const input = await withSignature({
-        env: c.env,
-        sender: c.get("user"),
-        mailbox: access,
-        kind: "reply",
-        message: body,
-      });
-
       try {
+        const input = await withSignature({
+          env: c.env,
+          sender: c.get("user"),
+          mailbox: access,
+          kind: "reply",
+          message: body,
+        });
+
         const context = await resolveForwardContext({
           env: c.env,
           mailboxId: input.mailboxId,

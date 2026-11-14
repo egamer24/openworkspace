@@ -1,6 +1,7 @@
 import { mailboxStub } from "../mailbox";
 import { repeatUntil } from "./repeat";
-import { deleteSignatureImages } from "./signatures";
+import { deleteRichImages } from "./rich-content";
+import { signatureImagePrefix } from "./signatures";
 
 /** Deletes the mailbox's objects a page at a time, until a listing comes back empty. */
 async function deleteMailboxObjects(bucket: R2Bucket, mailboxId: string) {
@@ -22,6 +23,6 @@ export async function deleteMailboxStorage(env: Env, mailboxId: string) {
     mailboxStub(env, mailboxId).deleteMailboxData(),
     deleteMailboxObjects(env.MAIL_STORAGE, mailboxId),
     // The signature's row goes with the mailbox's (foreign key); its images here.
-    deleteSignatureImages(env.MAIL_STORAGE, mailboxId),
+    deleteRichImages(env.MAIL_STORAGE, signatureImagePrefix(mailboxId)),
   ]);
 }
