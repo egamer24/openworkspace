@@ -29,6 +29,13 @@
       "when": 1794610010950,
       "tag": "0003_trash_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794631900110,
+      "tag": "0004_mail_rules",
+      "breakpoints": true
     }
   ]
 }

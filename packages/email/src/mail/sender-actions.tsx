@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { FilterMessagesDialog } from "./mailbox-rules";
 import {
   BlockSenderDialog,
   senderLabel,
@@ -14,10 +15,10 @@ import {
   useUnblockSender,
 } from "./use-mail-safety";
 
-type SenderDialogKind = "unsubscribe" | "block";
+type SenderDialogKind = "unsubscribe" | "block" | "filter";
 
 /**
- * Sender-level actions (unsubscribe, block, report, trust) and their
+ * Sender-level actions (unsubscribe, block, filter, report, trust) and their
  * confirmation dialogs, shared by the message menus and the command bar.
  */
 export function useSenderActions({
@@ -125,6 +126,14 @@ export function useSenderActions({
             open={dialog.open}
             onOpenChange={setOpen}
             onMoved={onLeaveConversation}
+          />
+        )}
+        {dialog.kind === "filter" && (
+          <FilterMessagesDialog
+            mailboxId={mailbox.id}
+            message={dialog.message}
+            open={dialog.open}
+            onOpenChange={setOpen}
           />
         )}
       </>

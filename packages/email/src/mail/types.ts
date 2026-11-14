@@ -51,3 +51,11 @@ export type MessageDetail = ConversationResponse["messages"][number];
 export type MessageAttachment = MessageDetail["attachments"][number];
 
 export type Folder = string;
+
+type MailRulesRoute = (typeof mailApi.api.mail.mailboxes)[":id"]["rules"];
+
+export type MailRule = SuccessfulResponse<
+  Awaited<ReturnType<MailRulesRoute["$get"]>>
+>["rules"][number];
+
+export type MailRuleInput = Parameters<MailRulesRoute["$post"]>[0]["json"];

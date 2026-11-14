@@ -2,7 +2,9 @@ import {
   aiObjectRunner,
   aiFeatureEnabled,
   aiModel,
+  createDb,
   createId,
+  mailboxAccess,
   normalizeMailboxAddress,
   deferWebhookTask,
   queueWebhookEvent,
@@ -86,6 +88,8 @@ import { emailListKey } from "../mail/message-view";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
 import { suggestParticipants } from "../mail/participants";
 import type { ParticipantSource } from "../mail/participants";
+import { evaluateRules, ruleMatches } from "../mail/rules";
+import type { RuleInput, RuleOutcome } from "../mail/rules";
 import { buildEmailSearchQuery } from "../mail/search";
 import { spamhausDqsKey, workspaceIdentity } from "../mail/security-settings";
 import type { WorkspaceIdentity } from "../mail/security-settings";
@@ -137,6 +141,7 @@ import {
   folders,
   systemFolderOrder,
   mailboxAiConfiguration,
+  mailRules,
   pendingInbound,
   pendingObjectDeletions,
   senders,
@@ -145,6 +150,7 @@ import {
 import type {
   Email,
   FolderRecord,
+  MailRule,
   NewEmail,
   NewFolder,
   PendingInbound,
@@ -168,6 +174,7 @@ const schema = {
   emails,
   folders,
   mailboxAiConfiguration,
+  mailRules,
   pendingInbound,
   pendingObjectDeletions,
   senders,
@@ -424,11 +431,32 @@ export type TransportUpdate = {
   error?: string | null;
 };
 
-/** Where an incoming message lands, decided before it is stored. */
+/**
+ * Where an incoming message lands, decided before it is stored. Spam and
+ * Trash split the message off (see insertClassifiedInboundEmail); `archive`
+ * and `folderId` file only a message that starts a conversation.
+ */
 type InboundPlacement = {
-  state: "spam" | null;
+  state: "spam" | "trash" | null;
   folderId: string | null;
+  archive: boolean;
 };
+
+const MAX_RULES = 100;
+const RULE_TEST_SCAN = 500;
+
+function ruleView(rule: MailRule) {
+  return {
+    id: rule.id,
+    name: rule.name,
+    enabled: rule.enabled,
+    match: rule.match,
+    conditions: rule.conditionsJson,
+    actions: rule.actionsJson,
+    stopProcessing: rule.stopProcessing,
+    updatedAt: rule.updatedAt.getTime(),
+  };
+}
 
 type InboundScreening = {
   block: SenderBlock | null;
@@ -879,7 +907,9 @@ export class MailboxDO extends DurableObject<Env> {
         .where(eq(conversations.id, email.conversationId))
         .all()[0];
 
-      if (conversation?.mailboxState !== "spam") {
+      // Only Inbox and custom folders notify: at delivery a conversation is
+      // elsewhere only because spam screening or a rule put it there.
+      if (conversation?.mailboxState === "active") {
         await this.queueIncomingNotification(email);
       }
 
@@ -1210,6 +1240,203 @@ export class MailboxDO extends DurableObject<Env> {
           instructions: "",
           confidenceThreshold: 75,
         };
+  }
+
+  /** `folderDeleted`: a "Move to folder" action whose folder is gone, so it files nothing. */
+  listRules() {
+    const custom = new Set(
+      this.db
+        .select({ id: folders.id })
+        .from(folders)
+        .all()
+        .map((folder) => folder.id)
+    );
+
+    return this.db
+      .select()
+      .from(mailRules)
+      .orderBy(asc(mailRules.position))
+      .all()
+      .map((rule) => ({
+        ...ruleView(rule),
+        folderDeleted: rule.actionsJson.some(
+          (action) =>
+            action.type === "moveToFolder" && !custom.has(action.folderId)
+        ),
+      }));
+  }
+
+  private ruleFolderError(input: RuleInput) {
+    return input.actions.some(
+      (action) =>
+        action.type === "moveToFolder" &&
+        this.getFolder(action.folderId)?.kind !== "custom"
+    )
+      ? "Move to folder needs an existing custom folder"
+      : null;
+  }
+
+  createRule(input: RuleInput) {
+    const error = this.ruleFolderError(input);
+
+    if (error) return { status: "invalid" as const, error };
+
+    const existing = this.db
+      .select({ position: mailRules.position })
+      .from(mailRules)
+      .all();
+
+    if (existing.length >= MAX_RULES) return { status: "limit" as const };
+
+    const rule: MailRule = {
+      id: createId("rule"),
+      position: Math.max(0, ...existing.map((row) => row.position)) + 1,
+      name: input.name,
+      enabled: input.enabled,
+      match: input.match,
+      conditionsJson: input.conditions,
+      actionsJson: input.actions,
+      stopProcessing: input.stopProcessing,
+      updatedAt: new Date(),
+    };
+
+    this.db.insert(mailRules).values(rule).run();
+
+    return { status: "ok" as const, rule: ruleView(rule) };
+  }
+
+  updateRule(id: string, input: RuleInput) {
+    const error = this.ruleFolderError(input);
+
+    if (error) return { status: "invalid" as const, error };
+
+    const [updated] = this.db
+      .update(mailRules)
+      .set({
+        name: input.name,
+        enabled: input.enabled,
+        match: input.match,
+        conditionsJson: input.conditions,
+        actionsJson: input.actions,
+        stopProcessing: input.stopProcessing,
+        updatedAt: new Date(),
+      })
+      .where(eq(mailRules.id, id))
+      .returning()
+      .all();
+
+    if (!updated) return { status: "not_found" as const };
+
+    return { status: "ok" as const, rule: ruleView(updated) };
+  }
+
+  deleteRule(id: string) {
+    return (
+      this.db
+        .delete(mailRules)
+        .where(eq(mailRules.id, id))
+        .returning({ id: mailRules.id })
+        .all().length > 0
+    );
+  }
+
+  reorderRules(ruleIds: string[]) {
+    const current = this.db.select({ id: mailRules.id }).from(mailRules).all();
+
+    if (
+      current.length !== ruleIds.length ||
+      new Set(ruleIds).size !== ruleIds.length ||
+      !current.every((row) => ruleIds.includes(row.id))
+    ) {
+      return false;
+    }
+
+    this.db.transaction((tx) => {
+      for (const [index, id] of ruleIds.entries()) {
+        tx.update(mailRules)
+          .set({ position: index + 1 })
+          .where(eq(mailRules.id, id))
+          .run();
+      }
+    });
+
+    return true;
+  }
+
+  /** How many of the latest incoming messages the conditions match; changes nothing. */
+  testRule(rule: Pick<RuleInput, "match" | "conditions">) {
+    const recent = this.db
+      .select()
+      .from(emails)
+      .where(eq(emails.direction, "incoming"))
+      .orderBy(desc(emails.timelineAt))
+      .limit(RULE_TEST_SCAN)
+      .all();
+
+    const matches = recent.filter((email) => ruleMatches(rule, email));
+
+    return {
+      scanned: recent.length,
+      matches: matches.length,
+      sample: matches.slice(0, 5).map((email) => ({
+        id: email.id,
+        conversationId: email.conversationId,
+        subject: email.subject,
+        from: email.fromJson[0]?.address ?? null,
+        timelineAt: email.timelineAt.getTime(),
+      })),
+    };
+  }
+
+  /** The rules' verdict on a live delivery, or null when none matches. */
+  private inboundRules(email: NewEmail, jobId: string): RuleOutcome | null {
+    let outcome: RuleOutcome;
+
+    try {
+      outcome = evaluateRules(
+        this.db
+          .select()
+          .from(mailRules)
+          .where(eq(mailRules.enabled, true))
+          .orderBy(asc(mailRules.position))
+          .all()
+          .map(ruleView),
+        {
+          fromJson: email.fromJson ?? [],
+          toJson: email.toJson ?? [],
+          ccJson: email.ccJson ?? [],
+          envelopeTo: email.envelopeTo ?? null,
+          subject: email.subject ?? "",
+          listId: email.listId ?? null,
+          attachmentsJson: email.attachmentsJson ?? [],
+        }
+      );
+    } catch (error) {
+      // A broken rule never holds up the delivery.
+      console.error(`Rules failed for inbound delivery ${jobId}`, error);
+
+      return null;
+    }
+
+    return outcome.matchedRuleIds.length ? outcome : null;
+  }
+
+  /** "Mark read" marks a message read for everyone with access to the mailbox. */
+  private async markReadForMembers(emailId: string) {
+    const members = await createDb(this.bindings.DB)
+      .select({ userId: mailboxAccess.userId })
+      .from(mailboxAccess)
+      .where(eq(mailboxAccess.mailboxId, this.state.id.name ?? ""));
+
+    const readAt = new Date();
+
+    for (const userId of new Set(members.map((member) => member.userId))) {
+      this.db
+        .insert(emailReadStates)
+        .values({ userId, emailId, readAt })
+        .onConflictDoNothing()
+        .run();
+    }
   }
 
   getMailboxAiSettings() {
@@ -2349,18 +2576,41 @@ export class MailboxDO extends DurableObject<Env> {
     return Number(row?.senders ?? 0) >= 2;
   }
 
-  /** Blocks win over AI; trusted senders override an AI spam verdict. */
+  /**
+   * Blocks win over rules and AI. A rule's Spam wins over AI; an AI spam
+   * verdict holds unless the sender is trusted or a rule says "never Spam".
+   * Otherwise a matching rule's placement replaces AI sorting's folder.
+   */
   private inboundPlacement(
     screening: InboundScreening,
-    classification: EmailAiClassification | null
+    classification: EmailAiClassification | null,
+    rules: RuleOutcome | null
   ): InboundPlacement {
-    if (screening.block) return { state: "spam", folderId: null };
+    const spam = { state: "spam", folderId: null, archive: false } as const;
+    const rule = rules?.placement;
 
-    if (classification?.spam && !screening.trusted) {
-      return { state: "spam", folderId: null };
+    if (screening.block || rule?.type === "spam") return spam;
+
+    if (classification?.spam && !screening.trusted && !rules?.notSpam) {
+      return spam;
     }
 
-    return { state: null, folderId: classification?.folderId ?? null };
+    if (rule?.type === "trash") {
+      return { state: "trash", folderId: null, archive: false };
+    }
+
+    if (rule?.type === "archive") {
+      return { state: null, folderId: null, archive: true };
+    }
+
+    return {
+      state: null,
+      folderId:
+        rule?.type === "folder"
+          ? rule.folderId
+          : (classification?.folderId ?? null),
+      archive: false,
+    };
   }
 
   /** The model from openworkspace.json; tests substitute one on the instance. */
@@ -2370,7 +2620,8 @@ export class MailboxDO extends DurableObject<Env> {
 
   private async classifyInbound(
     rawMime: ArrayBuffer,
-    signals: ClassificationSignals | null
+    signals: ClassificationSignals | null,
+    offerFolders: boolean
   ) {
     let ai: AiModel | null;
 
@@ -2386,11 +2637,15 @@ export class MailboxDO extends DurableObject<Env> {
     if (!ai) return null;
     const configuration = this.aiConfiguration();
 
-    const customFolders = this.db
-      .select({ id: folders.id, name: folders.name })
-      .from(folders)
-      .orderBy(asc(folders.sortOrder), asc(folders.name))
-      .all();
+    // A rule already decided where the message goes: the model only
+    // judges spam.
+    const customFolders = offerFolders
+      ? this.db
+          .select({ id: folders.id, name: folders.name })
+          .from(folders)
+          .orderBy(asc(folders.sortOrder), asc(folders.name))
+          .all()
+      : [];
 
     return classifyInboundEmail({
       rawMime,
@@ -2470,7 +2725,7 @@ export class MailboxDO extends DurableObject<Env> {
         eq(conversations.mailboxState, "active")
       );
 
-      // AI sorting files only the first incoming message of a conversation:
+      // AI sorting and rules file only the first incoming message of a conversation:
       // a reply to received mail (whose threading headers the sender chose)
       // leaves the thread where it is. Replies to a thread this mailbox
       // started are filed like new mail.
@@ -2494,6 +2749,11 @@ export class MailboxDO extends DurableObject<Env> {
             folderId: null,
             stateChangedAt: new Date(),
           })
+          .where(activeConversation)
+          .run();
+      } else if (placement.archive && startsConversation) {
+        tx.update(conversations)
+          .set({ mailboxState: "archive", folderId: null })
           .where(activeConversation)
           .run();
       } else if (trustedFolder && startsConversation) {
@@ -3626,13 +3886,22 @@ export class MailboxDO extends DurableObject<Env> {
         screeningJson,
       };
 
+      // Blocked senders get no rules: they go to Spam whatever a rule says.
+      const rules = screening.block ? null : this.inboundRules(email, job.id);
+
       let classification: EmailAiClassification | null = null;
-      // Blocked senders need no model.
-      const skipAi = Boolean(screening.block);
+
+      // Blocked senders, and mail a rule sends to Spam, need no model.
+      const skipAi =
+        Boolean(screening.block) || rules?.placement?.type === "spam";
 
       try {
         if (!skipAi) {
-          classification = await this.classifyInbound(rawMime, signals);
+          classification = await this.classifyInbound(
+            rawMime,
+            signals,
+            !rules?.placement
+          );
         }
       } catch (error) {
         if (!(error instanceof EmailAiClassificationError)) throw error;
@@ -3665,14 +3934,23 @@ export class MailboxDO extends DurableObject<Env> {
         );
       }
 
+      const placement = this.inboundPlacement(screening, classification, rules);
+
       const stored = this.insertClassifiedInboundEmail(
         email,
         classification,
-        this.inboundPlacement(screening, classification)
+        placement
       );
 
       if (!stored) {
         throw new Error("Parsed inbound email was not persisted");
+      }
+
+      // A failing rule action never fails the delivery.
+      if (rules?.markRead && placement.state !== "spam") {
+        await this.markReadForMembers(stored.id).catch((error) => {
+          console.error(`Rule could not mark ${stored.id} read`, error);
+        });
       }
 
       await this.finishStoredInbound(job, stored, now, true);

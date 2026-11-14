@@ -23,6 +23,7 @@ import {
   Check,
   Folder,
   FolderCog,
+  ListFilter,
   LoaderCircle,
   Pencil,
   Plus,
@@ -45,6 +46,7 @@ import { FolderGlyph } from "./folder-glyph";
 import { orderedFolders } from "./mail-folders";
 import { foldersQuery } from "./mail-queries";
 import { MailboxAiSettings } from "./mailbox-ai-settings";
+import { MailboxRules } from "./mailbox-rules";
 import { ToolbarTooltip } from "./toolbar-tooltip";
 import type { MailFolder } from "./types";
 
@@ -284,7 +286,8 @@ export function FolderManager({
             value={section}
             onValueChange={(value) => setSection(String(value))}
           >
-            <TabsList className="w-full">
+            {/* Four tabs fit a phone only as words. */}
+            <TabsList className="w-full max-sm:[&_svg]:hidden">
               <TabsTrigger value="folders">
                 <Folder />
                 Folders
@@ -292,6 +295,10 @@ export function FolderManager({
               <TabsTrigger value="blocked">
                 <ShieldBan />
                 Blocked
+              </TabsTrigger>
+              <TabsTrigger value="rules">
+                <ListFilter />
+                Rules
               </TabsTrigger>
               <TabsTrigger value="ai">
                 <Sparkles />
@@ -470,6 +477,14 @@ export function FolderManager({
               <BlockedSendersManager
                 mailboxId={mailboxId}
                 active={open && section === "blocked"}
+              />
+            </TabsContent>
+
+            <TabsContent value="rules" className="pt-2">
+              <MailboxRules
+                mailboxId={mailboxId}
+                folders={folders}
+                active={open && section === "rules"}
               />
             </TabsContent>
 

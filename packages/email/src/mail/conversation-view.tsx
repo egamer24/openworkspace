@@ -397,6 +397,7 @@ function senderHandlers(
       ? () => actions.open("unsubscribe", message)
       : undefined,
     onBlock: () => actions.open("block", message),
+    onFilter: () => actions.open("filter", message),
     onUnblock: () => actions.unblockSender(message),
     onReportSpam: reportable ? () => actions.reportSpam(message) : undefined,
     onTrust: message.sender?.trustedAt

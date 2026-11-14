@@ -74,6 +74,7 @@ import { participantLabels } from "./participants";
 import { signR2GetUrl } from "./r2-presigned-urls";
 import { signRemoteToken } from "./remote-token";
 import { buildReplyPlan } from "./reply-plan";
+import { ruleInputSchema, ruleTestSchema } from "./rules";
 import { mailSafetyRoutes } from "./safety-routes";
 import {
   attachmentPreflightSchema,
@@ -619,6 +620,143 @@ export const mailRoutes = new Hono<AppEnv>()
           c.req.valid("json")
         ),
       });
+    }
+  )
+  // Rules are mailbox organization, like folders and AI sorting.
+  .get("/mailboxes/:id/rules", oauthScope(MAIL_READ_SCOPE), async (c) => {
+    const mailboxId = c.req.param("id");
+
+    if (!(await accessibleMailbox(c, mailboxId, "read"))) {
+      return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
+    }
+
+    return c.json({
+      ok: true as const,
+      rules: await mailboxStub(c.env, mailboxId).listRules(),
+    });
+  })
+  .post(
+    "/mailboxes/:id/rules",
+    oauthScope(MAIL_ORGANIZE_SCOPE),
+    zValidator("json", ruleInputSchema),
+    async (c) => {
+      const mailboxId = c.req.param("id");
+
+      if (!(await accessibleMailbox(c, mailboxId, "read"))) {
+        return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
+      }
+
+      const result = await mailboxStub(c.env, mailboxId).createRule(
+        c.req.valid("json")
+      );
+
+      if (result.status === "invalid") {
+        return apiError(c, 400, "BAD_REQUEST", result.error);
+      }
+
+      if (result.status === "limit") {
+        return apiError(
+          c,
+          409,
+          "CONFLICT",
+          "A mailbox can have at most 100 rules"
+        );
+      }
+
+      return c.json({ ok: true as const, rule: result.rule }, 201);
+    }
+  )
+  .post(
+    "/mailboxes/:id/rules/test",
+    oauthScope(MAIL_READ_SCOPE),
+    zValidator("json", ruleTestSchema),
+    async (c) => {
+      const mailboxId = c.req.param("id");
+
+      if (!(await accessibleMailbox(c, mailboxId, "read"))) {
+        return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
+      }
+
+      return c.json({
+        ok: true as const,
+        ...(await mailboxStub(c.env, mailboxId).testRule(c.req.valid("json"))),
+      });
+    }
+  )
+  .put(
+    "/mailboxes/:id/rules/order",
+    oauthScope(MAIL_ORGANIZE_SCOPE),
+    zValidator(
+      "json",
+      z.object({ ruleIds: z.array(z.string().min(1).max(80)).max(100) })
+    ),
+    async (c) => {
+      const mailboxId = c.req.param("id");
+
+      if (!(await accessibleMailbox(c, mailboxId, "read"))) {
+        return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
+      }
+
+      if (
+        !(await mailboxStub(c.env, mailboxId).reorderRules(
+          c.req.valid("json").ruleIds
+        ))
+      ) {
+        return apiError(
+          c,
+          409,
+          "CONFLICT",
+          "Rules changed; refresh and try again"
+        );
+      }
+
+      return c.json({ ok: true as const });
+    }
+  )
+  .put(
+    "/mailboxes/:id/rules/:ruleId",
+    oauthScope(MAIL_ORGANIZE_SCOPE),
+    zValidator("json", ruleInputSchema),
+    async (c) => {
+      const mailboxId = c.req.param("id");
+
+      if (!(await accessibleMailbox(c, mailboxId, "read"))) {
+        return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
+      }
+
+      const result = await mailboxStub(c.env, mailboxId).updateRule(
+        c.req.param("ruleId"),
+        c.req.valid("json")
+      );
+
+      if (result.status === "invalid") {
+        return apiError(c, 400, "BAD_REQUEST", result.error);
+      }
+
+      if (result.status === "not_found") {
+        return apiError(c, 404, "NOT_FOUND", "Rule not found");
+      }
+
+      return c.json({ ok: true as const, rule: result.rule });
+    }
+  )
+  .delete(
+    "/mailboxes/:id/rules/:ruleId",
+    oauthScope(MAIL_ORGANIZE_SCOPE),
+    async (c) => {
+      const mailboxId = c.req.param("id");
+
+      if (!(await accessibleMailbox(c, mailboxId, "read"))) {
+        return apiError(c, 403, "FORBIDDEN", "Mailbox access is required");
+      }
+
+      if (
+        !(await mailboxStub(c.env, mailboxId).deleteRule(c.req.param("ruleId")))
+      ) {
+        return apiError(c, 404, "NOT_FOUND", "Rule not found");
+      }
+
+      return c.json({ ok: true as const });
     }
   )
   .post(

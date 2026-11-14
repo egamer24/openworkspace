@@ -21,6 +21,7 @@ import {
   Forward,
   Globe,
   Languages,
+  ListFilter,
   Mail,
   MailMinus,
   OctagonAlert,
@@ -65,6 +66,8 @@ export type SenderHandlers = {
   onUnsubscribe?: () => void;
   onBlock?: () => void;
   onUnblock?: () => void;
+  /** Opens a new rule with this sender (and list) filled in. */
+  onFilter?: () => void;
   /** Reporting spam moves the conversation to Spam; absent where that makes no sense. */
   onReportSpam?: () => void;
   /** "Looks safe": trusts the sender and hides caution hints. */
@@ -206,6 +209,14 @@ export function MessageActions({
                   </span>
                 </DropdownMenuItem>
               ) : null,
+              senderHandlers?.onFilter && (
+                <DropdownMenuItem
+                  key="filter"
+                  onClick={senderHandlers.onFilter}
+                >
+                  <ListFilter /> Filter messages like this
+                </DropdownMenuItem>
+              ),
             ],
             [
               senderHandlers?.onReportSpam && (

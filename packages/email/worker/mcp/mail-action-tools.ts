@@ -6,6 +6,7 @@ import { apiPath, runTool } from "@open-workspace/core/module";
 import { z } from "zod";
 
 import { MAIL_ORGANIZE_SCOPE, MAIL_READ_SCOPE } from "../../shared/permissions";
+import { ruleInputSchema, ruleTestSchema } from "../mail/rules";
 import { retentionFolderSchema } from "../mail/schemas";
 import {
   conversationIdsSchema,
@@ -267,6 +268,68 @@ export function registerMailActionTools(
         api.json(`/mail/mailboxes/${encodeURIComponent(mailboxId)}/ai`, {
           method: "PUT",
           json: { instructions, confidenceThreshold },
+        })
+      )
+  );
+
+  const rulesPath = (mailboxId: string) =>
+    `/mail/mailboxes/${encodeURIComponent(mailboxId)}/rules`;
+
+  tool(MAIL_READ_SCOPE)(
+    "list_rules",
+    {
+      title: "List mailbox rules",
+      description: "List a mailbox's rules in the order they run on new mail.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId }) => runTool(() => api.json(rulesPath(mailboxId)))
+  );
+
+  tool(MAIL_READ_SCOPE)(
+    "test_rule",
+    {
+      title: "Test a mailbox rule",
+      description:
+        "Count how many of the latest 500 incoming messages the conditions match, without changing anything.",
+      inputSchema: ruleTestSchema.extend({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId, ...rule }) =>
+      runTool(() =>
+        api.json(`${rulesPath(mailboxId)}/test`, { method: "POST", json: rule })
+      )
+  );
+
+  tool(MAIL_ORGANIZE_SCOPE)(
+    "create_rule",
+    {
+      title: "Create a mailbox rule",
+      description:
+        "Add a rule that runs on new mail. Conditions: from (contains/equals/domain), recipient, subject, listId, hasAttachment. Actions: moveToFolder, archive, trash, spam, notSpam, markRead. recipient matches To, Cc and the address the mail was delivered to. A matching moveToFolder or archive replaces AI sorting's folder; blocked senders always go to Spam.",
+      inputSchema: ruleInputSchema.extend({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, idempotentHint: false },
+    },
+    ({ mailboxId, ...rule }) =>
+      runTool(() =>
+        api.json(rulesPath(mailboxId), { method: "POST", json: rule })
+      )
+  );
+
+  tool(MAIL_ORGANIZE_SCOPE)(
+    "delete_rule",
+    {
+      title: "Delete a mailbox rule",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        ruleId: entityIdSchema,
+      }),
+      annotations: { ...write, destructiveHint: true },
+    },
+    ({ mailboxId, ruleId }) =>
+      runTool(() =>
+        api.json(`${rulesPath(mailboxId)}/${encodeURIComponent(ruleId)}`, {
+          method: "DELETE",
         })
       )
   );

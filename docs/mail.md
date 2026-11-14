@@ -70,6 +70,29 @@ or moving it to Inbox from the app or a mail app), it goes back into that
 conversation and the conversation returns to Inbox, unless that conversation
 is in Trash or Spam; then it stays on its own in Inbox.
 
+## Rules
+
+The **Rules** tab in **Folders & AI sorting** holds a mailbox's rules. Anyone
+with access to the mailbox can add, test, reorder and turn them off. **Filter
+messages like this** in a message's menu opens a new rule with its sender (and
+mailing list, for list mail) filled in. Each rule matches on the sender
+(address or domain), the recipient (To, Cc, or the address the mail was
+delivered to, so Bcc'd and forwarded mail counts), subject, mailing list or
+attachments, with all or any of its conditions. It can move mail to a custom
+folder, archive it, move it to Trash or Spam, keep it out of Spam, or mark it
+read for everyone. Rules run in order on new mail, and a rule can stop the ones
+after it. **Test on recent mail** shows how many of the last 500 incoming
+messages would match. A rule whose folder was deleted shows **Folder deleted**
+until you pick another one.
+
+Rules don't use AI. They run before AI sorting. When a matching rule picks a
+folder, Archive, Trash or Spam, the AI only checks for spam. A rule's Spam
+always applies, and an AI spam verdict stands unless a rule says **Never send
+to Spam**. Blocked senders go to Spam whatever the rules say, and no rule runs
+for them. Like AI sorting, moving and archiving apply only to mail that
+starts a conversation. A message a rule puts in Spam or Trash gets its own
+conversation and goes back into the thread it answers when you take it out.
+
 ## Attachments
 
 PDFs open in a built-in viewer. Word, Excel, PowerPoint, OpenDocument and RTF
