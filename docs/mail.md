@@ -24,6 +24,26 @@ Under **Teams** you create team addresses. Each one is either:
 - a mailing list, which copies each message into every member's primary
   mailbox.
 
+### Aliases, forwards and catch-all
+
+An address under **People** or **Teams** can also be:
+
+- an **alias**, which delivers into another mailbox of the same person or
+  team. Replies to mail sent to the alias come from the alias.
+- a **forward**, which sends each message on, unchanged, to up to five
+  outside addresses. Cloudflare emails each new address a link to confirm
+  it, and mail goes only to confirmed ones; the address editor shows which
+  are **Confirmed** and which are **Waiting for confirmation**. Forwarding
+  happens as mail arrives, so it skips mail that fails DMARC and mail from
+  senders blocked for everyone, and never sends mail back to its sender. A
+  message forwarded three times isn't forwarded again. If no destination is
+  confirmed, or every forward fails, the sender gets a bounce.
+
+An address with its own mailbox can be the **catch-all** for its domain (one
+per domain): it also gets mail sent to addresses on that domain that don't
+exist. Mail to `sam+anything@` goes to `sam@` when there's no address
+`sam+anything@` itself. Deleting a mailbox deletes its aliases too.
+
 The Everyone team includes everyone, at `all@`. You also use teams to choose
 who can sign in to each [single sign-on app](sso.md).
 

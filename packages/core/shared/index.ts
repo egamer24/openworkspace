@@ -7,6 +7,7 @@ export type {
   PermissionDefinition,
   WorkspacePermission,
   ListPostingPolicy,
+  MailboxDelivery,
 } from "./workspace";
 
 export { hasWorkspacePermission, workspaceIconPath } from "./workspace";

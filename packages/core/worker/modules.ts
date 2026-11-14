@@ -101,7 +101,15 @@ export type WorkspaceModule = {
     (env: Env, source: ModuleWebhookSource) => Promise<object>
   >;
   hooks?: {
-    /** An address was deleted; remove what the module stored for it. */
+    /**
+     * An address was created or changed, e.g. a forward's destinations. Runs
+     * after the change is stored; a failure is logged, not undone.
+     */
+    mailboxSaved?: (env: Env, mailboxId: string) => Promise<void>;
+    /**
+     * An address was deleted; remove what the module stored for it. Deleting
+     * a mailbox deletes its aliases first, and this runs for each of them.
+     */
     mailboxDeleted?: (env: Env, mailboxId: string) => Promise<void>;
     /**
      * One browser session ended on purpose: the person or an administrator

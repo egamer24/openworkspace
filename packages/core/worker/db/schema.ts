@@ -9,6 +9,7 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 import { accessLinkKinds } from "../../shared/auth";
 import { oidcClientRegistrations } from "../../shared/oidc";
@@ -81,12 +82,28 @@ export const mailboxes = sqliteTable(
       onDelete: "restrict",
     }),
     /**
-     * A team address either is a shared inbox, or a mailing list that copies
-     * each message into every member's own mailbox.
+     * An address with its own mailbox (inbox); for a team, a mailing list
+     * that copies each message into every member's own mailbox (list); an
+     * alias that delivers into `aliasOf`; or a forward to `forwardTo`.
+     * Only an inbox can be primary or a catch-all (admin/mailbox-routes.ts).
      */
     delivery: text("delivery", { enum: mailboxDeliveries })
       .notNull()
       .default("inbox"),
+    /**
+     * The inbox or list an alias delivers into, of the same owner or team.
+     * Deleting a mailbox deletes its aliases first, each as an address of its
+     * own, so nothing relies on a cascade (restrict catches a missed one).
+     */
+    aliasOf: text("alias_of").references((): AnySQLiteColumn => mailboxes.id, {
+      onDelete: "restrict",
+    }),
+    /** A forward's outside addresses, each an Email Routing destination. */
+    forwardTo: text("forward_to", { mode: "json" }).$type<string[]>(),
+    /** Gets mail for addresses on its domain that nothing else takes. */
+    catchAll: integer("catch_all", { mode: "boolean" })
+      .notNull()
+      .default(false),
     /** Who may write to a mailing list; unused for inboxes. */
     listPosting: text("list_posting", { enum: listPostingPolicies })
       .notNull()
@@ -106,6 +123,10 @@ export const mailboxes = sqliteTable(
       .where(sql`${table.isPrimary} = 1`),
     index("mailboxes_owner_idx").on(table.ownerUserId),
     index("mailboxes_team_idx").on(table.teamId),
+    index("mailboxes_alias_of_idx").on(table.aliasOf),
+    uniqueIndex("mailboxes_catch_all_unique")
+      .on(table.domain)
+      .where(sql`${table.catchAll} = 1`),
     check(
       "mailboxes_primary_owner_check",
       sql`${table.isPrimary} = 0 OR ${table.ownerUserId} IS NOT NULL`
@@ -135,8 +156,8 @@ export const teamMembership = sqliteView("team_membership", {
 
 /**
  * Who may open each mailbox: the owner of a personal mailbox, or the members
- * of the team a shared inbox belongs to. Mailing lists are never opened; their
- * mail lands in members' own mailboxes. Derived, never written.
+ * of the team a shared inbox belongs to. Mailing lists, aliases and forwards
+ * are never opened; their mail lands in other mailboxes. Derived, never written.
  */
 export const mailboxAccess = sqliteView("mailbox_access", {
   mailboxId: text("mailbox_id").notNull(),
@@ -145,7 +166,7 @@ export const mailboxAccess = sqliteView("mailbox_access", {
 }).as(sql`
   SELECT id AS mailbox_id, owner_user_id AS user_id, 1 AS can_send
   FROM mailboxes
-  WHERE owner_user_id IS NOT NULL
+  WHERE owner_user_id IS NOT NULL AND delivery = 'inbox'
   UNION ALL
   SELECT mailboxes.id, team_membership.user_id, team_membership.can_send
   FROM mailboxes

@@ -2,7 +2,11 @@ import { z } from "zod";
 
 import { oidcClientTypes } from "../../shared/oidc";
 import { samlNameIdFormats } from "../../shared/saml";
-import { listPostingPolicies, mailboxDeliveries } from "../../shared/workspace";
+import {
+  listPostingPolicies,
+  MAX_FORWARD_DESTINATIONS,
+  mailboxDeliveries,
+} from "../../shared/workspace";
 import { emailSchema, userNameSchema } from "../auth/schemas";
 import { workspacePermissions } from "../modules";
 import { isKnownScope } from "../oidc/scopes";
@@ -50,6 +54,26 @@ export const createInvitationSchema = z.object({
   email: emailSchema,
 });
 
+/** A forward's outside addresses: distinct, lowercase, at most five. */
+const forwardToSchema = z
+  .array(emailSchema)
+  .min(1)
+  .max(MAX_FORWARD_DESTINATIONS)
+  .transform((values) => [
+    ...new Set(values.map((value) => value.toLowerCase())),
+  ]);
+
+/**
+ * How an address delivers. An alias names the mailbox it delivers into, a
+ * forward its outside addresses; only an inbox can be its domain's catch-all.
+ * Checked against the stored rows in admin/mailbox-routes.ts.
+ */
+const deliveryFields = {
+  aliasOf: z.string().min(1).nullable().optional(),
+  forwardTo: forwardToSchema.nullable().optional(),
+  catchAll: z.boolean().optional(),
+};
+
 /** A mailbox belongs to one person, or is shared by the members of one team. */
 export const createMailboxSchema = z
   .object({
@@ -59,22 +83,24 @@ export const createMailboxSchema = z
     teamId: z.string().min(1).nullable(),
     delivery: z.enum(mailboxDeliveries).default("inbox"),
     listPosting: z.enum(listPostingPolicies).default("workspace"),
+    ...deliveryFields,
   })
   .refine((input) => Boolean(input.ownerUserId) !== Boolean(input.teamId), {
     message: "Choose either an owner or a team",
     path: ["teamId"],
   })
-  .refine((input) => input.delivery === "inbox" || Boolean(input.teamId), {
+  .refine((input) => input.delivery !== "list" || Boolean(input.teamId), {
     message: "Only a team address can be a mailing list",
     path: ["delivery"],
   });
 
 export const updateMailboxSchema = z.object({
   displayName: z.string().trim().min(2).max(80),
-  /** Team mailboxes only: the team, and how its address delivers. */
+  /** Team mailboxes only: the team. */
   teamId: z.string().min(1).optional(),
   delivery: z.enum(mailboxDeliveries).optional(),
   listPosting: z.enum(listPostingPolicies).optional(),
+  ...deliveryFields,
 });
 
 export const updateUserSchema = z

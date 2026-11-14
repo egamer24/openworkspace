@@ -132,8 +132,18 @@ const ownNotes = new Hono<AppEnv>()
   If a `save` throws, its message is shown and the editor stays open. `save`
   goes through your own routes; guard them with
   `requirePermission("manage_teams")`. The section gets the form's current
-  `delivery`, so it can hide as soon as the delivery changes: unmount the
-  component that calls `useAddressSection`, and it stops taking part.
+  `delivery` (and a forward's `forwardTo`), so it can hide as soon as the
+  delivery changes: unmount the component that calls `useAddressSection`,
+  and it stops taking part.
+- A `userAddress` section does the same for a person's address under
+  **Administration → People**; guard its routes with
+  `requirePermission("manage_people")`.
+- An address delivers as `inbox` (its own mailbox), `list` (a team's mailing
+  list), `alias` (into the mailbox `aliasOf`) or `forward` (to the outside
+  addresses `forwardTo`), and an inbox may be its domain's `catchAll`.
+  `hooks.mailboxSaved` runs after an address is created or changed, and
+  `hooks.mailboxDeleted` after one is deleted. Deleting a mailbox deletes its
+  aliases first, so both run for each of them.
 - Register MCP tools through `tool(scope)`, and implement them by calling your
   own routes through `api`, so a token only sees what its scopes allow.
 - Declare webhook events once in `shared/`, on both the server and client

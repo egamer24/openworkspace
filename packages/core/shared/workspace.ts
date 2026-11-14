@@ -62,8 +62,15 @@ export function hasWorkspacePermission(
   return user.role === "admin" || user.permissions.includes(permission);
 }
 
-/** A team address is a shared inbox, or a mailing list copied to every member. */
-export const mailboxDeliveries = ["inbox", "list"] as const;
+/**
+ * Where an address's mail goes: its own mailbox (inbox), every team member's
+ * own mailbox (list, team addresses only), another mailbox (alias), or
+ * outside addresses (forward).
+ */
+export const mailboxDeliveries = ["inbox", "list", "alias", "forward"] as const;
+
+/** Outside addresses one `forward` address may send each message on to. */
+export const MAX_FORWARD_DESTINATIONS = 5;
 
 export type MailboxDelivery = (typeof mailboxDeliveries)[number];
 

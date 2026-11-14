@@ -1,7 +1,9 @@
 import { env as workerEnv } from "cloudflare:workers";
+import { z } from "zod";
 
 import { poll } from "../../testing/poll.ts";
 import type { HookContext, TestHook } from "../../testing/test-hooks.ts";
+import { deleteMailboxAddress } from "../../worker/admin/mailbox-routes.ts";
 import { revokeUserAccess } from "../../worker/auth/revocation.ts";
 import { revokeUserSession } from "../../worker/auth/session-records.ts";
 import {
@@ -180,10 +182,99 @@ const sso = {
   },
 } satisfies Record<string, TestHook>;
 
+/** A queued webhook event, as far as these tests read it. */
+const recordedJob = z.object({
+  eventType: z.string(),
+  source: z.object({
+    data: z
+      .object({ mailbox: z.object({ id: z.string() }).optional() })
+      .optional(),
+  }),
+});
+
+/** What modules' address hooks were called with, in order. */
+const addressHookCalls: string[] = [];
+
+let installedBeforeRecording: ReturnType<typeof workspaceModules> | undefined;
+
+/** Mailbox hooks a module sees, and deletions with their webhook events. */
+const addressHooks = {
+  /** Installs a module that records `mailboxSaved`/`mailboxDeleted`; false removes it. */
+  "modules.recordAddressHooks": (_, on: boolean) => {
+    installedBeforeRecording ??= workspaceModules();
+    addressHookCalls.length = 0;
+
+    installModules(
+      on
+        ? [
+            ...installedBeforeRecording,
+            {
+              name: "recorder",
+              hooks: {
+                mailboxSaved: (_env, id) => {
+                  addressHookCalls.push(`saved ${id}`);
+
+                  return Promise.resolve();
+                },
+                mailboxDeleted: (_env, id) => {
+                  addressHookCalls.push(`deleted ${id}`);
+
+                  return Promise.resolve();
+                },
+              },
+            },
+          ]
+        : installedBeforeRecording
+    );
+  },
+  /** The recorded calls since the last read. */
+  "modules.addressHookCalls": () => addressHookCalls.splice(0),
+  /** Deletes an address as the admin API does; the webhook events it queued. */
+  "modules.deleteAddress": async ({ env }, mailboxId: string) => {
+    const events: { eventType: string; mailboxId: string }[] = [];
+    const tasks: Promise<unknown>[] = [];
+
+    const noBacklog = { backlogCount: 0, backlogBytes: 0 };
+
+    const record = (job: z.infer<typeof recordedJob>) => {
+      events.push({
+        eventType: job.eventType,
+        mailboxId: job.source.data?.mailbox?.id ?? "",
+      });
+    };
+
+    const webhooks: Env["WEBHOOKS"] = {
+      metrics: () => Promise.resolve(noBacklog),
+      send: (body) => {
+        record(recordedJob.parse(body));
+
+        return Promise.resolve({ metadata: { metrics: noBacklog } });
+      },
+      sendBatch: (messages) => {
+        for (const message of messages) record(recordedJob.parse(message.body));
+
+        return Promise.resolve({ metadata: { metrics: noBacklog } });
+      },
+    };
+
+    const result = await deleteMailboxAddress(
+      { ...env, WEBHOOKS: webhooks },
+      createDb(env.DB),
+      mailboxId,
+      (task) => void tasks.push(task)
+    );
+
+    await Promise.all(tasks);
+
+    return { result, events };
+  },
+} satisfies Record<string, TestHook>;
+
 export const coreHooks = {
   ...identity,
   ...revocation,
   ...sso,
+  ...addressHooks,
   /** The OIDC cleanup routes run at random; run it now. */
   "oidc.cleanupExpiredArtifacts": ({ env }) =>
     cleanupExpiredOidcArtifacts(createDb(env.DB)),
