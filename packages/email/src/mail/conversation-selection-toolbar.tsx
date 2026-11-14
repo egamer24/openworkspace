@@ -64,6 +64,7 @@ function ActionButton({
 }
 
 export function ConversationSelectionToolbar({
+  onDiscardDrafts,
   sharedMailboxName,
   canDeletePermanently,
   folder,
@@ -80,6 +81,8 @@ export function ConversationSelectionToolbar({
   onReport,
   onExit,
 }: {
+  /** In Drafts, discarding is the only action. */
+  onDiscardDrafts?: () => void;
   sharedMailboxName?: string;
   canDeletePermanently: boolean;
   folder: string;
@@ -138,150 +141,166 @@ export function ConversationSelectionToolbar({
           </span>
         </label>
 
-        <ActionButton
-          label={
-            anySelectedUnread
-              ? "Mark selected as read"
-              : "Mark selected as unread"
-          }
-          disabled={disabled || !hasSelectedIncoming}
-          onClick={() =>
-            onAction(
-              { type: "read", isRead: anySelectedUnread },
-              anySelectedUnread ? "marked as read" : "marked as unread"
-            )
-          }
-        >
-          {busy ? (
-            <LoaderCircle className="animate-spin" />
-          ) : anySelectedUnread ? (
-            <MailOpen />
-          ) : (
-            <Mail />
-          )}
-        </ActionButton>
-
-        {isInboxDistribution ? (
+        {onDiscardDrafts ? (
           <ActionButton
-            label={`Archive selected${sharedSuffix}`}
+            label="Discard selected drafts"
+            destructive
             disabled={disabled}
-            onClick={() =>
-              onAction(
-                { type: "update", update: { mailboxState: "archive" } },
-                "archived"
-              )
-            }
+            onClick={onDiscardDrafts}
           >
-            <Archive />
+            {busy ? <LoaderCircle className="animate-spin" /> : <Trash2 />}
           </ActionButton>
-        ) : null}
-        {["archive", "spam", "trash"].includes(systemType ?? "") ? (
-          <ActionButton
-            label={
-              systemType === "spam"
-                ? `Mark selected as not spam${sharedSuffix}`
-                : `Restore selected${sharedSuffix}`
-            }
-            disabled={disabled}
-            onClick={() =>
-              onAction(
-                { type: "update", update: { mailboxState: "active" } },
-                systemType === "spam" ? "marked as not spam" : "restored"
-              )
-            }
-          >
-            <Inbox />
-          </ActionButton>
-        ) : null}
-
-        <DropdownMenu>
-          <ToolbarTooltip label={`Move selected${sharedSuffix}`}>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={moveDisabled}
-                />
+        ) : (
+          <>
+            <ActionButton
+              label={
+                anySelectedUnread
+                  ? "Mark selected as read"
+                  : "Mark selected as unread"
+              }
+              disabled={disabled || !hasSelectedIncoming}
+              onClick={() =>
+                onAction(
+                  { type: "read", isRead: anySelectedUnread },
+                  anySelectedUnread ? "marked as read" : "marked as unread"
+                )
               }
             >
-              <FolderInput />
-              <span className="sr-only">Move selected</span>
-            </DropdownMenuTrigger>
-          </ToolbarTooltip>
-          <DropdownMenuContent align="end" className="w-64">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Move to</DropdownMenuLabel>
-              <DropdownMenuItem
-                disabled={systemType === "inbox"}
+              {busy ? (
+                <LoaderCircle className="animate-spin" />
+              ) : anySelectedUnread ? (
+                <MailOpen />
+              ) : (
+                <Mail />
+              )}
+            </ActionButton>
+
+            {isInboxDistribution ? (
+              <ActionButton
+                label={`Archive selected${sharedSuffix}`}
+                disabled={disabled}
                 onClick={() =>
                   onAction(
-                    {
-                      type: "update",
-                      update: { mailboxState: "active", folderId: null },
-                    },
-                    "moved to Inbox"
+                    { type: "update", update: { mailboxState: "archive" } },
+                    "archived"
                   )
                 }
               >
-                <Inbox /> Inbox
-              </DropdownMenuItem>
-              {customFolders.map((item) => (
-                <DropdownMenuItem
-                  key={item.id}
-                  disabled={item.id === folder}
-                  onClick={() =>
-                    onAction(
-                      {
-                        type: "update",
-                        update: { mailboxState: "active", folderId: item.id },
-                      },
-                      `moved to ${item.name}`
-                    )
+                <Archive />
+              </ActionButton>
+            ) : null}
+            {["archive", "spam", "trash"].includes(systemType ?? "") ? (
+              <ActionButton
+                label={
+                  systemType === "spam"
+                    ? `Mark selected as not spam${sharedSuffix}`
+                    : `Restore selected${sharedSuffix}`
+                }
+                disabled={disabled}
+                onClick={() =>
+                  onAction(
+                    { type: "update", update: { mailboxState: "active" } },
+                    systemType === "spam" ? "marked as not spam" : "restored"
+                  )
+                }
+              >
+                <Inbox />
+              </ActionButton>
+            ) : null}
+
+            <DropdownMenu>
+              <ToolbarTooltip label={`Move selected${sharedSuffix}`}>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      disabled={moveDisabled}
+                    />
                   }
                 >
-                  <FolderInput /> {item.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                  <FolderInput />
+                  <span className="sr-only">Move selected</span>
+                </DropdownMenuTrigger>
+              </ToolbarTooltip>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    disabled={systemType === "inbox"}
+                    onClick={() =>
+                      onAction(
+                        {
+                          type: "update",
+                          update: { mailboxState: "active", folderId: null },
+                        },
+                        "moved to Inbox"
+                      )
+                    }
+                  >
+                    <Inbox /> Inbox
+                  </DropdownMenuItem>
+                  {customFolders.map((item) => (
+                    <DropdownMenuItem
+                      key={item.id}
+                      disabled={item.id === folder}
+                      onClick={() =>
+                        onAction(
+                          {
+                            type: "update",
+                            update: {
+                              mailboxState: "active",
+                              folderId: item.id,
+                            },
+                          },
+                          `moved to ${item.name}`
+                        )
+                      }
+                    >
+                      <FolderInput /> {item.name}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-        {systemType === "trash" ? (
-          canDeletePermanently ? (
-            <ActionButton
-              label="Delete selected permanently"
-              destructive
-              disabled={disabled}
-              onClick={() => setDeleteDialogOpen(true)}
-            >
-              <Trash2 />
-            </ActionButton>
-          ) : null
-        ) : (
-          <ActionButton
-            label={`Move selected to Trash${sharedSuffix}`}
-            disabled={disabled}
-            onClick={() =>
-              onAction(
-                { type: "update", update: { mailboxState: "trash" } },
-                "moved to Trash"
-              )
-            }
-          >
-            <Trash2 />
-          </ActionButton>
-        )}
+            {systemType === "trash" ? (
+              canDeletePermanently ? (
+                <ActionButton
+                  label="Delete selected permanently"
+                  destructive
+                  disabled={disabled}
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
+                  <Trash2 />
+                </ActionButton>
+              ) : null
+            ) : (
+              <ActionButton
+                label={`Move selected to Trash${sharedSuffix}`}
+                disabled={disabled}
+                onClick={() =>
+                  onAction(
+                    { type: "update", update: { mailboxState: "trash" } },
+                    "moved to Trash"
+                  )
+                }
+              >
+                <Trash2 />
+              </ActionButton>
+            )}
 
-        {["sent", "spam", "trash"].includes(systemType ?? "") ? null : (
-          <ActionButton
-            label="Report spam"
-            disabled={disabled || !hasSelectedIncoming}
-            onClick={onReport}
-          >
-            <OctagonAlert />
-          </ActionButton>
+            {["sent", "spam", "trash"].includes(systemType ?? "") ? null : (
+              <ActionButton
+                label="Report spam"
+                disabled={disabled || !hasSelectedIncoming}
+                onClick={onReport}
+              >
+                <OctagonAlert />
+              </ActionButton>
+            )}
+          </>
         )}
 
         <span className="bg-border mx-0.5 hidden h-5 w-px lg:block" />

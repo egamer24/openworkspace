@@ -79,6 +79,26 @@ or moving it to Inbox from the app or a mail app), it goes back into that
 conversation and the conversation returns to Inbox, unless that conversation
 is in Trash or Spam; then it stays on its own in Inbox.
 
+## Drafts
+
+What you write is saved as a draft a couple of seconds after you stop typing,
+and again when you close the composer, leave the conversation, switch tabs or
+close the page; leaving while a save is still pending asks first. A composer
+holding nothing but your signature isn't saved. Drafts are yours alone, even
+in a shared mailbox, and wait in the **Drafts** folder after Sent: a new
+message or forward opens in the composer, a reply opens its conversation with
+the reply box as you left it. Other folders show **Draft** next to a
+conversation you started a reply in. A conversation keeps one reply draft:
+replying to another message in it asks before discarding the one you started.
+The open composer is in the address (`?compose=…`), so reloading reopens it.
+Sending deletes the draft; so does the trash button in the composer, **×** on
+a reply, or selecting drafts in Drafts and discarding them. Drafts keep their
+attachments, inline images and signature images for as long as the draft
+exists, though uploads not yet finished when you close the composer are
+dropped. If the same draft is open in two windows, only the first one to save
+keeps saving. Mail apps see the same drafts in their Drafts mailbox (see
+[MCP and JMAP](mcp-and-jmap.md)).
+
 ## Attachments
 
 PDFs open in a built-in viewer. Word, Excel, PowerPoint, OpenDocument and RTF

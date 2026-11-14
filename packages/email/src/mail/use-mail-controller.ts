@@ -1,6 +1,6 @@
 import { useDebouncedValue } from "@open-workspace/core/ui";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 
 import { mailPath, parseMailPath } from "../../shared/mail-path";
@@ -13,6 +13,8 @@ import {
 import type { MailRoute } from "./mail-location";
 import type { Folder, MessageDetail } from "./types";
 import { useConversationSelection } from "./use-conversation-selection";
+import { findDraftSource, newDraftId, useDrafts } from "./use-drafts";
+import type { SavedDraft } from "./use-drafts";
 import {
   useBulkConversationAction,
   useConversation,
@@ -23,6 +25,32 @@ import {
 } from "./use-mail-data";
 
 export type MailController = ReturnType<typeof useMailController>;
+
+/** The open composer: a new message, a forward, or a reopened draft. */
+type Composer = {
+  mailboxId: string;
+  /** The id its draft is saved under. */
+  draftId: string;
+  draft?: SavedDraft;
+  forwarded?: MessageDetail;
+};
+
+/**
+ * The open composer lives in the URL, as Gmail's does: `?compose=new` until
+ * its draft is first saved, then `?compose=<draft id>`, so reloading reopens
+ * it. Moving around the mail screen keeps it.
+ */
+const COMPOSE_PARAM = "compose";
+
+function withComposeParam(path: string) {
+  const compose = new URLSearchParams(window.location.search).get(
+    COMPOSE_PARAM
+  );
+
+  return compose
+    ? `${path}?${new URLSearchParams({ [COMPOSE_PARAM]: compose })}`
+    : path;
+}
 
 /**
  * Mail state and actions shared by every mail frontend: the route-derived
@@ -35,14 +63,28 @@ export function useMailController(
 ) {
   const { mailboxId } = route;
   const navigateRoute = useNavigate();
+  const [searchParams] = useSearchParams();
+  const composeParam = searchParams.get(COMPOSE_PARAM);
 
-  const [composerMailboxId, setComposerMailboxId] = useState<string | null>(
-    null
+  // A reload with ?compose=new opens an empty composer again.
+  const [composer, setComposer] = useState<Composer | null>(() =>
+    composeParam === "new" && mailboxId
+      ? { mailboxId, draftId: newDraftId() }
+      : null
   );
 
-  const [forwardedMessage, setForwardedMessage] = useState<
-    MessageDetail | undefined
-  >();
+  // Only a change of the parameter acts here (Back, Forward, a link), not
+  // the render in between opening a composer and its parameter arriving.
+  const [seenComposeParam, setSeenComposeParam] = useState(composeParam);
+
+  if (composeParam !== seenComposeParam) {
+    setSeenComposeParam(composeParam);
+
+    if (!composeParam) setComposer(null);
+    else if (composeParam === "new" && !composer && mailboxId) {
+      setComposer({ mailboxId, draftId: newDraftId() });
+    }
+  }
 
   const [search, setSearch] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -73,25 +115,111 @@ export function useMailController(
   } = location;
 
   const activeMailboxId = mailbox?.id;
-  const composeOpen = composerMailboxId === activeMailboxId;
   const currentPath = routePath(route);
 
-  // Moving to another mailbox (e.g. back in history) discards its draft
-  // window: adjusted while rendering, so the old composer never shows.
-  if (
-    composerMailboxId &&
-    activeMailboxId &&
-    composerMailboxId !== activeMailboxId
-  ) {
-    setComposerMailboxId(null);
-    setForwardedMessage(undefined);
+  const composeOpen = Boolean(
+    composer &&
+    composer.mailboxId === activeMailboxId &&
+    mailbox?.canSend &&
+    (composeParam === "new" || composeParam === composer.draftId)
+  );
+
+  // Moving to another mailbox (e.g. back in history) closes its composer,
+  // whose draft is saved: adjusted while rendering, so it never shows.
+  if (composer && activeMailboxId && composer.mailboxId !== activeMailboxId) {
+    setComposer(null);
   }
 
   useEffect(() => {
     if (locationReady && canonicalPath && currentPath !== canonicalPath) {
-      navigateRoute(canonicalPath, { replace: true });
+      navigateRoute(withComposeParam(canonicalPath), { replace: true });
     }
   }, [canonicalPath, currentPath, locationReady, navigateRoute]);
+
+  /** Sets or (with null) removes ?compose= on the current page. */
+  function setComposeParam(value: string | null, replace = false) {
+    navigateRoute(
+      {
+        search: value
+          ? `?${new URLSearchParams({ [COMPOSE_PARAM]: value })}`
+          : "",
+      },
+      { replace }
+    );
+  }
+
+  // ?compose=<draft id> of a draft not open here (a reload, a Drafts row,
+  // Back) loads it: a new message or forward opens in the composer, a reply
+  // in its conversation. Other drafts wait in Drafts.
+  const pendingDraftId =
+    composeParam &&
+    composeParam !== "new" &&
+    composer?.draftId !== composeParam &&
+    mailbox?.canSend
+      ? composeParam
+      : null;
+
+  const pendingDrafts = useDrafts(pendingDraftId ? mailbox?.id : undefined);
+  const pendingDraftList = pendingDrafts.data;
+
+  useEffect(() => {
+    if (!pendingDraftId || !activeMailboxId || !pendingDraftList) return;
+    const draft = pendingDraftList.find((item) => item.id === pendingDraftId);
+    let cancelled = false;
+
+    const drop = (message: string) => {
+      toast.error(message);
+      navigateRoute({ search: "" }, { replace: true });
+    };
+
+    if (!draft) drop("That draft was sent or discarded");
+    else if (draft.kind === "reply") {
+      // Its reply box reopens in the conversation.
+      navigateRoute(
+        mailPath(activeMailboxId, folder, draft.conversationId ?? undefined),
+        { replace: true }
+      );
+    } else {
+      void (async () => {
+        let forwarded: MessageDetail | undefined;
+
+        if (draft.kind === "forward") {
+          try {
+            forwarded = await findDraftSource(activeMailboxId, draft);
+          } catch {
+            forwarded = undefined;
+          }
+
+          if (!forwarded) {
+            if (!cancelled) {
+              drop("The forwarded message is no longer available");
+            }
+
+            return;
+          }
+        }
+
+        if (!cancelled) {
+          setComposer({
+            mailboxId: activeMailboxId,
+            draftId: draft.id,
+            draft,
+            forwarded,
+          });
+        }
+      })();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeMailboxId,
+    folder,
+    navigateRoute,
+    pendingDraftId,
+    pendingDraftList,
+  ]);
   const debouncedSearch = useDebouncedValue(search.trim(), 250);
 
   const conversationsQuery = useConversations(
@@ -133,6 +261,13 @@ export function useMailController(
   const conversation = conversationPages?.[0];
   const prefetchConversation = usePrefetchConversation();
 
+  // A new message or forward in Drafts is a row of its own, named by its
+  // draft: there is no conversation yet, so it opens in the composer.
+  const isComposeDraftRow = (id: string) =>
+    conversations.some(
+      (item) => item.draftId === id && item.conversationId === id
+    );
+
   // With a conversation open, the previous and next one load in the
   // background, so stepping through the list does not wait.
   const openIndex =
@@ -145,7 +280,10 @@ export function useMailController(
   const neighbourIds =
     openIndex >= 0
       ? [conversations[openIndex + 1], conversations[openIndex - 1]].flatMap(
-          (item) => (item ? [item.conversationId] : [])
+          (item) =>
+            item && item.draftId !== item.conversationId
+              ? [item.conversationId]
+              : []
         )
       : [];
 
@@ -197,26 +335,25 @@ export function useMailController(
       next.conversation === null ? null : (next.conversation ?? conversationId);
 
     navigateRoute(
-      mailPath(targetMailboxId, next.folder ?? folder, targetConversation),
+      withComposeParam(
+        mailPath(targetMailboxId, next.folder ?? folder, targetConversation)
+      ),
       { replace }
     );
   }
 
-  function openCompose() {
+  function openCompose(forwarded?: MessageDetail) {
     if (!mailbox?.canSend) return;
-    setForwardedMessage(undefined);
-    setComposerMailboxId(mailbox.id);
-  }
-
-  function openForward(message: MessageDetail) {
-    if (!mailbox?.canSend) return;
-    setForwardedMessage(message);
-    setComposerMailboxId(mailbox.id);
+    setComposer({ mailboxId: mailbox.id, draftId: newDraftId(), forwarded });
+    setComposeParam("new");
   }
 
   function closeComposer() {
-    setComposerMailboxId(null);
-    setForwardedMessage(undefined);
+    setComposer(null);
+
+    if (new URLSearchParams(window.location.search).has(COMPOSE_PARAM)) {
+      setComposeParam(null);
+    }
   }
 
   // Reads the live URL: a mutation can settle after the user already moved to
@@ -225,7 +362,9 @@ export function useMailController(
     const current = parseMailPath(window.location.pathname);
 
     if (!current?.conversationId) return;
-    navigateRoute(mailPath(current.mailboxId, current.folder));
+    navigateRoute(
+      withComposeParam(mailPath(current.mailboxId, current.folder))
+    );
   }
 
   function mutateConversation(
@@ -336,7 +475,7 @@ export function useMailController(
     debouncedSearch,
     unreadOnly,
     composeOpen,
-    forwardedMessage,
+    composer,
     sharedActionPending: sharedConversationAction.isPending,
     listLoading: !listError && conversationsQuery.isPending,
     listError,
@@ -378,9 +517,15 @@ export function useMailController(
     },
     /** Starts loading a conversation the person is likely to open next. */
     prefetchConversation(id: string) {
-      prefetchConversation(location.mailboxId, id);
+      if (!isComposeDraftRow(id)) prefetchConversation(location.mailboxId, id);
     },
     openConversation(id: string, folderOverride?: Folder) {
+      if (isComposeDraftRow(id)) {
+        setComposeParam(id);
+
+        return;
+      }
+
       // An absent folder keeps the current one.
       navigate({ conversation: id, folder: folderOverride });
     },
@@ -393,8 +538,14 @@ export function useMailController(
     openSettings() {
       navigateRoute("/settings");
     },
-    openCompose,
-    openForward,
+    openCompose: () => openCompose(),
+    openForward: (message: MessageDetail) => openCompose(message),
+    /** The open composer's draft was first saved: the URL now names it. */
+    composerSaved(draftId: string) {
+      if (composer?.draftId === draftId && composeParam === "new") {
+        setComposeParam(draftId, true);
+      }
+    },
     closeComposer,
     archive: () => mutateConversation({ mailboxState: "archive" }, true),
     restore: () => mutateConversation({ mailboxState: "active" }, true),

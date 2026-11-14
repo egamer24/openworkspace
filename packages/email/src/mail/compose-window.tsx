@@ -1,4 +1,4 @@
-import { useAuth } from "@open-workspace/core/ui";
+import { useAuth, useConfirm } from "@open-workspace/core/ui";
 import {
   useEffect,
   useEffectEvent,
@@ -21,15 +21,28 @@ import { ComposerAttachmentList } from "./composer-attachment-list";
 import { ComposerEditor } from "./composer-editor";
 import type { ComposerContent, ComposerEditorHandle } from "./composer-editor";
 import { ComposerRecipientFields } from "./composer-recipient-fields";
-import { validateComposerRecipients } from "./composer-recipients";
+import {
+  recipientAddresses,
+  recipientField,
+  validateComposerRecipients,
+} from "./composer-recipients";
 import type { RecipientFieldValue } from "./composer-recipients";
 import { useComposerSession } from "./composer-session";
 import { isInlineComposerImage } from "./composer-upload-client";
+import {
+  draftAttachments,
+  holdsOnlyInitialContent,
+  openingText,
+  restoredComposerAssets,
+  restoredDraftHtml,
+} from "./draft-attachments";
 import { ReplyToWarning } from "./reply-to-warning";
 import { messageSignatureHtml } from "./signature";
 import type { Mailbox, MessageDetail } from "./types";
 import { useComposeSubmission } from "./use-compose-submission";
 import { useComposerAttachmentPreflight } from "./use-composer-attachment-preflight";
+import { useDraftAutosave } from "./use-drafts";
+import type { DraftContent, SavedDraft } from "./use-drafts";
 
 const EMPTY_RECIPIENT_FIELD: RecipientFieldValue = {
   recipients: [],
@@ -38,6 +51,7 @@ const EMPTY_RECIPIENT_FIELD: RecipientFieldValue = {
 
 const EMPTY_CONTENT: ComposerContent = {
   bodyHtml: "",
+  editorHtml: "",
   bodyText: "",
   inlineAssetIds: [],
   storedImages: [],
@@ -161,6 +175,9 @@ function useFullScreenComposer(
 export function ComposeWindow({
   mailbox,
   forwardedMessage,
+  draft,
+  draftId,
+  onSaved,
   onClose,
 }: {
   mailbox: Mailbox;
@@ -173,23 +190,52 @@ export function ComposeWindow({
     | "preview"
     | "attachments"
     | "security"
+    | "conversationId"
   >;
+  /** A saved draft to reopen. */
+  draft?: SavedDraft;
+  /** The id this composer's draft is saved under. */
+  draftId: string;
+  /** The draft was first saved. */
+  onSaved: (draftId: string) => void;
   onClose: () => void;
 }) {
   const form = useRef<HTMLFormElement>(null);
   const editor = useRef<ComposerEditorHandle>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const inlineFileInput = useRef<HTMLInputElement>(null);
-  const [to, setTo] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [cc, setCc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [bcc, setBcc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [replyTo, setReplyTo] = useState("");
 
-  const [subject, setSubject] = useState(() =>
-    forwardedMessage ? forwardSubject(forwardedMessage.subject) : ""
+  const [to, setTo] = useState<RecipientFieldValue>(() =>
+    draft ? recipientField(draft.to) : EMPTY_RECIPIENT_FIELD
   );
 
-  const [content, setContent] = useState<ComposerContent>(EMPTY_CONTENT);
+  const [cc, setCc] = useState<RecipientFieldValue>(() =>
+    draft ? recipientField(draft.cc) : EMPTY_RECIPIENT_FIELD
+  );
+
+  const [bcc, setBcc] = useState<RecipientFieldValue>(() =>
+    draft ? recipientField(draft.bcc) : EMPTY_RECIPIENT_FIELD
+  );
+
+  const [replyTo, setReplyTo] = useState(draft?.replyTo ?? "");
+
+  const [subject, setSubject] = useState(
+    () =>
+      draft?.subject ??
+      (forwardedMessage ? forwardSubject(forwardedMessage.subject) : "")
+  );
+
+  const [content, setContent] = useState<ComposerContent>(() =>
+    draft
+      ? {
+          ...EMPTY_CONTENT,
+          bodyHtml: draft.bodyHtml ?? "",
+          editorHtml: draft.editorHtml ?? draft.bodyHtml ?? "",
+          bodyText: draft.bodyText,
+        }
+      : EMPTY_CONTENT
+  );
+
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
   const [minimized, setMinimized] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -202,21 +248,30 @@ export function ComposeWindow({
 
   const { session, snapshot } = useComposerSession(
     mailbox.id,
-    forwardedMessage?.attachments
+    forwardedMessage?.attachments,
+    restoredComposerAssets(mailbox.id, draft)
   );
 
   const { user } = useAuth();
 
-  // The signature that applies, as editable content; the window opens empty,
-  // so it is only ever added once.
+  // A reopened draft as it was saved; otherwise the signature that applies,
+  // as editable content. Either way it is added once, so a reopened draft
+  // never gets a second signature.
   // oxlint-disable-next-line react/hook-use-state -- read once, when the editor is created; nothing sets it
   const [initialHtml] = useState(() =>
-    messageSignatureHtml(
-      mailbox,
-      forwardedMessage ? "reply" : "new",
-      user?.name ?? ""
-    )
+    draft
+      ? restoredDraftHtml(draft)
+      : messageSignatureHtml(
+          mailbox,
+          forwardedMessage ? "reply" : "new",
+          user?.name ?? ""
+        )
   );
+
+  // The text the editor opened with: a new composer still holding just that
+  // (its signature) is untouched and creates no draft.
+  // oxlint-disable-next-line react/hook-use-state -- read once; nothing sets it
+  const [initialText] = useState(() => openingText(initialHtml));
 
   const recipients = validateComposerRecipients({
     to,
@@ -265,6 +320,45 @@ export function ComposeWindow({
   );
 
   const uploadsFailed = activeAssets.some((asset) => asset.status === "error");
+  const toAddresses = recipientAddresses(to);
+  const ccAddresses = recipientAddresses(cc);
+  const bccAddresses = recipientAddresses(bcc);
+
+  const keptAttachments = draftAttachments(activeAssets);
+
+  const draftContent = (body: ComposerContent): DraftContent => ({
+    kind: forwardedMessage ? "forward" : "compose",
+    sourceEmailId: forwardedMessage?.id ?? null,
+    conversationId: forwardedMessage?.conversationId ?? null,
+    to: toAddresses,
+    cc: ccAddresses,
+    bcc: bccAddresses,
+    replyTo: replyTo.trim() || null,
+    subject,
+    bodyText: body.bodyText,
+    bodyHtml: body.bodyHtml,
+    // The editor's HTML, so the reopened editor puts the files back in place.
+    editorHtml: body.editorHtml,
+    attachments: keptAttachments,
+    storedImages: body.storedImages,
+  });
+
+  const autosave = useDraftAutosave({
+    mailboxId: mailbox.id,
+    session,
+    draftId,
+    restored: draft,
+    content: draftContent(content),
+    blank: () =>
+      !draft &&
+      !toAddresses.length &&
+      !ccAddresses.length &&
+      !bccAddresses.length &&
+      (Boolean(forwardedMessage) || !subject.trim()) &&
+      holdsOnlyInitialContent(content, initialText, keptAttachments.length),
+    editing: snapshot.phase === "editing" && mailbox.canSend,
+    onSaved,
+  });
 
   const submission = useComposeSubmission({
     session,
@@ -279,8 +373,15 @@ export function ComposeWindow({
     uploadLimitError: attachmentError,
     uploadsPending,
     uploadsFailed,
-    onClose,
+    draftId: autosave.draftId,
+    // Sent: the server deleted the draft.
+    onClose: () => {
+      autosave.sent();
+      onClose();
+    },
   });
+
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const { busy } = submission;
   // Sending takes over the window: no drop target while it is busy.
@@ -335,6 +436,36 @@ export function ComposeWindow({
       return;
     }
 
+    // The editor reports changes after a short pause; save what it has now.
+    autosave.flush(draftContent(editor.current?.content() ?? content));
+    session.close();
+    onClose();
+  }
+
+  async function discardDraft() {
+    if (busy) return;
+
+    if (
+      !(await confirm({
+        title: "Discard this draft?",
+        description: "The message you wrote and its attachments are deleted.",
+        action: "Discard draft",
+        destructive: true,
+      }))
+    ) {
+      return;
+    }
+
+    try {
+      await autosave.discard();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not discard the draft"
+      );
+
+      return;
+    }
+
     session.close();
     onClose();
   }
@@ -372,6 +503,7 @@ export function ComposeWindow({
       tabIndex={-1}
       className="animate-rise bg-surface ring-border fixed inset-0 z-50 flex flex-col shadow-2xl ring-1 outline-none sm:inset-auto sm:right-6 sm:bottom-6 sm:h-[min(600px,calc(100dvh-3rem))] sm:w-[min(560px,calc(100vw-2.5rem))] sm:rounded-xl"
     >
+      {confirmDialog}
       {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- files can be dropped anywhere on the form */}
       <form
         ref={form}
@@ -406,6 +538,7 @@ export function ComposeWindow({
           from={mailbox.address}
           minimizeRef={minimizeButton}
           onMinimize={() => toggleMinimized(true)}
+          onDiscard={() => void discardDraft()}
           onClose={closeComposer}
         />
 

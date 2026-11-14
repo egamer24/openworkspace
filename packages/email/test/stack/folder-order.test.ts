@@ -91,9 +91,11 @@ describe("folder order", () => {
     // Until someone moves them, system folders come first and new folders go last.
     const product = await createFolder("Product");
     const decks = await createFolder("Pitch Decks");
+    // Drafts follows Sent wherever Sent goes, outside the order.
     expect(names(await listed())).toEqual([
       "Inbox",
       "Sent",
+      "Drafts",
       "Archive",
       "Spam",
       "Trash",
@@ -118,13 +120,14 @@ describe("folder order", () => {
       "Inbox",
       "Pitch Decks",
       "Sent",
+      "Drafts",
       "Archive",
       "Spam",
       "Product",
       "Trash",
     ]);
     expect(folders.map((folder) => folder.sortOrder)).toEqual([
-      0, 10, 20, 30, 40, 50, 60,
+      0, 10, 20, 21, 30, 40, 50, 60,
     ]);
 
     // A folder created afterwards goes to the end, after Trash.
@@ -142,6 +145,7 @@ describe("folder order", () => {
       "Inbox",
       "Pitch Decks",
       "Sent",
+      "Drafts",
       "Archive",
       "Spam",
       "Product",
@@ -155,7 +159,9 @@ describe("folder order", () => {
 
     const custom = (await listed()).filter(
       (folder) =>
-        !["inbox", "sent", "archive", "spam", "trash"].includes(folder.id)
+        !["inbox", "sent", "drafts", "archive", "spam", "trash"].includes(
+          folder.id
+        )
     );
 
     const customIds = custom.map((folder) => folder.id);

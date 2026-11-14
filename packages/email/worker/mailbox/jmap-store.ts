@@ -1,3 +1,4 @@
+import { DRAFTS_FOLDER_ID } from "../../shared/folder-order";
 import { defaultSystemFolderOrder } from "./folder-model";
 /**
  * JMAP views over a mailbox's SQLite store (RFC 8621). A JMAP Mailbox is a
@@ -109,6 +110,16 @@ export function mailboxes(sql: SqlStorage, userId: string): JmapMailboxRow[] {
       .map((row) => [row.folder_id, row.sort_order])
   );
 
+  // The person's drafts (the drafts table), right after Sent.
+  const drafts = sql
+    .exec<{ total: number }>(
+      "select count(*) as total from drafts where user_id = ?",
+      userId
+    )
+    .one().total;
+
+  const sentOrder = systemOrder.get("sent") ?? defaultSystemFolderOrder("sent");
+
   const rows = [
     ...SYSTEM_MAILBOXES.map((mailbox) => ({
       ...mailbox,
@@ -126,17 +137,31 @@ export function mailboxes(sql: SqlStorage, userId: string): JmapMailboxRow[] {
     })),
   ];
 
-  return rows.map((mailbox) => {
-    const count = counts.get(mailbox.id);
+  const draftsMailbox = {
+    id: DRAFTS_FOLDER_ID,
+    name: "Drafts",
+    role: "drafts",
+    sortOrder: sentOrder + 1,
+    totalEmails: drafts,
+    unreadEmails: 0,
+    totalThreads: drafts,
+    unreadThreads: 0,
+  };
 
-    return {
-      ...mailbox,
-      totalEmails: count?.total ?? 0,
-      unreadEmails: count?.unread ?? 0,
-      totalThreads: count?.threads ?? 0,
-      unreadThreads: count?.unread_threads ?? 0,
-    };
-  });
+  return [
+    ...rows.map((mailbox) => {
+      const count = counts.get(mailbox.id);
+
+      return {
+        ...mailbox,
+        totalEmails: count?.total ?? 0,
+        unreadEmails: count?.unread ?? 0,
+        totalThreads: count?.threads ?? 0,
+        unreadThreads: count?.unread_threads ?? 0,
+      };
+    }),
+    draftsMailbox,
+  ];
 }
 
 function ftsQuery(text: string) {

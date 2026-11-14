@@ -30,6 +30,7 @@ type ReplySubmissionInput = {
   uploadLimitError: string | null;
   uploadsPending: boolean;
   uploadsFailed: boolean;
+  draftId: string;
   onSuccess: (result: SentReply) => void;
 };
 
@@ -141,6 +142,7 @@ async function prepareReplySubmission(
     storedImages: content.storedImages,
     parentEmailId: input.parent.id,
     mode: input.action.mode,
+    draftId: input.draftId,
   };
 
   return {

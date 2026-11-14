@@ -13,7 +13,7 @@ import { baseSubject } from "../../shared/mail";
 import { ConversationLoadingSkeleton } from "./conversation-loading-skeleton";
 import { ConversationMessage } from "./conversation-message";
 import { ConversationReply, ReplyActionIcon } from "./conversation-reply";
-import type { SentReply } from "./conversation-reply";
+import type { ReplyHandle, SentReply } from "./conversation-reply";
 import { actionButtonLabel } from "./message-actions";
 import type { SenderHandlers } from "./message-actions";
 import {
@@ -29,6 +29,7 @@ import type {
   MessageDetail,
   ReplyActionMode,
 } from "./types";
+import { useDiscardDraft, useDrafts } from "./use-drafts";
 import { useResendMessage, useSetMessageRead } from "./use-mail-data";
 
 type ReplySelection = {
@@ -82,6 +83,38 @@ export function ConversationView({
   );
 
   const replyRegion = useRef<HTMLDivElement>(null);
+  const reply = useRef<ReplyHandle>(null);
+  const drafts = useDrafts(mailbox?.canSend ? mailbox.id : undefined);
+  const discardDraft = useDiscardDraft();
+  const openConversationId = messages.at(-1)?.conversationId;
+
+  // The conversation has one reply box, so the person has at most one reply
+  // draft here; it reopens in the reply box, once per visit.
+  const replyDraft = drafts.data?.find(
+    (draft) =>
+      draft.kind === "reply" && draft.conversationId === openConversationId
+  );
+
+  const replyDraftParent = messages.find(
+    (message) =>
+      message.id === replyDraft?.sourceEmailId &&
+      message.replyPlan.actions.length > 0
+  );
+
+  const [openedDraftId, setOpenedDraftId] = useState<string | null>(null);
+
+  if (
+    replyDraft?.replyMode &&
+    replyDraftParent &&
+    !replySelection &&
+    openedDraftId !== replyDraft.id
+  ) {
+    setOpenedDraftId(replyDraft.id);
+    setReplySelection({
+      parentId: replyDraftParent.id,
+      mode: replyDraft.replyMode,
+    });
+  }
 
   const canShowOriginal = (message: MessageDetail) =>
     Boolean(mailbox && message.hasOriginal);
@@ -180,6 +213,50 @@ export function ConversationView({
   const replyTarget =
     replyCandidates.find((message) => message.direction === "incoming") ??
     replyCandidates[0];
+
+  /**
+   * Opens the reply box on `next`. Replying to another message than the
+   * draft here would replace the draft, so that asks first.
+   */
+  async function startReply(next: ReplySelection) {
+    const open = replySelection ? reply.current : null;
+    const replacing = replySelection?.parentId !== next.parentId;
+
+    // A draft here whose message is not shown (an older page) has no box.
+    const hidden =
+      !open && replyDraft && replyDraft.sourceEmailId !== next.parentId
+        ? replyDraft
+        : null;
+
+    if (replacing && (open?.hasContent() || hidden)) {
+      if (
+        !(await confirm({
+          title: "Discard your draft reply?",
+          description:
+            "This conversation has one reply draft. Replying to another message deletes the one you started.",
+          action: "Discard draft",
+          destructive: true,
+        }))
+      ) {
+        return;
+      }
+
+      try {
+        if (open) await open.discard();
+        else if (hidden && mailbox) await discardDraft(mailbox.id, hidden.id);
+      } catch (discardError) {
+        toast.error(
+          discardError instanceof Error
+            ? discardError.message
+            : "Could not discard the draft"
+        );
+
+        return;
+      }
+    }
+
+    setReplySelection(next);
+  }
 
   function handleSent(result: SentReply) {
     setReplySelection(null);
@@ -300,7 +377,7 @@ export function ConversationView({
                 handlers={{
                   onViewed: () => markViewed(message.id),
                   onReply: (action) =>
-                    setReplySelection({
+                    void startReply({
                       parentId: message.id,
                       mode: action.mode,
                     }),
@@ -334,6 +411,7 @@ export function ConversationView({
         {selectedParent && selectedMode ? (
           <ConversationReply
             key={selectedParent.id}
+            ref={reply}
             mailbox={mailbox}
             parent={selectedParent}
             mode={selectedMode}
@@ -345,6 +423,11 @@ export function ConversationView({
             }
             onCancel={() => setReplySelection(null)}
             onSent={handleSent}
+            draft={
+              replyDraft?.sourceEmailId === selectedParent.id
+                ? replyDraft
+                : undefined
+            }
           />
         ) : mailbox?.canSend ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -355,7 +438,7 @@ export function ConversationView({
                 variant="outline"
                 size="sm"
                 onClick={() =>
-                  setReplySelection({
+                  void startReply({
                     parentId: replyTarget.id,
                     mode: action.mode,
                   })

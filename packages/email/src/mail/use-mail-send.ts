@@ -20,6 +20,8 @@ type MessageContent = {
   uploadedAttachments?: SubmittedComposerUpload[];
   /** Saved images the body shows by `cid:`, e.g. the signature's. */
   storedImages?: StoredImageRef[];
+  /** The composer's draft, which the server deletes once the message is accepted. */
+  draftId?: string;
 };
 
 type MailSendInput =
@@ -89,6 +91,7 @@ export function useMailSend() {
         bodyHtml: input.bodyHtml,
         attachments: input.uploadedAttachments ?? [],
         storedImages: input.storedImages ?? [],
+        draftId: input.draftId,
       };
 
       if (input.kind === "reply") {

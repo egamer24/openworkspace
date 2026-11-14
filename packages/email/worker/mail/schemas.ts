@@ -163,6 +163,17 @@ export const signatureSchema = z.object({
   useOnReply: z.boolean().default(true),
 });
 
+/** Saved images (a signature's) a body shows by `cid:`, by owner and content id. */
+const storedImagesSchema = z
+  .array(
+    z.object({
+      ownerId: z.string().min(1).max(80),
+      contentId: contentIdSchema,
+    })
+  )
+  .max(MAX_COMPOSER_ATTACHMENT_COUNT)
+  .default([]);
+
 export const outboundMessageContentFields = {
   bodyText: z.string().max(500_000).default(""),
   /**
@@ -175,15 +186,7 @@ export const outboundMessageContentFields = {
    * Saved images (a signature's) the body shows by `cid:`, sent inline
    * without uploading them again.
    */
-  storedImages: z
-    .array(
-      z.object({
-        ownerId: z.string().min(1).max(80),
-        contentId: contentIdSchema,
-      })
-    )
-    .max(MAX_COMPOSER_ATTACHMENT_COUNT)
-    .default([]),
+  storedImages: storedImagesSchema,
   bodyHtml: z.string().max(1_000_000).optional(),
   attachments: z
     .array(outboundAttachmentSchema)
@@ -220,8 +223,14 @@ export const outboundContentFields = {
   ...outboundMessageContentFields,
 };
 
+export const draftIdSchema = z
+  .string()
+  .regex(/^drf_[A-Za-z0-9-]{8,64}$/u, "Draft id is invalid");
+
 const outboundRequestFields = {
   requestId: z.uuid(),
+  /** The sender's draft of this message, deleted once it is accepted. */
+  draftId: draftIdSchema.optional(),
   ...outboundContentFields,
 };
 
@@ -366,3 +375,59 @@ export const unsubscribeSchema = z.object({
 export const bulkReportSchema = z.object({
   conversationIds: z.array(z.string().trim().min(1).max(255)).min(1).max(100),
 });
+
+/** Addresses as typed: a draft may hold ones that aren't valid yet. */
+const draftAddressesSchema = z
+  .array(z.string().trim().min(1).max(320))
+  .max(MAX_MAIL_RECIPIENTS)
+  .default([]);
+
+const draftReferenceSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .nullable()
+  .default(null);
+
+/** A composer file a draft keeps, named by its upload; the server adds the rest. */
+const draftAttachmentsSchema = z
+  .array(z.object({ assetId: z.uuid() }).and(outboundAttachmentSchema))
+  .max(MAX_COMPOSER_ATTACHMENT_COUNT)
+  .default([])
+  .refine(
+    (attachments) =>
+      new Set(attachments.map((file) => file.uploadId)).size ===
+      attachments.length,
+    { message: "Duplicate attachment uploads are not allowed" }
+  );
+
+// A draft row stays well under the Durable Object's 2 MB value limit even
+// when every character takes three UTF-8 bytes.
+export const saveDraftSchema = z
+  .object({
+    /** The version this save is based on; 0 creates the draft. */
+    expectedVersion: z.number().int().nonnegative(),
+    kind: z.enum(["compose", "reply", "forward"]),
+    sourceEmailId: draftReferenceSchema,
+    conversationId: draftReferenceSchema,
+    replyMode: z.enum(replyActionModes).nullable().default(null),
+    to: draftAddressesSchema,
+    cc: draftAddressesSchema,
+    bcc: draftAddressesSchema,
+    replyTo: z.string().trim().max(320).nullable().default(null),
+    subject: z.string().max(998).default(""),
+    bodyText: z.string().max(150_000).default(""),
+    bodyHtml: z.string().max(200_000).nullable().default(null),
+    editorHtml: z.string().max(200_000).nullable().default(null),
+    attachments: draftAttachmentsSchema,
+    /** Signature images the HTML shows; the draft keeps its own copies. */
+    storedImages: storedImagesSchema,
+  })
+  .refine((value) => value.kind === "compose" || value.sourceEmailId, {
+    path: ["sourceEmailId"],
+    message: "Replies and forwards name their message",
+  })
+  .refine((value) => value.kind !== "reply" || value.replyMode, {
+    path: ["replyMode"],
+    message: "Replies name their reply mode",
+  });

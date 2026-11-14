@@ -92,14 +92,28 @@ export class ComposerSession {
   private owners = 0;
   private disposed = false;
 
+  /**
+   * Whether closing keeps finished uploads, because a draft holds (or is
+   * about to copy) them. Unkept uploads expire with `composer-uploads/`.
+   */
+  private retainUploads = false;
+
   constructor(
     readonly mailboxId: string,
     private readonly reservedAssets: readonly {
       size: number;
-    }[] = EMPTY_RESERVED_ASSETS
-  ) {}
+    }[] = EMPTY_RESERVED_ASSETS,
+    /** Uploaded assets a reopened draft brings back. */
+    restoredAssets: readonly ComposerAsset[] = []
+  ) {
+    this.snapshot = { ...this.snapshot, assets: restoredAssets };
+  }
 
   getSnapshot = () => this.snapshot;
+
+  setRetainUploads(retain: boolean) {
+    this.retainUploads = retain;
+  }
 
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
@@ -369,7 +383,9 @@ export class ComposerSession {
     if (this.disposed) return;
     this.disposed = true;
     const claimed = this.claimedAssetIds;
-    this.disposeAssets((asset) => !claimed.has(asset.id));
+    this.disposeAssets(
+      (asset) => !claimed.has(asset.id) && !this.retainUploads
+    );
     this.publish({ ...this.snapshot, phase: "closed" });
   };
 
@@ -542,12 +558,13 @@ function setsEqual<T>(left: ReadonlySet<T>, right: ReadonlySet<T>) {
 
 export function useComposerSession(
   mailboxId: string,
-  reservedAssets?: readonly { size: number }[]
+  reservedAssets?: readonly { size: number }[],
+  restoredAssets?: readonly ComposerAsset[]
 ) {
   // One session for the composer's lifetime: created once, never replaced.
   // oxlint-disable-next-line react/hook-use-state -- the lazy initializer keeps one instance; there is nothing to set
   const [session] = useState(
-    () => new ComposerSession(mailboxId, reservedAssets)
+    () => new ComposerSession(mailboxId, reservedAssets, restoredAssets)
   );
 
   const snapshot = useSyncExternalStore(

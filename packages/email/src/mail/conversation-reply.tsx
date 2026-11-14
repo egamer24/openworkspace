@@ -22,19 +22,28 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
-import type { DragEvent } from "react";
+import { useImperativeHandle, useMemo, useRef, useState } from "react";
+import type { DragEvent, Ref } from "react";
+import { toast } from "sonner";
 
 import { normalizeExternalEmailAddress } from "../../shared/mail";
 import { ComposerAttachmentList } from "./composer-attachment-list";
 import { ComposerEditor } from "./composer-editor";
 import type { ComposerContent, ComposerEditorHandle } from "./composer-editor";
 import {
-  recipientsWithPendingInput,
+  recipientAddresses,
+  recipientField,
   validateComposerRecipients,
 } from "./composer-recipients";
 import type { RecipientFieldValue } from "./composer-recipients";
 import { useComposerSession } from "./composer-session";
+import {
+  draftAttachments,
+  holdsOnlyInitialContent,
+  openingText,
+  restoredComposerAssets,
+  restoredDraftHtml,
+} from "./draft-attachments";
 import { RecipientCombobox } from "./recipient-combobox";
 import { ReplyToWarning } from "./reply-to-warning";
 import { messageSignatureHtml } from "./signature";
@@ -45,28 +54,25 @@ import type {
   ReplyActionMode,
 } from "./types";
 import { useComposerAttachmentPreflight } from "./use-composer-attachment-preflight";
+import { newDraftId, useDraftAutosave } from "./use-drafts";
+import type { SavedDraft } from "./use-drafts";
 import { useReplySubmission } from "./use-reply-submission";
 import type { SentReply } from "./use-reply-submission";
 
 export type { SentReply } from "./use-reply-submission";
 
+/** What the conversation asks the open reply box before replacing it. */
+export type ReplyHandle = {
+  /** Something was written: replacing the reply would lose it. */
+  hasContent: () => boolean;
+  /** Stops saving and deletes its draft. */
+  discard: () => Promise<void>;
+};
+
 const EMPTY_RECIPIENT_FIELD: RecipientFieldValue = {
   recipients: [],
   input: "",
 };
-
-function recipientField(addresses: string[]): RecipientFieldValue {
-  return {
-    recipients: addresses.map((address) => ({ address, name: null })),
-    input: "",
-  };
-}
-
-function recipientAddresses(value: RecipientFieldValue) {
-  return recipientsWithPendingInput(value).map(
-    (recipient) => recipient.address
-  );
-}
 
 function recipientAddressSet(value: RecipientFieldValue) {
   return new Set(recipientAddresses(value).map(normalizeExternalEmailAddress));
@@ -74,6 +80,7 @@ function recipientAddressSet(value: RecipientFieldValue) {
 
 const EMPTY_CONTENT: ComposerContent = {
   bodyHtml: "",
+  editorHtml: "",
   bodyText: "",
   inlineAssetIds: [],
   linkedAssetIds: [],
@@ -87,6 +94,8 @@ export function ConversationReply({
   onModeChange,
   onCancel,
   onSent,
+  draft,
+  ref,
 }: {
   mailbox?: Mailbox;
   parent: MessageDetail;
@@ -94,6 +103,9 @@ export function ConversationReply({
   onModeChange: (mode: ReplyActionMode) => void;
   onCancel: () => void;
   onSent: (result: SentReply) => void;
+  /** A saved reply to this message to reopen. */
+  draft?: SavedDraft;
+  ref?: Ref<ReplyHandle>;
 }) {
   const form = useRef<HTMLFormElement>(null);
   const editor = useRef<ComposerEditorHandle>(null);
@@ -103,20 +115,30 @@ export function ConversationReply({
   const fieldsSource = `${mode}\0${parent.id}`;
   const { user } = useAuth();
 
-  // The signature that applies, as editable content above the quoted text
-  // the Worker adds; the box opens empty, so it is only ever added once.
+  // A reopened draft as it was saved; otherwise the signature that applies,
+  // as editable content above the quoted text the Worker adds. Either way it
+  // is added once, so a reopened draft never gets a second signature.
   // oxlint-disable-next-line react/hook-use-state -- read once, when the editor is created; nothing sets it
   const [initialHtml] = useState(() =>
-    mailbox ? messageSignatureHtml(mailbox, "reply", user?.name ?? "") : ""
+    draft
+      ? restoredDraftHtml(draft)
+      : mailbox
+        ? messageSignatureHtml(mailbox, "reply", user?.name ?? "")
+        : ""
   );
 
   // Updated as the person edits; untouched until then.
   const [content, setContent] = useState<ComposerContent>(EMPTY_CONTENT);
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
-  const [cc, setCc] = useState(() => recipientField(initialAction?.cc ?? []));
-  const [bcc, setBcc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
-  const [showCc, setShowCc] = useState(Boolean(initialAction?.cc.length));
-  const [showBcc, setShowBcc] = useState(false);
+  const initialCc = draft?.cc ?? initialAction?.cc ?? [];
+  const [cc, setCc] = useState(() => recipientField(initialCc));
+
+  const [bcc, setBcc] = useState<RecipientFieldValue>(() =>
+    recipientField(draft?.bcc ?? [])
+  );
+
+  const [showCc, setShowCc] = useState(initialCc.length > 0);
+  const [showBcc, setShowBcc] = useState(Boolean(draft?.bcc.length));
   const [ccSource, setCcSource] = useState(fieldsSource);
 
   // Another reply mode or parent message resets Cc to its own; adjusted
@@ -127,7 +149,11 @@ export function ConversationReply({
     setShowCc(Boolean(initialAction?.cc.length));
   }
 
-  const { session, snapshot } = useComposerSession(mailbox?.id ?? "");
+  const { session, snapshot } = useComposerSession(
+    mailbox?.id ?? "",
+    undefined,
+    restoredComposerAssets(mailbox?.id ?? "", draft)
+  );
 
   // Attachments, and the inline images still in the text.
   const activeAssets = snapshot.assets.filter(
@@ -166,6 +192,50 @@ export function ConversationReply({
     snapshot.phase === "editing" && Boolean(mailbox && action)
   );
 
+  const keptAttachments = draftAttachments(activeAssets);
+
+  // The text the editor opened with: a new reply still holding just that
+  // (its signature) is untouched and creates no draft.
+  // oxlint-disable-next-line react/hook-use-state -- read once; nothing sets it
+  const [initialText] = useState(() => openingText(initialHtml));
+
+  // One id for the reply box's lifetime: created once, never replaced.
+  // oxlint-disable-next-line react/hook-use-state -- the lazy initializer keeps one id; there is nothing to set
+  const [draftId] = useState(() => draft?.id ?? newDraftId());
+
+  // A reopened draft already exists, so it is never blank.
+  const blank = () =>
+    !draft &&
+    holdsOnlyInitialContent(content, initialText, keptAttachments.length);
+
+  const autosave = useDraftAutosave({
+    mailboxId: mailbox?.id ?? "",
+    session,
+    draftId,
+    restored: draft,
+    content: {
+      kind: "reply",
+      sourceEmailId: parent.id,
+      conversationId: parent.conversationId,
+      replyMode: action?.mode ?? mode,
+      // Shown in the drafts list; sending works out the recipients again.
+      to: action?.to ?? [],
+      cc: recipientAddresses(cc),
+      bcc: recipientAddresses(bcc),
+      replyTo: null,
+      subject: parent.subject,
+      bodyText: content.bodyText,
+      bodyHtml: content.bodyHtml || null,
+      // The editor's HTML, so the reopened editor puts the files back in place.
+      editorHtml: content.editorHtml || null,
+      attachments: keptAttachments,
+      storedImages: content.storedImages,
+    },
+    blank,
+    editing:
+      snapshot.phase === "editing" && Boolean(mailbox?.canSend && action),
+  });
+
   const submission = useReplySubmission({
     session,
     phase: snapshot.phase,
@@ -178,11 +248,18 @@ export function ConversationReply({
     uploadLimitError,
     uploadsPending,
     uploadsFailed,
+    draftId: autosave.draftId,
     onSuccess: (result) => {
+      autosave.sent();
       setBcc(EMPTY_RECIPIENT_FIELD);
       onSent(result);
     },
   });
+
+  useImperativeHandle(ref, () => ({
+    hasContent: () => !blank(),
+    discard: autosave.discard,
+  }));
 
   const { busy } = submission;
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -212,7 +289,7 @@ export function ConversationReply({
 
   async function cancel() {
     if (
-      (content.bodyText.trim() || activeAssets.length > 0) &&
+      !blank() &&
       !(await confirm({
         title: "Discard this reply?",
         description:
@@ -223,6 +300,16 @@ export function ConversationReply({
         destructive: true,
       }))
     ) {
+      return;
+    }
+
+    try {
+      await autosave.discard();
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Could not discard the draft"
+      );
+
       return;
     }
 

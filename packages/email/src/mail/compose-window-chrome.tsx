@@ -6,6 +6,7 @@ import {
   Minus,
   Paperclip,
   Send,
+  Trash2,
   X,
 } from "lucide-react";
 import type { Ref, RefObject } from "react";
@@ -54,11 +55,13 @@ export function ComposeWindowHeader({
   from,
   minimizeRef,
   onMinimize,
+  onDiscard,
   onClose,
 }: {
   from: string;
   minimizeRef?: Ref<HTMLButtonElement>;
   onMinimize: () => void;
+  onDiscard: () => void;
   onClose: () => void;
 }) {
   return (
@@ -69,6 +72,16 @@ export function ComposeWindowHeader({
           From {from}
         </p>
       </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        title="Discard draft"
+        onClick={onDiscard}
+      >
+        <Trash2 />
+        <span className="sr-only">Discard draft</span>
+      </Button>
       <Button
         ref={minimizeRef}
         className="hidden sm:inline-flex"

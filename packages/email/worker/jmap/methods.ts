@@ -7,6 +7,7 @@ import type { Issue } from "@open-workspace/core/module";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
+import { DRAFTS_FOLDER_ID } from "../../shared/folder-order";
 import { MAX_COMPOSER_ATTACHMENT_COUNT } from "../../shared/mail";
 import {
   importPlacements,
@@ -18,9 +19,10 @@ import {
   MAIL_SEND_SCOPE,
 } from "../../shared/permissions";
 import { jmapPushSubscriptions } from "../db/schema";
+import { storeDraft } from "../mail/draft-routes";
 import { importRawMessage } from "../mail/import-routes";
 import { submitOutgoing } from "../mail/outbound-service";
-import { composeSchema } from "../mail/schemas";
+import { composeSchema, saveDraftSchema } from "../mail/schemas";
 import {
   describeComposerUpload,
   loadComposerUpload,
@@ -28,7 +30,7 @@ import {
 } from "../mail/uploads";
 import { mailboxStub } from "../mailbox";
 import type { JmapEmailFilter, JmapMailboxRow } from "../mailbox/jmap-store";
-import type { Email } from "../mailbox/schema";
+import type { Email, Draft as StoredDraft } from "../mailbox/schema";
 import {
   newVerificationCode,
   sendVerification,
@@ -684,6 +686,118 @@ const emailGetArguments = z.object({
 
 type EmailGetArguments = z.output<typeof emailGetArguments>;
 
+/** A body value as Email/get returns it, cut to maxBodyValueBytes. */
+function bodyValueOf(value: string, args: EmailGetArguments) {
+  const maxBytes = args.maxBodyValueBytes ?? 0;
+
+  return {
+    value:
+      maxBytes && value.length > maxBytes ? value.slice(0, maxBytes) : value,
+    isEncodingProblem: false,
+    isTruncated: Boolean(maxBytes && value.length > maxBytes),
+  };
+}
+
+/**
+ * One of the person's drafts as an Email in the drafts mailbox, with the
+ * $draft keyword. Its files download as the uploads they were (`upl~`).
+ */
+function draftEmailObject(
+  owner: JmapAccount,
+  draft: StoredDraft,
+  args: EmailGetArguments
+) {
+  const part = (partId: string, type: string, value: string) => ({
+    partId,
+    blobId: `draft~${draft.id}`,
+    size: value.length,
+    name: null,
+    type,
+    charset: "utf-8",
+    disposition: null,
+    cid: null,
+  });
+
+  const textBody = [part("text", "text/plain", draft.bodyText)];
+
+  const htmlBody = draft.bodyHtml
+    ? [part("html", "text/html", draft.bodyHtml)]
+    : textBody;
+
+  const attachments = draft.attachments.map((file) => ({
+    partId: `att-${file.uploadId}`,
+    blobId: `upl~${file.uploadId}`,
+    size: file.size,
+    name: file.filename,
+    type: file.contentType,
+    charset: null,
+    disposition: file.disposition,
+    cid: file.contentId,
+  }));
+
+  const wanted = args.properties ?? defaultEmailProperties;
+  const bodyValues: Record<string, ReturnType<typeof bodyValueOf>> = {};
+
+  if (wanted.includes("bodyValues")) {
+    const all = args.fetchAllBodyValues === true;
+
+    if (all || args.fetchTextBodyValues === true || !draft.bodyHtml) {
+      bodyValues.text = bodyValueOf(draft.bodyText, args);
+    }
+
+    if ((all || args.fetchHTMLBodyValues === true) && draft.bodyHtml) {
+      bodyValues.html = bodyValueOf(draft.bodyHtml, args);
+    }
+  }
+
+  const timestamp = draft.updatedAt.toISOString();
+
+  const list = (values: string[]) =>
+    addresses(values.map((address) => ({ address })));
+
+  return pick(
+    {
+      id: draft.id,
+      blobId: `draft~${draft.id}`,
+      threadId:
+        draft.kind === "reply" && draft.conversationId
+          ? draft.conversationId
+          : draft.id,
+      mailboxIds: { [DRAFTS_FOLDER_ID]: true },
+      keywords: { $draft: true, $seen: true },
+      size:
+        draft.bodyText.length +
+        attachments.reduce((total, file) => total + file.size, 0),
+      receivedAt: timestamp,
+      messageId: null,
+      inReplyTo: null,
+      references: null,
+      sender: null,
+      from: [{ name: owner.displayName || null, email: owner.address }],
+      to: list(draft.to),
+      cc: list(draft.cc),
+      bcc: list(draft.bcc),
+      replyTo: draft.replyTo ? list([draft.replyTo]) : null,
+      subject: draft.subject,
+      sentAt: timestamp,
+      hasAttachment: attachments.some(
+        (file) => file.disposition === "attachment"
+      ),
+      preview: draft.bodyText.replaceAll(/\s+/gu, " ").trim().slice(0, 256),
+      bodyValues,
+      textBody,
+      htmlBody,
+      attachments,
+      bodyStructure: {
+        partId: null,
+        type: "multipart/mixed",
+        subParts: [...htmlBody, ...attachments],
+      },
+    },
+    wanted
+  );
+}
+
 async function emailObject(
   env: Env,
   row: { email: Email; mailboxId: string; seen: boolean },
@@ -732,15 +846,7 @@ async function emailObject(
   }));
 
   const wanted = args.properties ?? defaultEmailProperties;
-  const maxBytes = args.maxBodyValueBytes ?? 0;
-
-  const bodyValue = (value: string) => ({
-    value:
-      maxBytes && value.length > maxBytes ? value.slice(0, maxBytes) : value,
-    isEncodingProblem: false,
-    isTruncated: Boolean(maxBytes && value.length > maxBytes),
-  });
-
+  const bodyValue = (value: string) => bodyValueOf(value, args);
   const bodyValues: Record<string, ReturnType<typeof bodyValue>> = {};
 
   if (wanted.includes("bodyValues")) {
@@ -821,14 +927,20 @@ async function emailGet(state: RequestState, args: EmailGetArguments) {
     ids
   );
 
-  const found = new Set(result.emails.map((row) => row.email.id));
+  const found = new Set([
+    ...result.emails.map((row) => row.email.id),
+    ...result.drafts.map((draft) => draft.id),
+  ]);
 
   return {
     accountId: owner.id,
     state: result.state,
-    list: await Promise.all(
-      result.emails.map((row) => emailObject(state.context.env, row, args))
-    ),
+    list: [
+      ...(await Promise.all(
+        result.emails.map((row) => emailObject(state.context.env, row, args))
+      )),
+      ...result.drafts.map((draft) => draftEmailObject(owner, draft, args)),
+    ],
     notFound: ids.filter((id) => !found.has(id)),
   };
 }
@@ -994,6 +1106,152 @@ const draftSchema = z
     };
   });
 
+/** Whether an Email/set create puts the email in the drafts mailbox, to keep it. */
+function inDraftsMailbox(input: Json) {
+  return (
+    isJsonObject(input) &&
+    isJsonObject(input.mailboxIds ?? null) &&
+    isJsonObject(input.mailboxIds) &&
+    input.mailboxIds[DRAFTS_FOLDER_ID] === true
+  );
+}
+
+const isStoredDraftId = (id: string) => id.startsWith("drf_");
+
+/**
+ * Keeps a mail app's draft (Email/set create in the drafts mailbox) as one
+ * of the person's drafts, which the web app lists too. Returns its id, or
+ * the SetError it was not created with.
+ */
+async function createStoredDraft(
+  state: RequestState,
+  owner: JmapAccount,
+  input: Json
+): Promise<{ id: string; size: number } | { error: JsonObject }> {
+  if (!owner.canSend) {
+    return {
+      error: { type: "forbidden", description: "This account cannot send" },
+    };
+  }
+
+  const parsed = draftSchema.safeParse(input);
+
+  if (!parsed.success) {
+    return {
+      error: invalidProperties(parsed.error.issues, { topLevel: true }),
+    };
+  }
+
+  const { attachments, ...message } = parsed.data;
+
+  try {
+    await Promise.all(
+      attachments.map((attachment) =>
+        describeComposerUpload({
+          env: state.context.env,
+          mailboxId: owner.id,
+          userId: state.context.user.id,
+          uploadId: attachment.uploadId,
+          filename: attachment.name,
+          contentType: attachment.type,
+        })
+      )
+    );
+  } catch (error) {
+    if (!(error instanceof UploadValidationError)) throw error;
+
+    return { error: { type: "blobNotFound", description: error.message } };
+  }
+
+  const save = saveDraftSchema.safeParse({
+    ...message,
+    expectedVersion: 0,
+    kind: "compose",
+    bodyHtml: message.bodyHtml ?? null,
+    attachments: attachments.map((attachment) => ({
+      assetId: crypto.randomUUID(),
+      uploadId: attachment.uploadId,
+      disposition: attachment.disposition,
+      contentId: attachment.contentId,
+    })),
+  });
+
+  if (!save.success) {
+    return {
+      error: invalidProperties(save.error.issues.map(draftIssue), {
+        topLevel: true,
+      }),
+    };
+  }
+
+  const id = `drf_${crypto.randomUUID()}`;
+
+  const result = await storeDraft(
+    {
+      env: state.context.env,
+      user: state.context.user,
+      mailbox: { id: owner.id, ownerUserId: owner.ownerUserId },
+    },
+    id,
+    save.data
+  );
+
+  if (result.status === "saved") {
+    return { id, size: result.draft.bodyText.length };
+  }
+
+  if (result.status === "limit") {
+    return {
+      error: {
+        type: "overQuota",
+        description: "Too many drafts: send or discard some first",
+      },
+    };
+  }
+
+  return {
+    error: {
+      type: "invalidProperties",
+      properties: ["attachments"],
+      description:
+        result.status === "invalid" ? result.message : "Draft was not saved",
+    },
+  };
+}
+
+/**
+ * Why an Email/set update of a draft can't apply, or null: a draft's
+ * content can't change (a mail app replaces it with a new one), and it stays
+ * in the drafts mailbox with $draft until it is sent.
+ */
+function draftPatchError(patch: Json): JsonObject | null {
+  if (!isJsonObject(patch)) {
+    return { type: "invalidPatch", description: "A patch is an object" };
+  }
+
+  for (const [key, value] of Object.entries(patch)) {
+    const keeps =
+      (key === "keywords" && isJsonObject(value) && value.$draft === true) ||
+      (key === "keywords/$draft" && value === true) ||
+      key === "keywords/$seen" ||
+      (key === "mailboxIds" &&
+        isJsonObject(value) &&
+        Object.keys(value).join(",") === DRAFTS_FOLDER_ID) ||
+      (key === `mailboxIds/${DRAFTS_FOLDER_ID}` && value === true);
+
+    if (!keeps) {
+      return {
+        type: "invalidProperties",
+        properties: [patchPath(key)[0] ?? key],
+        description:
+          "A draft stays in Drafts until it is sent; save a new draft to change it",
+      };
+    }
+  }
+
+  return null;
+}
+
 const emailSetArguments = z.object({
   accountId,
   ifInState: z.string().nullish(),
@@ -1034,8 +1292,33 @@ async function emailSet(state: RequestState, args: EmailSetArguments) {
   const created = new Map<string, JsonObject>();
   const notCreated = new Map<string, JsonObject>();
 
-  const drafts = Object.entries(args.create ?? {}).flatMap(
-    ([creationId, input]) => {
+  const creations = Object.entries(args.create ?? {});
+
+  // In the drafts mailbox: a draft to keep, as the web app's drafts are.
+  for (const [creationId, input] of creations.filter(([, object]) =>
+    inDraftsMailbox(object)
+  )) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- drafts are saved in the order the client gave them
+    const stored = await createStoredDraft(state, owner, input);
+
+    if ("error" in stored) {
+      notCreated.set(creationId, stored.error);
+      continue;
+    }
+
+    state.createdIds.set(creationId, stored.id);
+    created.set(creationId, {
+      id: stored.id,
+      blobId: `draft~${stored.id}`,
+      threadId: stored.id,
+      size: stored.size,
+    });
+  }
+
+  // Anywhere else: a message to send in this request, never stored.
+  const drafts = creations
+    .filter(([, object]) => !inDraftsMailbox(object))
+    .flatMap(([creationId, input]) => {
       const parsed = draftSchema.safeParse(input);
 
       if (!parsed.success) {
@@ -1079,8 +1362,7 @@ async function emailSet(state: RequestState, args: EmailSetArguments) {
           draft: { accountId: owner.id, compose: compose.data, attachments },
         },
       ];
-    }
-  );
+    });
 
   const missingBlobs = await Promise.all(
     drafts.map(async ({ draft }) => {
@@ -1136,7 +1418,26 @@ async function emailSet(state: RequestState, args: EmailSetArguments) {
   const reads: [string, boolean][] = [];
   const moves = new Map<string, string[]>();
 
-  for (const [id, patch] of Object.entries(args.update ?? {})) {
+  const updates = Object.entries(args.update ?? {});
+
+  const draftUpdates = updates.filter(([id]) => isStoredDraftId(id));
+
+  const draftsFound = await Promise.all(
+    draftUpdates.map(([id]) => stub.getDraft(state.context.user.id, id))
+  );
+
+  for (const [index, [id, patch]] of draftUpdates.entries()) {
+    const error = draftsFound[index]
+      ? draftPatchError(patch)
+      : { type: "notFound" };
+
+    if (error) notUpdated.set(id, error);
+    else updated.set(id, null);
+  }
+
+  for (const [id, patch] of updates.filter(
+    ([emailId]) => !isStoredDraftId(emailId)
+  )) {
     const change = emailPatch.safeParse(patch);
 
     if (!change.success) {
@@ -1191,7 +1492,18 @@ async function emailSet(state: RequestState, args: EmailSetArguments) {
 
   const destroyed: string[] = [];
   const notDestroyed = new Map<string, JsonObject>();
-  const destroyIds = args.destroy ?? [];
+  const draftDestroyIds = (args.destroy ?? []).filter(isStoredDraftId);
+
+  const draftsDeleted = await Promise.all(
+    draftDestroyIds.map((id) => stub.deleteDraft(state.context.user.id, id))
+  );
+
+  for (const [index, id] of draftDestroyIds.entries()) {
+    if (draftsDeleted[index]) destroyed.push(id);
+    else notDestroyed.set(id, { type: "notFound" });
+  }
+
+  const destroyIds = (args.destroy ?? []).filter((id) => !isStoredDraftId(id));
 
   if (destroyIds.length) {
     const { emails } = await stub.jmapEmails(state.context.user.id, destroyIds);
@@ -1496,8 +1808,66 @@ const submissionSetArguments = z.object({
 const notADraft = {
   type: "invalidProperties",
   properties: ["emailId"],
-  description: "Send an email created by Email/set earlier in the same request",
+  description:
+    "Send a draft, or an email created by Email/set earlier in the same request",
 };
+
+/**
+ * A kept draft as a message to send, checked as the composer's would be.
+ * Replies and forwards started in the web app depend on the message they
+ * answer, so they are sent from there.
+ */
+async function storedDraftMessage(
+  state: RequestState,
+  owner: JmapAccount,
+  id: string
+): Promise<{ draft: Draft } | { error: JsonObject }> {
+  const stored = await mailboxStub(state.context.env, owner.id).getDraft(
+    state.context.user.id,
+    id
+  );
+
+  if (!stored) return { error: notADraft };
+
+  if (stored.kind !== "compose") {
+    return {
+      error: {
+        ...notADraft,
+        description:
+          "Replies and forwards saved in the web app are sent from the web app",
+      },
+    };
+  }
+
+  const compose = composeSchema.safeParse({
+    requestId: crypto.randomUUID(),
+    mailboxId: owner.id,
+    to: stored.to,
+    cc: stored.cc,
+    bcc: stored.bcc,
+    replyTo: stored.replyTo ?? undefined,
+    subject: stored.subject,
+    bodyText: stored.bodyText,
+    bodyHtml: stored.bodyHtml ?? undefined,
+    attachments: stored.attachments.map((file) => ({
+      uploadId: file.uploadId,
+      disposition: file.disposition,
+      contentId: file.contentId ?? undefined,
+    })),
+  });
+
+  if (!compose.success) {
+    return {
+      error: invalidProperties(compose.error.issues.map(draftIssue), {
+        topLevel: true,
+      }),
+    };
+  }
+
+  return {
+    draft: { accountId: owner.id, compose: compose.data, attachments: [] },
+  };
+}
 
 /** Sends a draft as the account; a failure is the reason it was not sent. */
 async function sendDraft(
@@ -1557,7 +1927,21 @@ async function submissionSet(
       ? createdId(state, submission.emailId.slice(1))
       : submission.emailId;
 
-    const draft = emailId === undefined ? undefined : state.drafts.get(emailId);
+    const sendable =
+      emailId !== undefined && isStoredDraftId(emailId)
+        ? // oxlint-disable-next-line eslint/no-await-in-loop -- submissions send mail in the order the client gave them
+          await storedDraftMessage(state, owner, emailId)
+        : {
+            draft:
+              emailId === undefined ? undefined : state.drafts.get(emailId),
+          };
+
+    if ("error" in sendable) {
+      notCreated.set(creationId, sendable.error);
+      continue;
+    }
+
+    const { draft } = sendable;
 
     if (emailId === undefined || !draft || draft.accountId !== owner.id) {
       notCreated.set(creationId, notADraft);
@@ -1599,8 +1983,8 @@ async function submissionSet(
     });
   }
 
-  // The sent copy is already in Sent; drafts were never stored, so the
-  // follow-up Email/set only reports them gone.
+  // The sent copy is already in Sent: the follow-up Email/set deletes a
+  // kept draft, and only reports one created for this request gone.
   const followUp = [
     ...(args.onSuccessDestroyEmail ?? []),
     ...Object.keys(args.onSuccessUpdateEmail ?? {}),
@@ -1617,12 +2001,19 @@ async function submissionSet(
   if (followUp.length) {
     const stub = mailboxStub(state.context.env, owner.id);
     const current = await stub.jmapState();
+
+    await Promise.all(
+      followUp.flatMap((id) =>
+        isStoredDraftId(id) ? [stub.deleteDraft(state.context.user.id, id)] : []
+      )
+    );
+
     state.after.push([
       "Email/set",
       {
         accountId: owner.id,
         oldState: current,
-        newState: current,
+        newState: await stub.jmapState(),
         created: null,
         updated: null,
         destroyed: followUp,

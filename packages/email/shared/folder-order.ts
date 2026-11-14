@@ -33,6 +33,13 @@ export function defaultSystemFolderOrder(id: string) {
   return isSystemFolderId(id) ? DEFAULT_SYSTEM_FOLDER_ORDER[id] : undefined;
 }
 
+/**
+ * Drafts: a system folder of the person's own drafts, always right after
+ * Sent. It lists the `drafts` table, not conversations, so it takes no part
+ * in the order and no folder predicate covers it.
+ */
+export const DRAFTS_FOLDER_ID = "drafts";
+
 /** The gap between neighbours, so a folder created later can go after the last. */
 export const FOLDER_ORDER_STEP = 10;
 
@@ -87,7 +94,7 @@ export function moveFolderInOrder<T extends Orderable>(
 ) {
   const ids = sortFolders(folders)
     .map((folder) => folder.id)
-    .filter((id) => id !== "inbox");
+    .filter((id) => id !== "inbox" && id !== DRAFTS_FOLDER_ID);
 
   const index = ids.indexOf(folderId);
   const target = index + direction;

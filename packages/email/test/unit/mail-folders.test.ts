@@ -12,7 +12,7 @@ import {
 } from "@open-workspace/email/src/mail/mail-folders.ts";
 import type { MailFolder } from "@open-workspace/email/src/mail/types.ts";
 
-type SystemType = NonNullable<MailFolder["systemType"]>;
+type SystemType = Exclude<NonNullable<MailFolder["systemType"]>, "drafts">;
 
 function systemFolder(
   id: SystemType,
@@ -103,6 +103,13 @@ describe("folder order", () => {
     systemFolder("trash"),
     customFolder("Product", 100),
     customFolder("Pitch Decks", 110),
+    // Drafts follows Sent and takes no part in the order.
+    {
+      ...systemFolder("sent"),
+      id: "drafts",
+      systemType: "drafts",
+      sortOrder: 11,
+    },
   ];
 
   it("moves a custom folder up past a system folder, leaving Inbox out", () => {
@@ -131,6 +138,7 @@ describe("folder order", () => {
     expect(moveFolderInOrder(folders, "sent", -1)).toBeNull();
     expect(moveFolderInOrder(folders, "Pitch Decks", 1)).toBeNull();
     expect(moveFolderInOrder(folders, "inbox", 1)).toBeNull();
+    expect(moveFolderInOrder(folders, "drafts", 1)).toBeNull();
     expect(moveFolderInOrder(folders, "missing", 1)).toBeNull();
   });
 

@@ -31,6 +31,7 @@ import { z } from "zod";
 
 import migrations from "../../drizzle/mailbox/migrations.js";
 import {
+  DRAFTS_FOLDER_ID,
   FOLDER_ORDER_STEP,
   folderOrderPositions,
   isCompleteFolderOrder,
@@ -132,6 +133,7 @@ import { isRetentionFolder, retentionDays, retentionRules } from "./retention";
 import type { RetentionFolder } from "./retention";
 import {
   conversations,
+  drafts,
   emailReadStates,
   emails,
   folders,
@@ -143,6 +145,7 @@ import {
   unsubscriptions,
 } from "./schema";
 import type {
+  Draft,
   Email,
   FolderRecord,
   NewEmail,
@@ -193,6 +196,9 @@ const RETENTION_BATCH_SIZE = 100;
 
 const PRESENCE_TTL_MS = 60_000;
 const AI_CONFIGURATION_ID = "default";
+
+/** Per person and mailbox; a runaway client can't fill the mailbox's storage. */
+const MAX_DRAFTS_PER_USER = 200;
 
 /** Set while imported mail has not been announced (counts, realtime, JMAP state). */
 const IMPORT_PENDING_KEY = "import:pending";
@@ -265,6 +271,13 @@ function stringListJson(values: string[]) {
   return JSON.stringify([...new Set(values)]);
 }
 
+export type DraftInput = Omit<Draft, "userId" | "version" | "updatedAt">;
+
+export type SaveDraftResult =
+  | { status: "saved"; draft: Draft }
+  | { status: "conflict"; draft: Draft | null }
+  | { status: "limit" };
+
 export type ConversationUpdate = {
   mailboxState?: MailboxState;
   folderId?: string | null;
@@ -280,6 +293,16 @@ export type ConversationListItem = {
   messageCount: number;
   unreadCount: number;
   hasIncoming: boolean;
+  /** The person has a reply draft in this conversation. */
+  hasDraft: boolean;
+};
+
+/** A page of a folder's list: conversations, or in Drafts the person's drafts. */
+export type ConversationPage = {
+  items: ConversationListItem[];
+  drafts: Draft[];
+  next: ConversationCursorPosition | null;
+  version: number;
 };
 
 export type SubmitOutgoingResult = {
@@ -347,7 +370,7 @@ export type FolderListItem = {
   id: string;
   name: string;
   kind: "system" | "custom";
-  systemType: SystemFolderType | null;
+  systemType: SystemFolderType | typeof DRAFTS_FOLDER_ID | null;
   sortOrder: number;
   totalCount: number;
   unreadCount: number;
@@ -896,7 +919,16 @@ export class MailboxDO extends DurableObject<Env> {
     cursor: ConversationCursorPosition | null,
     search: string | undefined,
     unreadOnly = false
-  ) {
+  ): ConversationPage | null {
+    if (folderId === DRAFTS_FOLDER_ID) {
+      return {
+        items: [],
+        drafts: cursor || unreadOnly ? [] : this.searchDrafts(userId, search),
+        next: null,
+        version: this.version(),
+      };
+    }
+
     const folder = this.getFolder(folderId);
 
     if (!folder) return null;
@@ -904,7 +936,7 @@ export class MailboxDO extends DurableObject<Env> {
     const searchQuery = search ? buildEmailSearchQuery(search) : undefined;
 
     if (search && !searchQuery) {
-      return { items: [], next: null, version: this.version() };
+      return { items: [], drafts: [], next: null, version: this.version() };
     }
 
     const predicates = [membership.predicate];
@@ -989,6 +1021,26 @@ export class MailboxDO extends DurableObject<Env> {
 
     const emailsById = new Map(emailRows.map((email) => [email.id, email]));
 
+    const replyDrafts = new Set(
+      emailRows.length
+        ? this.db
+            .select({ conversationId: drafts.conversationId })
+            .from(drafts)
+            .where(
+              and(
+                eq(drafts.userId, userId),
+                eq(drafts.kind, "reply"),
+                inArray(
+                  drafts.conversationId,
+                  emailRows.map((email) => email.conversationId)
+                )
+              )
+            )
+            .all()
+            .map((row) => row.conversationId)
+        : []
+    );
+
     const items = pageRows.flatMap((row): ConversationListItem[] => {
       const email = emailsById.get(row.email_id);
 
@@ -999,6 +1051,7 @@ export class MailboxDO extends DurableObject<Env> {
               messageCount: Number(row.message_count),
               unreadCount: Number(row.unread_count),
               hasIncoming: Boolean(row.has_incoming),
+              hasDraft: replyDrafts.has(email.conversationId),
             },
           ]
         : [];
@@ -1008,6 +1061,7 @@ export class MailboxDO extends DurableObject<Env> {
 
     return {
       items,
+      drafts: [],
       next:
         rows.length > limit && last
           ? { timelineAt: Number(last.timeline_at), emailId: last.email_id }
@@ -1056,6 +1110,7 @@ export class MailboxDO extends DurableObject<Env> {
     const normalized = name.toLocaleLowerCase("en-US");
 
     return (
+      normalized === DRAFTS_FOLDER_ID ||
       systemFolderDefinitions.some(
         (folder) => folder.name.toLocaleLowerCase("en-US") === normalized
       ) ||
@@ -1249,6 +1304,186 @@ export class MailboxDO extends DurableObject<Env> {
     return this.getMailboxAiSettings();
   }
 
+  /** The person's drafts in this mailbox, newest first. */
+  listDrafts(userId: string) {
+    return this.db
+      .select()
+      .from(drafts)
+      .where(eq(drafts.userId, userId))
+      .orderBy(desc(drafts.updatedAt))
+      .all();
+  }
+
+  /**
+   * The Drafts folder: the person's drafts, newest first, those whose
+   * recipients, subject or text hold `search` when given. One page: there
+   * are at most MAX_DRAFTS_PER_USER.
+   */
+  private searchDrafts(userId: string, search: string | undefined) {
+    const needle = search?.trim().toLocaleLowerCase("en-US");
+
+    return this.listDrafts(userId).filter(
+      (draft) =>
+        !needle ||
+        [...draft.to, ...draft.cc, draft.subject, draft.bodyText].some(
+          (value) => value.toLocaleLowerCase("en-US").includes(needle)
+        )
+    );
+  }
+
+  getDraft(userId: string, id: string) {
+    return (
+      this.db
+        .select()
+        .from(drafts)
+        .where(and(eq(drafts.userId, userId), eq(drafts.id, id)))
+        .get() ?? null
+    );
+  }
+
+  /**
+   * Saves a draft if it is still at `expectedVersion` (0 for a new one). The
+   * check and the write run without an await between them, so they can't
+   * interleave with another save. A conversation has one reply box, so a
+   * reply draft replaces the person's other reply drafts in its
+   * conversation. `copiedKeys` are files copied for this save; those the
+   * stored draft doesn't hold afterwards (a conflict, the cap), and the files
+   * the save dropped or the replaced drafts held, are queued for deletion.
+   */
+  async saveDraft(
+    userId: string,
+    input: DraftInput,
+    expectedVersion: number,
+    copiedKeys: string[] = []
+  ): Promise<SaveDraftResult> {
+    const current = this.getDraft(userId, input.id);
+    const result = this.writeDraft(userId, input, expectedVersion, current);
+    const kept = result.status === "saved" ? result.draft : current;
+    const keptKeys = new Set(kept?.attachments.map((file) => file.r2Key));
+
+    const replaced =
+      result.status === "saved" && input.kind === "reply"
+        ? this.db
+            .delete(drafts)
+            .where(
+              and(
+                eq(drafts.userId, userId),
+                eq(drafts.kind, "reply"),
+                eq(drafts.conversationId, input.conversationId ?? ""),
+                ne(drafts.id, input.id)
+              )
+            )
+            .returning({ attachments: drafts.attachments })
+            .all()
+        : [];
+
+    await this.forgetDraftFiles(
+      [
+        ...copiedKeys,
+        ...(current?.attachments.map((file) => file.r2Key) ?? []),
+        ...replaced.flatMap((draft) =>
+          draft.attachments.map((file) => file.r2Key)
+        ),
+      ].filter((key) => !keptKeys.has(key))
+    );
+
+    if (result.status === "saved") {
+      this.announceDrafts(!current || replaced.length > 0);
+    }
+
+    return result;
+  }
+
+  /**
+   * Tells clients the drafts changed. A new or deleted draft changes the
+   * Drafts count and list, so web clients refresh; an autosave only tells
+   * JMAP streams, without a push to phones every few seconds.
+   */
+  private announceDrafts(listChanged: boolean) {
+    if (listChanged) {
+      this.publishUpdate();
+
+      return;
+    }
+
+    bumpJmapState(this.state.storage);
+    this.announceJmapState(false);
+  }
+
+  private writeDraft(
+    userId: string,
+    input: DraftInput,
+    expectedVersion: number,
+    current: Draft | null
+  ): SaveDraftResult {
+    if ((current?.version ?? 0) !== expectedVersion) {
+      return { status: "conflict", draft: current };
+    }
+
+    if (!current) {
+      const [count] = this.db
+        .select({ value: sql<number>`count(*)` })
+        .from(drafts)
+        .where(eq(drafts.userId, userId))
+        .all();
+
+      if ((count?.value ?? 0) >= MAX_DRAFTS_PER_USER) {
+        return { status: "limit" };
+      }
+    }
+
+    const draft: Draft = {
+      ...input,
+      userId,
+      version: expectedVersion + 1,
+      updatedAt: new Date(),
+    };
+
+    this.db
+      .insert(drafts)
+      .values(draft)
+      .onConflictDoUpdate({ target: [drafts.userId, drafts.id], set: draft })
+      .run();
+
+    return { status: "saved", draft };
+  }
+
+  /** Whether the person had a draft with this id; its files are queued for deletion. */
+  async deleteDraft(userId: string, id: string) {
+    const [deleted] = this.db
+      .delete(drafts)
+      .where(and(eq(drafts.userId, userId), eq(drafts.id, id)))
+      .returning({ attachments: drafts.attachments })
+      .all();
+
+    await this.forgetDraftFiles(
+      deleted?.attachments.map((file) => file.r2Key) ?? []
+    );
+
+    if (deleted) this.announceDrafts(true);
+
+    return Boolean(deleted);
+  }
+
+  /**
+   * Queues draft files for deletion. The queue skips a key some draft still
+   * holds, so a save racing this one can't lose its file.
+   */
+  async forgetDraftFiles(objectKeys: string[]) {
+    if (!objectKeys.length) return;
+    const cleanupAt = new Date();
+
+    for (const objectKey of new Set(objectKeys)) {
+      this.db
+        .insert(pendingObjectDeletions)
+        .values({ objectKey, nextAttemptAt: cleanupAt })
+        .onConflictDoNothing()
+        .run();
+    }
+
+    await this.scheduleAlarm(cleanupAt.getTime() + ALARM_WAKE_DELAY_MS);
+  }
+
   jmapState() {
     return jmapState(this.state.storage);
   }
@@ -1261,15 +1496,33 @@ export class MailboxDO extends DurableObject<Env> {
   }
 
   jmapQueryEmails(input: Parameters<typeof queryJmapEmails>[1]) {
+    // The drafts mailbox lists the person's drafts, newest first; its
+    // other conditions are not applied.
+    if (input.filter.inMailbox === DRAFTS_FOLDER_ID) {
+      const ids = this.listDrafts(input.userId).map((draft) => draft.id);
+
+      if (input.ascending) ids.reverse();
+
+      return {
+        state: jmapState(this.state.storage),
+        ids: ids.slice(input.position, input.position + input.limit),
+        total: ids.length,
+      };
+    }
+
     return {
       state: jmapState(this.state.storage),
       ...queryJmapEmails(this.state.storage.sql, input),
     };
   }
 
-  /** Emails with their JMAP Mailbox and this user's $seen keyword; unknown ids are left out. */
+  /**
+   * Emails with their JMAP Mailbox and this user's $seen keyword, and the
+   * person's drafts among `ids`; unknown ids are left out.
+   */
   jmapEmails(userId: string, ids: string[]) {
     const placement = jmapEmailPlacement(this.state.storage.sql, userId, ids);
+    const draftIds = ids.filter((id) => id.startsWith("drf_"));
 
     return {
       state: jmapState(this.state.storage),
@@ -1279,6 +1532,13 @@ export class MailboxDO extends DurableObject<Env> {
 
         return email && place ? [{ email, ...place }] : [];
       }),
+      drafts: draftIds.length
+        ? this.db
+            .select()
+            .from(drafts)
+            .where(and(eq(drafts.userId, userId), inArray(drafts.id, draftIds)))
+            .all()
+        : [],
     };
   }
 
@@ -1688,8 +1948,16 @@ export class MailboxDO extends DurableObject<Env> {
       )
       .toArray();
 
-    return sortFolders(
-      rows.map((row): FolderListItem => ({
+    const sent = this.systemFolders().find((folder) => folder.id === "sent");
+
+    const [draftCount] = this.db
+      .select({ value: sql<number>`count(*)` })
+      .from(drafts)
+      .where(eq(drafts.userId, userId))
+      .all();
+
+    return sortFolders([
+      ...rows.map((row): FolderListItem => ({
         id: row.id,
         name: row.name,
         kind: row.kind,
@@ -1697,8 +1965,18 @@ export class MailboxDO extends DurableObject<Env> {
         sortOrder: Number(row.sort_order),
         totalCount: Number(row.total_count),
         unreadCount: Number(row.unread_count),
-      }))
-    );
+      })),
+      {
+        id: DRAFTS_FOLDER_ID,
+        name: "Drafts",
+        kind: "system",
+        systemType: DRAFTS_FOLDER_ID,
+        // Folder positions are steps of 10 apart, so this is right after Sent.
+        sortOrder: (sent?.sortOrder ?? 0) + 1,
+        totalCount: Number(draftCount?.value ?? 0),
+        unreadCount: 0,
+      },
+    ]);
   }
 
   /**
@@ -3441,6 +3719,11 @@ export class MailboxDO extends DurableObject<Env> {
                 or json_extract(attachment.value, '$.r2Key') || '.preview.pdf' = candidate.object_key
             )
           )
+      )
+      or exists (
+        select 1
+        from drafts draft, json_each(draft.attachments_json) attachment
+        where json_extract(attachment.value, '$.r2Key') = candidate.object_key
       )
     `,
         stringListJson(objectKeys),

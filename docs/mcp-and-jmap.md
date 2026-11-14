@@ -46,6 +46,11 @@ updates. A few things work differently from other servers:
   like the [migration CLI](migration.md). A message imported before (same
   bytes or Message-ID) is `alreadyExists`.
 - Read/unread is the only flag that's stored.
+- Drafts created in the Drafts mailbox (`$draft`) are the same drafts the web
+  app lists, yours alone. A draft can't be edited in place: apps replace it
+  with a new one, as they usually do, and it stays in Drafts until it is sent
+  or destroyed. Replies and forwards started in the web app are listed but
+  sent from the web app.
 - Apps resync fully after changes, instead of fetching only what changed.
 
 ## Scopes

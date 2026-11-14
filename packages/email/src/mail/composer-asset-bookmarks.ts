@@ -244,7 +244,23 @@ export function createComposerAssetBookmarksPlugin(
   return new Plugin<BookmarkState>({
     key: composerAssetBookmarksKey,
     state: {
-      init: () => new Map(),
+      // A reopened draft's assets: those in its HTML where they are, the
+      // rest (plain attachments) at the end.
+      init: (_config, state) => {
+        const bookmarks = visibleAssets(state.doc);
+
+        for (const asset of session.getSnapshot().assets) {
+          if (!bookmarks.has(asset.id)) {
+            bookmarks.set(asset.id, {
+              assetId: asset.id,
+              intent: asset.intent,
+              pos: state.doc.content.size,
+            });
+          }
+        }
+
+        return bookmarks;
+      },
       apply: applyBookmarkTransaction,
     },
     view(initialView) {

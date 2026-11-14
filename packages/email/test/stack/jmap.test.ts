@@ -357,7 +357,8 @@ describe("JMAP", () => {
       "the draft was created"
     ).id;
 
-    expect(draftId).toMatch(/^draft-/u);
+    // A draft created in the drafts mailbox is kept until it is sent.
+    expect(draftId).toMatch(/^drf_/u);
     expect(required(submitted, "a submission response")[0]).toBe(
       "EmailSubmission/set"
     );
@@ -373,7 +374,7 @@ describe("JMAP", () => {
       "x",
     ]);
 
-    const [sent] = await jmap(accessToken, [
+    const [sent, gone] = await jmap(accessToken, [
       [
         "Email/get",
         {
@@ -383,7 +384,11 @@ describe("JMAP", () => {
         },
         "y",
       ],
+      ["Email/get", { accountId, ids: [draftId] }, "g"],
     ]);
+
+    // Sending it deleted the draft.
+    expect(args(gone)).toMatchObject({ list: [], notFound: [draftId] });
 
     expect(result(sent, getResult).list[0]).toMatchObject({
       subject: "Re: Quarterly plan",
@@ -590,6 +595,100 @@ describe("JMAP", () => {
 
     return (await readJson(uploaded, z.object({ blobId: z.string() }))).blobId;
   }
+
+  it("shares one set of drafts with the web app", async () => {
+    const { accessToken, accountId } = await signIn();
+
+    const [created] = await jmap(accessToken, [
+      [
+        "Email/set",
+        {
+          accountId,
+          create: {
+            note: {
+              mailboxIds: { drafts: true },
+              keywords: { $draft: true, $seen: true },
+              to: [{ email: "grace@example.net" }],
+              subject: "Plans",
+              bodyValues: { body: { value: "Thinking about it" } },
+              textBody: [{ partId: "body", type: "text/plain" }],
+            },
+          },
+        },
+        "c",
+      ],
+    ]);
+
+    const draftId = required(
+      result(created, setResult).created?.note,
+      "the draft was created"
+    ).id;
+
+    // The web app lists it among the person's drafts.
+    const user = z
+      .object({ id: z.string() })
+      .parse(
+        await env.DB.prepare(
+          "SELECT id FROM users WHERE role = 'admin'"
+        ).first()
+      );
+
+    expect(await mailbox(accountId).listDrafts(user.id)).toEqual([
+      expect.objectContaining({ id: draftId, subject: "Plans" }),
+    ]);
+
+    const [mailboxes, query, got, moved, kept] = await jmap(accessToken, [
+      ["Mailbox/query", { accountId, filter: { role: "drafts" } }, "m"],
+      ["Email/query", { accountId, filter: { inMailbox: "drafts" } }, "q"],
+      [
+        "Email/get",
+        {
+          accountId,
+          ids: [draftId],
+          properties: ["mailboxIds", "keywords", "to", "subject", "bodyValues"],
+          fetchTextBodyValues: true,
+        },
+        "g",
+      ],
+      [
+        "Email/set",
+        { accountId, update: { [draftId]: { "mailboxIds/archive": true } } },
+        "u",
+      ],
+      [
+        "Email/set",
+        { accountId, update: { [draftId]: { "keywords/$seen": true } } },
+        "k",
+      ],
+    ]);
+
+    expect(args(mailboxes)).toMatchObject({ ids: ["drafts"] });
+    expect(args(query)).toMatchObject({ ids: [draftId], total: 1 });
+    expect(result(got, getResult).list).toEqual([
+      expect.objectContaining({
+        mailboxIds: { drafts: true },
+        keywords: { $draft: true, $seen: true },
+        to: [{ name: null, email: "grace@example.net" }],
+        subject: "Plans",
+        bodyValues: {
+          text: expect.objectContaining({ value: "Thinking about it" }),
+        },
+      }),
+    ]);
+    // A draft stays in Drafts until it is sent.
+    expect(result(moved, setResult).notUpdated?.[draftId]).toMatchObject({
+      type: "invalidProperties",
+    });
+    expect(result(kept, setResult).updated).toEqual({ [draftId]: null });
+
+    const [destroyed, after] = await jmap(accessToken, [
+      ["Email/set", { accountId, destroy: [draftId] }, "d"],
+      ["Email/query", { accountId, filter: { inMailbox: "drafts" } }, "q"],
+    ]);
+
+    expect(result(destroyed, setResult).destroyed).toEqual([draftId]);
+    expect(args(after)).toMatchObject({ ids: [], total: 0 });
+  });
 
   it("imports uploaded messages into a mailbox", async () => {
     const { accessToken, accountId } = await signIn();

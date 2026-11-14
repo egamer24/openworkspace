@@ -33,7 +33,7 @@ import {
 import { mailboxStub } from "../mailbox";
 import type { MailboxDO } from "../mailbox";
 import { isRetentionFolder } from "../mailbox/retention";
-import type { Email } from "../mailbox/schema";
+import type { Draft, Email } from "../mailbox/schema";
 import {
   accessibleMailbox,
   accessibleMailboxes,
@@ -46,6 +46,7 @@ import {
   decodeConversationCursor,
   encodeConversationCursor,
 } from "./conversation-cursor";
+import { discardSentDraft, mailDraftRoutes } from "./draft-routes";
 import { readStoredBody } from "./edge-cache";
 import {
   headerAuthentication,
@@ -410,6 +411,53 @@ export function folderListView(view: ReturnType<MailboxDO["folderView"]>) {
   };
 }
 
+const NO_DELIVERY_STATUSES: Email["deliveryStatusJson"] = [];
+
+/**
+ * A Drafts folder row, in a conversation row's shape. A reply draft stands
+ * for its conversation, which the row opens; a new message or forward is its
+ * own row (`conversationId` is the draft's id) and opens the composer.
+ */
+function draftRowView(draft: Draft, mailboxAddress: string) {
+  const conversationId =
+    draft.kind === "reply" && draft.conversationId
+      ? draft.conversationId
+      : draft.id;
+
+  const labels = participantLabels(
+    [...draft.to, ...draft.cc].map((address) => ({ address, name: null })),
+    mailboxAddress
+  );
+
+  return {
+    id: draft.id,
+    conversationId,
+    direction: "outgoing" as const,
+    fromAddress: mailboxAddress,
+    fromName: null,
+    toAddresses: draft.to,
+    ccAddresses: draft.cc,
+    bccAddresses: draft.bcc,
+    replyToAddresses: draft.replyTo ? [draft.replyTo] : [],
+    subject: conversationSubject(draft.subject),
+    preview: draft.bodyText.replaceAll(/\s+/gu, " ").trim().slice(0, 200),
+    transportState: null,
+    transportError: null,
+    deliveryStatuses: NO_DELIVERY_STATUSES,
+    timelineAt: draft.updatedAt,
+    senderLogoUrl: null,
+    conversationLabel: labels.length
+      ? labels.slice(0, 3).join(", ")
+      : "(no recipients)",
+    messageCount: 1,
+    unreadCount: 0,
+    isUnread: false,
+    hasIncoming: false,
+    draft: true,
+    draftId: draft.id,
+  };
+}
+
 /** GET /conversations without `ok`. */
 export function conversationPageView(
   page: NonNullable<ReturnType<MailboxDO["listConversations"]>>,
@@ -417,15 +465,22 @@ export function conversationPageView(
 ) {
   return {
     version: page.version,
-    conversations: page.items.map((item) => ({
-      ...toMessageSummary(item.email),
-      subject: conversationSubject(item.email.subject),
-      conversationLabel: conversationLabel(mailboxAddress, item.email),
-      messageCount: item.messageCount,
-      unreadCount: item.unreadCount,
-      isUnread: item.unreadCount > 0,
-      hasIncoming: item.hasIncoming,
-    })),
+    conversations: [
+      ...page.items.map((item) => ({
+        ...toMessageSummary(item.email),
+        subject: conversationSubject(item.email.subject),
+        conversationLabel: conversationLabel(mailboxAddress, item.email),
+        messageCount: item.messageCount,
+        unreadCount: item.unreadCount,
+        isUnread: item.unreadCount > 0,
+        hasIncoming: item.hasIncoming,
+        /** The caller has a reply draft here; shown as "Draft". */
+        draft: item.hasDraft,
+        /** Set on Drafts folder rows only: the draft the row is. */
+        draftId: null,
+      })),
+      ...page.drafts.map((draft) => draftRowView(draft, mailboxAddress)),
+    ],
     nextCursor: page.next ? encodeConversationCursor(page.next) : null,
   };
 }
@@ -1681,7 +1736,7 @@ export const mailRoutes = new Hono<AppEnv>()
     oauthScope(MAIL_SEND_SCOPE),
     zValidator("json", composeSchema),
     async (c) => {
-      const body = c.req.valid("json");
+      const { draftId, ...body } = c.req.valid("json");
       const access = await accessibleMailbox(c, body.mailboxId, "send");
 
       if (!access) {
@@ -1713,6 +1768,8 @@ export const mailRoutes = new Hono<AppEnv>()
           defer: (task) => c.executionCtx.waitUntil(task),
         });
 
+        await discardSentDraft(c, input.mailboxId, draftId);
+
         return c.json(
           outgoingResponse(submission.email, false),
           submission.inserted ? 201 : 200
@@ -1727,7 +1784,7 @@ export const mailRoutes = new Hono<AppEnv>()
     oauthScope(MAIL_SEND_SCOPE),
     zValidator("json", replySchema),
     async (c) => {
-      const body = c.req.valid("json");
+      const { draftId, ...body } = c.req.valid("json");
       const access = await accessibleMailbox(c, body.mailboxId, "send");
 
       if (!access) {
@@ -1778,6 +1835,8 @@ export const mailRoutes = new Hono<AppEnv>()
           defer: (task) => c.executionCtx.waitUntil(task),
         });
 
+        await discardSentDraft(c, input.mailboxId, draftId);
+
         return c.json(
           outgoingResponse(submission.email, context.detached),
           submission.inserted ? 201 : 200
@@ -1792,7 +1851,7 @@ export const mailRoutes = new Hono<AppEnv>()
     oauthScope(MAIL_SEND_SCOPE),
     zValidator("json", forwardSchema),
     async (c) => {
-      const body = c.req.valid("json");
+      const { draftId, ...body } = c.req.valid("json");
       const access = await accessibleMailbox(c, body.mailboxId, "send");
 
       if (!access) {
@@ -1831,6 +1890,8 @@ export const mailRoutes = new Hono<AppEnv>()
           defer: (task) => c.executionCtx.waitUntil(task),
         });
 
+        await discardSentDraft(c, input.mailboxId, draftId);
+
         return c.json(
           outgoingResponse(submission.email, false),
           submission.inserted ? 201 : 200
@@ -1840,5 +1901,6 @@ export const mailRoutes = new Hono<AppEnv>()
       }
     }
   )
+  .route("/drafts", mailDraftRoutes)
   .route("/", mailSafetyRoutes)
   .route("/", signatureRoutes);

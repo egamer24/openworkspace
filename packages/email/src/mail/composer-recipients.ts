@@ -109,6 +109,23 @@ export function parseComposerRecipients(value: string) {
   return { recipients, invalidParts };
 }
 
+/** A field holding these addresses, nothing typed. */
+export function recipientField(
+  addresses: readonly string[]
+): RecipientFieldValue {
+  return {
+    recipients: addresses.map((address) => ({ address, name: null })),
+    input: "",
+  };
+}
+
+/** The field's addresses, including what is typed but not yet a chip. */
+export function recipientAddresses(value: RecipientFieldValue) {
+  return recipientsWithPendingInput(value).map(
+    (recipient) => recipient.address
+  );
+}
+
 export function recipientsWithPendingInput(value: RecipientFieldValue) {
   const { recipients: pending } = parseComposerRecipients(value.input);
   const seen = new Set<string>();

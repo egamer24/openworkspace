@@ -19,6 +19,7 @@ import {
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
+import { DRAFTS_FOLDER_ID } from "../../shared/folder-order";
 import { ConversationSelectionToolbar } from "./conversation-selection-toolbar";
 import { FolderCleanupBar } from "./folder-cleanup-bar";
 import { SearchField } from "./mail-app-bar";
@@ -199,6 +200,11 @@ function ConversationRow({
             {conversation.messageCount}
           </span>
         )}
+        {conversation.draft && (
+          <span className="text-destructive shrink-0 text-[12px] font-medium">
+            Draft
+          </span>
+        )}
       </span>
 
       <span className="mail-subject pointer-events-none min-w-0 truncate text-[13px] leading-5 [grid-area:subject]">
@@ -249,6 +255,10 @@ function emptyFolderHint(systemType: string | null | undefined) {
       return "Deleted conversations wait here until you delete them permanently.";
     }
 
+    case "drafts": {
+      return "Messages you start writing are saved here until you send them.";
+    }
+
     default: {
       return "New conversations will appear here as soon as they arrive.";
     }
@@ -277,6 +287,7 @@ export function ConversationList({ mail }: { mail: MailController }) {
       : 0;
 
   const hasConversations = conversations.length > 0;
+  const inDrafts = folder === DRAFTS_FOLDER_ID;
 
   // Resting on a row (pointer or keyboard focus) starts loading it, so a
   // click usually finds the conversation already there.
@@ -412,6 +423,11 @@ export function ConversationList({ mail }: { mail: MailController }) {
             <TooltipProvider delay={300}>
               <div className="-ml-1.5 min-w-0 flex-1 [&_[data-slot=button]]:shrink-0 lg:[&>div:first-child]:h-8 lg:[&>div:first-child]:border-0 lg:[&>div:first-child]:bg-transparent lg:[&>div:first-child]:px-0">
                 <ConversationSelectionToolbar
+                  onDiscardDrafts={
+                    folder === DRAFTS_FOLDER_ID
+                      ? selection.discardDrafts
+                      : undefined
+                  }
                   sharedMailboxName={
                     mailbox.kind === "shared" ? mailbox.displayName : undefined
                   }
@@ -547,15 +563,17 @@ export function ConversationList({ mail }: { mail: MailController }) {
               />
             </span>
             <span data-col="from-wide" className="[grid-area:from]">
-              From
+              {inDrafts ? "To" : "From"}
             </span>
             <span data-col="from-narrow" className="[grid-area:from]">
-              From · Subject
+              {inDrafts ? "To" : "From"} · Subject
             </span>
             <span data-col="subject" className="[grid-area:subject]">
               Subject
             </span>
-            <span className="text-right [grid-area:date]">Received</span>
+            <span className="text-right [grid-area:date]">
+              {inDrafts ? "Saved" : "Received"}
+            </span>
           </div>
         )}
         {body}

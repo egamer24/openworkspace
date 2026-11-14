@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import type { ConversationSummary } from "./types";
+import { useDiscardDrafts } from "./use-drafts";
 import { useBulkConversationAction } from "./use-mail-data";
 import type { BulkConversationAction } from "./use-mail-data";
 import { useBulkReport } from "./use-mail-safety";
@@ -39,6 +40,7 @@ export function useConversationSelection({
 
   const mutation = useBulkConversationAction();
   const reportMutation = useBulkReport();
+  const discardMutation = useDiscardDrafts();
   const active = state.scope === scope && state.active;
   const selectedIds = active ? state.ids : EMPTY_SELECTION;
 
@@ -159,6 +161,27 @@ export function useConversationSelection({
     );
   }
 
+  /** Deletes the selected Drafts rows' drafts. */
+  function discardDrafts() {
+    const draftIds = selectedConversations.flatMap((conversation) =>
+      conversation.draftId ? [conversation.draftId] : []
+    );
+
+    if (!mailboxId || !draftIds.length) return;
+    discardMutation.mutate(
+      { mailboxId, draftIds },
+      {
+        onSuccess: () => {
+          toast.success(
+            `${draftIds.length} ${draftIds.length === 1 ? "draft" : "drafts"} discarded`
+          );
+          exit();
+        },
+        onError: (error) => toast.error(error.message),
+      }
+    );
+  }
+
   return {
     active,
     selectedIds,
@@ -175,8 +198,12 @@ export function useConversationSelection({
     allSelectedHaveIncoming:
       selectedConversations.length > 0 &&
       selectedConversations.every((conversation) => conversation.hasIncoming),
-    pending: mutation.isPending || reportMutation.isPending,
+    pending:
+      mutation.isPending ||
+      reportMutation.isPending ||
+      discardMutation.isPending,
     report,
+    discardDrafts,
     start,
     exit,
     toggle,

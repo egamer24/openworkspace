@@ -7,7 +7,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-import { transportStates } from "../../shared/mail";
+import { replyActionModes, transportStates } from "../../shared/mail";
+import type { StoredImageRef } from "../../shared/rich-content";
 import { mailboxStates } from "./folder-model";
 import type {
   DeliveryFacts,
@@ -371,6 +372,71 @@ export const emailReadStates = sqliteTable(
   ]
 );
 
+/**
+ * A file a draft keeps at `r2Key` (see `draftFileKey`), under its upload's id,
+ * so the composer gets the same upload back when the draft reopens.
+ */
+export type DraftAttachment = {
+  /** The composer's asset id, which the saved editor HTML refers to. */
+  assetId: string;
+  uploadId: string;
+  disposition: "attachment" | "inline";
+  contentId: string | null;
+  filename: string;
+  contentType: string;
+  size: number;
+  r2Key: string;
+  /**
+   * The signature image this is the draft's copy of, while the editor still
+   * shows it as one; a reopened draft turns it into an ordinary inline image.
+   */
+  storedImage?: StoredImageRef;
+};
+
+/**
+ * A composer's autosaved state. A draft belongs to its author, even in a
+ * shared mailbox, so the key starts with the user. `version` counts saves:
+ * a save names the version it was based on, so two windows editing one draft
+ * can't silently overwrite each other.
+ */
+export const drafts = sqliteTable(
+  "drafts",
+  {
+    userId: text("user_id").notNull(),
+    id: text("id").notNull(),
+    kind: text("kind", { enum: ["compose", "reply", "forward"] }).notNull(),
+    /** The message replied to or forwarded. */
+    sourceEmailId: text("source_email_id"),
+    /** Its conversation, where a reply draft reopens. */
+    conversationId: text("conversation_id"),
+    replyMode: text("reply_mode", { enum: replyActionModes }),
+    to: text("to_json", { mode: "json" }).$type<string[]>().notNull(),
+    cc: text("cc_json", { mode: "json" }).$type<string[]>().notNull(),
+    bcc: text("bcc_json", { mode: "json" }).$type<string[]>().notNull(),
+    replyTo: text("reply_to"),
+    subject: text("subject").notNull(),
+    bodyText: text("body_text").notNull(),
+    /** The HTML as it would be sent: inline images are `cid:` attachments. */
+    bodyHtml: text("body_html"),
+    /**
+     * The web composer's own HTML, asset references included, which it
+     * reopens; null for a draft a mail app made over JMAP.
+     */
+    editorHtml: text("editor_html"),
+    /** Files the draft holds outside the expiring upload prefix. */
+    attachments: text("attachments_json", { mode: "json" })
+      .$type<DraftAttachment[]>()
+      .notNull()
+      .default([]),
+    version: integer("version").notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.id] }),
+    index("drafts_user_updated_idx").on(table.userId, table.updatedAt),
+  ]
+);
+
 export type Email = typeof emails.$inferSelect;
 
 export type SenderRecord = typeof senders.$inferSelect;
@@ -392,3 +458,5 @@ export type ConversationRecord = typeof conversations.$inferSelect;
 export type FolderRecord = typeof folders.$inferSelect;
 
 export type NewFolder = typeof folders.$inferInsert;
+
+export type Draft = typeof drafts.$inferSelect;

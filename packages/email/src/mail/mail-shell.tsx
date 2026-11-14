@@ -111,12 +111,15 @@ export function MailShell({ route }: { route: MailRoute }) {
         />
       )}
 
-      {mail.composeOpen && mail.mailbox && (
+      {mail.composeOpen && mail.mailbox && mail.composer && (
         <Suspense fallback={null}>
           <ComposeWindow
-            key={`${mail.mailbox.id}:${mail.forwardedMessage?.id ?? "compose"}`}
+            key={mail.composer.draftId}
             mailbox={mail.mailbox}
-            forwardedMessage={mail.forwardedMessage}
+            forwardedMessage={mail.composer.forwarded}
+            draft={mail.composer.draft}
+            draftId={mail.composer.draftId}
+            onSaved={mail.composerSaved}
             onClose={mail.closeComposer}
           />
         </Suspense>

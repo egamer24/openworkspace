@@ -76,6 +76,76 @@ export function composerUploadMetaKey(
   return `${composerUploadPrefix(mailboxId, userId, uploadId)}/metadata.json`;
 }
 
+/**
+ * Where a draft keeps an upload's bytes: under the mailbox's own prefix (so
+ * deleting the mailbox deletes it), outside `composer-uploads/` and its 7-day
+ * expiry. Keyed by the upload's id so the composer gets the same upload back.
+ */
+export function draftFileKey(
+  mailboxId: string,
+  userId: string,
+  uploadId: string
+) {
+  return `mailboxes/${mailboxId}/drafts/${userId}/${uploadId}`;
+}
+
+const draftFileMetaSchema = z.object({
+  filename: z.string().min(1).max(255),
+  contentType: z.string().min(1).max(255),
+});
+
+/** The upload as its draft holds it, or null if no draft holds it. */
+async function loadDraftFile(input: {
+  env: Bindings;
+  mailboxId: string;
+  userId: string;
+  uploadId: string;
+}): Promise<UploadedAttachment | null> {
+  const r2Key = draftFileKey(input.mailboxId, input.userId, input.uploadId);
+  const object = await input.env.MAIL_STORAGE.head(r2Key);
+  const meta = draftFileMetaSchema.safeParse(object?.customMetadata);
+
+  if (!object || !meta.success) return null;
+
+  return {
+    id: input.uploadId,
+    r2Key,
+    filename: meta.data.filename,
+    contentType: meta.data.contentType,
+    size: object.size,
+  };
+}
+
+/** Copies an object to a draft file key, with what loading it back needs. */
+export async function copyDraftFile(
+  env: Bindings,
+  sourceKey: string,
+  file: { r2Key: string; filename: string; contentType: string }
+) {
+  const source = await env.MAIL_STORAGE.get(sourceKey);
+
+  if (!source) {
+    throw new UploadValidationError("Attachment upload was not found");
+  }
+
+  await env.MAIL_STORAGE.put(file.r2Key, source.body, {
+    httpMetadata: { contentType: file.contentType },
+    customMetadata: { filename: file.filename, contentType: file.contentType },
+  });
+}
+
+/** Reads a file a draft holds, for showing its inline image in the composer. */
+export function readDraftFile(input: {
+  env: Bindings;
+  mailboxId: string;
+  userId: string;
+  uploadId: string;
+}) {
+  return input.env.MAIL_STORAGE.get(
+    draftFileKey(input.mailboxId, input.userId, input.uploadId)
+  );
+}
+
 function composerUploadKeys(
   mailboxId: string,
   userId: string,
@@ -335,11 +405,16 @@ export async function loadComposerUploadMetadata(input: {
     input.uploadId
   );
 
-  const meta = assertUploadOwner(
-    await readUploadMeta(input.env, keys.metadata),
-    input.userId,
-    input.mailboxId
-  );
+  const stored = await readUploadMeta(input.env, keys.metadata);
+
+  // A reopened draft's upload may have expired; its draft still holds it.
+  if (!stored) {
+    const held = await loadDraftFile(input);
+
+    if (held) return held;
+  }
+
+  const meta = assertUploadOwner(stored, input.userId, input.mailboxId);
 
   return {
     id: input.uploadId,
@@ -490,6 +565,10 @@ export async function loadComposerUpload(input: {
   ]);
 
   if (!object || !meta || meta.finalizedAt === null) {
+    // A reopened draft's upload may have expired; its draft still holds it.
+    const held = meta ? null : await loadDraftFile(input);
+
+    if (held) return held;
     throw new UploadValidationError("Attachment upload was not found");
   }
 

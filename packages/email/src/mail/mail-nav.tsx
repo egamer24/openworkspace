@@ -100,7 +100,11 @@ function FolderRow({
         <CountPill
           count={unread}
           strong={active || folder.systemType === "inbox"}
-          label={`${unread} unread`}
+          label={
+            folder.systemType === "drafts"
+              ? `${unread} drafts`
+              : `${unread} unread`
+          }
         />
       </button>
     </li>

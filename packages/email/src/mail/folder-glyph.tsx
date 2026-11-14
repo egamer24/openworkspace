@@ -2,6 +2,7 @@ import {
   Archive,
   Folder as FolderIcon,
   Inbox,
+  NotebookPen,
   Send,
   ShieldAlert,
   Trash2,
@@ -24,6 +25,10 @@ export function FolderGlyph({
 
     case "sent": {
       return <Send {...props} />;
+    }
+
+    case "drafts": {
+      return <NotebookPen {...props} />;
     }
 
     case "archive": {

@@ -36,6 +36,7 @@ import type { FormEvent } from "react";
 import { toast } from "sonner";
 
 import {
+  DRAFTS_FOLDER_ID,
   folderOrderPositions,
   moveFolderInOrder,
 } from "../../shared/folder-order";
@@ -73,9 +74,10 @@ export function FolderManager({
 }) {
   const client = useQueryClient();
 
-  // Every folder but Inbox, which stays first: system folders move too, but keep their names.
+  // Every folder but Inbox, which stays first, and Drafts, which follows
+  // Sent: system folders move too, but keep their names.
   const orderable = orderedFolders(folders).filter(
-    (folder) => folder.id !== "inbox"
+    (folder) => folder.id !== "inbox" && folder.id !== DRAFTS_FOLDER_ID
   );
 
   const hasCustomFolders = orderable.some((folder) => folder.kind === "custom");
