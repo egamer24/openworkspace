@@ -19,6 +19,10 @@ import { Label } from "../components/ui/label";
 import { useConfirm } from "../hooks/use-confirm";
 import { api, responseJson } from "../lib/api";
 import { clientModules } from "../modules";
+import {
+  AddressSectionsProvider,
+  useAddressSections,
+} from "./address-sections";
 import { TeamDeliveryFields } from "./team-delivery";
 import type { AdminMailbox, AdminTeam } from "./types";
 
@@ -138,6 +142,16 @@ function AddressEditor({
     mailbox?.listPosting ?? "workspace"
   );
 
+  const sections = useAddressSections();
+  const [sectionError, setSectionError] = useState<string | null>(null);
+
+  // Saved as is: a new address always needs saving, a saved one only if changed.
+  const addressDirty =
+    !mailbox ||
+    displayName !== mailbox.displayName ||
+    delivery !== mailbox.delivery ||
+    listPosting !== mailbox.listPosting;
+
   const idPrefix = `team-address-${mailbox?.id ?? "new"}`;
   const { confirm, dialog: confirmDialog } = useConfirm();
 
@@ -148,36 +162,57 @@ function AddressEditor({
     ]);
   }
 
-  const save = useMutation({
-    mutationFn: async (target: SaveTarget) => {
-      if ("mailboxId" in target) {
-        return responseJson(
-          await api.api.admin.mailboxes[":id"].$patch({
-            param: { id: target.mailboxId },
-            json: { displayName, delivery, listPosting },
-          })
-        );
-      }
-
-      return responseJson(
-        await api.api.admin.mailboxes.$post({
-          json: {
-            address: target.address,
-            displayName,
-            ownerUserId: null,
-            teamId: team.id,
-            delivery,
-            listPosting,
-          },
+  async function saveAddress(target: SaveTarget) {
+    if ("mailboxId" in target) {
+      await responseJson(
+        await api.api.admin.mailboxes[":id"].$patch({
+          param: { id: target.mailboxId },
+          json: { displayName, delivery, listPosting },
         })
       );
+
+      return;
+    }
+
+    await responseJson(
+      await api.api.admin.mailboxes.$post({
+        json: {
+          address: target.address,
+          displayName,
+          ownerUserId: null,
+          teamId: team.id,
+          delivery,
+          listPosting,
+        },
+      })
+    );
+  }
+
+  // The address first, then each module section with changes; the editor
+  // closes only if all of them were saved.
+  const save = useMutation({
+    mutationFn: async (target: SaveTarget) => {
+      setSectionError(null);
+
+      if (addressDirty) await saveAddress(target);
+
+      try {
+        await sections.save();
+      } catch (error) {
+        // The address may be saved already: show it, keep the editor open.
+        await refresh();
+        throw error;
+      }
     },
     onSuccess: async () => {
       toast.success(mailbox ? "Address updated" : "Address added");
       await refresh();
       onDone();
     },
-    onError: (error) => toast.error(error.message),
+    onError: (error) => {
+      setSectionError(error.message);
+      toast.error(error.message);
+    },
   });
 
   const remove = useMutation({
@@ -278,8 +313,9 @@ function AddressEditor({
         onDeliveryChange={setDelivery}
         onListPostingChange={setListPosting}
       />
-      {mailbox
-        ? clientModules().flatMap((module) =>
+      {mailbox ? (
+        <AddressSectionsProvider sections={sections}>
+          {clientModules().flatMap((module) =>
             (module.teamAddress ?? []).map(({ id, Component }) => (
               // Modules save their sections themselves, so Enter there doesn't save the address.
               <div key={`${module.name}:${id}`} data-module-section>
@@ -288,14 +324,21 @@ function AddressEditor({
                     mailboxId: mailbox.id,
                     address: mailbox.address,
                     displayName: mailbox.displayName,
-                    delivery: mailbox.delivery,
+                    // The form's choice, so a section can hide at once.
+                    delivery,
                     teamId: team.id,
                   }}
                 />
               </div>
             ))
-          )
-        : null}
+          )}
+        </AddressSectionsProvider>
+      ) : null}
+      {sectionError ? (
+        <p role="alert" className="text-destructive text-xs">
+          {sectionError}
+        </p>
+      ) : null}
       <div className="flex items-center gap-2">
         {mailbox ? (
           <Button
@@ -333,7 +376,8 @@ function AddressEditor({
           disabled={
             save.isPending ||
             displayName.trim().length < 2 ||
-            (!mailbox && !address.address)
+            (!mailbox && !address.address) ||
+            (!addressDirty && !sections.dirty)
           }
           onClick={submit}
         >
