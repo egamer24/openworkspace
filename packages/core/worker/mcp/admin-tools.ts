@@ -186,7 +186,7 @@ export function registerAdminTools(
     {
       title: "Create mailbox",
       description:
-        "Create a personal mailbox for one owner, or a team address: a shared inbox the team opens together (delivery inbox), or a mailing list that copies mail into each member's own mailbox (delivery list, with listPosting limiting who may write to it).",
+        "Create a person's address, or a team address. Delivery inbox gives it its own mailbox (for a team, a shared inbox the team opens together); list copies mail into each team member's own mailbox (team addresses only, with listPosting limiting who may write to it); alias delivers into aliasOf, another mailbox of the same person or team; forward sends mail on to forwardTo, up to five outside addresses, each of which must confirm the email Cloudflare sends it first. catchAll makes an inbox get mail for unknown addresses on its domain (one per domain).",
       inputSchema: createMailboxSchema,
       annotations: adminWrite,
     },
@@ -214,12 +214,12 @@ export function registerAdminTools(
       )
   );
 
-  tool("admin.teams")(
+  tool({ anyOf: ["admin.people", "admin.teams"] })(
     "update_shared_mailbox",
     {
-      title: "Update shared mailbox",
+      title: "Update mailbox address",
       description:
-        "Change a team address: its display name, its team, whether it is a shared inbox or a mailing list, and who may write to a mailing list.",
+        "Change a team address or a person's address: its display name, its team (team addresses only), its delivery (inbox, list, alias with aliasOf, or forward with forwardTo, as in create_mailbox), whether it is its domain's catch-all, and who may write to a mailing list. A primary address stays an inbox.",
       inputSchema: z.object({
         mailboxId: entityIdSchema,
         ...updateMailboxSchema.shape,

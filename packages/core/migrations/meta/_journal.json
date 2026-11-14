@@ -8,6 +8,13 @@
       "when": 1794460028548,
       "tag": "0000_wakeful_proteus",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1794629855844,
+      "tag": "0001_alias_forward_catch_all",
+      "breakpoints": true
     }
   ]
 }
