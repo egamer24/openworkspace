@@ -125,8 +125,15 @@ const ownNotes = new Hono<AppEnv>()
   routes with `requirePermission(id)`, under `/api/admin/<section>`.
 - A `teamAddress` section on `ClientModule` adds settings to a team's address
   under **Administration → Teams**, such as a shared inbox's signature. It
-  saves through your own routes; guard them with
-  `requirePermission("manage_teams")`.
+  has no save button of its own: call `useAddressSection({ dirty, save })`
+  from `@open-workspace/core/ui`. "Save address" is enabled when the address
+  or any section is `dirty`. It saves the address first, then calls `save`
+  for each dirty section, and closes the editor only if all of them succeed.
+  If a `save` throws, its message is shown and the editor stays open. `save`
+  goes through your own routes; guard them with
+  `requirePermission("manage_teams")`. The section gets the form's current
+  `delivery`, so it can hide as soon as the delivery changes: unmount the
+  component that calls `useAddressSection`, and it stops taking part.
 - Register MCP tools through `tool(scope)`, and implement them by calling your
   own routes through `api`, so a token only sees what its scopes allow.
 - Declare webhook events once in `shared/`, on both the server and client

@@ -49,8 +49,9 @@ export type ClientModule = {
   /**
    * Sections in the editor of a team's saved address, under Administration →
    * Teams, e.g. a shared inbox's signature. Only people who can manage teams
-   * see them; each section saves through the module's own routes, guarded
-   * with `requirePermission("manage_teams")`.
+   * see them. A section registers with `useAddressSection({ dirty, save })`,
+   * and the editor's "Save address" saves it after the address; `save` uses
+   * the module's own routes, guarded with `requirePermission("manage_teams")`.
    */
   teamAddress?: {
     /** Unique among every module's team address sections. */
@@ -104,7 +105,10 @@ export type TeamAddress = {
   mailboxId: string;
   address: string;
   displayName: string;
-  /** A shared inbox, or a mailing list that copies mail to members. */
+  /**
+   * A shared inbox, or a mailing list that copies mail to members: the
+   * editor's current choice, which may not be saved yet.
+   */
   delivery: MailboxDelivery;
   teamId: string;
 };

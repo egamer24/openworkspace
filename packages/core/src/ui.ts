@@ -76,6 +76,10 @@ export { AppearanceMenuRow } from "./components/appearance-menu-row";
 export { useWorkspaceBrand, WorkspaceLogo } from "./components/workspace-logo";
 
 // The session and hooks.
+export { useAddressSection } from "./admin/address-sections";
+
+export type { AddressSection } from "./admin/address-sections";
+
 export { useAuth } from "./auth/auth-context";
 
 export { type ConfirmOptions, useConfirm } from "./hooks/use-confirm";
