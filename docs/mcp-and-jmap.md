@@ -38,10 +38,13 @@ Only JMAP apps that sign in through the browser can connect. Apps that use IMAP
 and SMTP with a password, such as Apple Mail, Outlook or Gmail, can't.
 
 JMAP apps can search, read, move, delete, and mark mail as read, send new mail
-with attachments, and get push updates. A few things work differently from
-other servers:
+with attachments, import existing messages (`Email/import`), and get push
+updates. A few things work differently from other servers:
 
 - Moving a message moves its whole conversation.
+- `Email/import` needs `mail.organize` and works only in your own mailboxes,
+  like the [migration CLI](migration.md). A message imported before (same
+  bytes or Message-ID) is `alreadyExists`.
 - Read/unread is the only flag that's stored.
 - Apps resync fully after changes, instead of fetching only what changed.
 
@@ -54,7 +57,7 @@ asks for and you approve, and only as far as your own role allows.
 | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `mail.read`                                                                                                 | Read mail in the mailboxes you can open                                                        |
 | `mail.send`                                                                                                 | Send, reply and forward from the mailboxes you can send from                                   |
-| `mail.organize`                                                                                             | Mark as read, move, report spam, and manage folders and blocked senders                        |
+| `mail.organize`                                                                                             | Mark as read, move, report spam, import mail, and manage folders and blocked senders           |
 | `people.read`                                                                                               | See people, teams and mailboxes, if you manage something                                       |
 | `admin.people`, `admin.teams`, `admin.apps`, `admin.webhooks`, `admin.blocked_senders`, `admin.import_mail` | Use the matching permission, if you hold it                                                    |
 | `admin.workspace`                                                                                           | Administrators only: change branding and choose which apps may connect                         |

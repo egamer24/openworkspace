@@ -9,14 +9,23 @@ import { z } from "zod";
 
 import { MAX_COMPOSER_ATTACHMENT_COUNT } from "../../shared/mail";
 import {
+  importPlacements,
+  MAX_IMPORT_MESSAGE_BYTES,
+} from "../../shared/mail-import";
+import {
   MAIL_ORGANIZE_SCOPE,
   MAIL_READ_SCOPE,
   MAIL_SEND_SCOPE,
 } from "../../shared/permissions";
 import { jmapPushSubscriptions } from "../db/schema";
+import { importRawMessage } from "../mail/import-routes";
 import { submitOutgoing } from "../mail/outbound-service";
 import { composeSchema } from "../mail/schemas";
-import { describeComposerUpload, UploadValidationError } from "../mail/uploads";
+import {
+  describeComposerUpload,
+  loadComposerUpload,
+  UploadValidationError,
+} from "../mail/uploads";
 import { mailboxStub } from "../mailbox";
 import type { JmapEmailFilter, JmapMailboxRow } from "../mailbox/jmap-store";
 import type { Email } from "../mailbox/schema";
@@ -1224,6 +1233,185 @@ async function emailSet(state: RequestState, args: EmailSetArguments) {
   };
 }
 
+// ------------------------------------------------------------------ import
+
+/** An Email/import object (RFC 8621 §4.8): an uploaded message, its one mailbox and $seen. */
+const emailImportObject = z.object({
+  blobId: z.string(),
+  mailboxIds: trueSet
+    .transform((ids) => Object.keys(ids))
+    .refine((ids) => ids.length === 1, "An email is in exactly one mailbox"),
+  keywords: trueSet
+    .nullish()
+    .refine(
+      (keywords) =>
+        Object.keys(keywords ?? {}).every((name) => name === "$seen"),
+      "Only the $seen keyword is stored"
+    ),
+  receivedAt: utcDate.nullish(),
+});
+
+const emailImportArguments = z.object({
+  accountId,
+  ifInState: z.string().nullish(),
+  emails: z.record(z.string(), z.json()).superRefine((emails, context) => {
+    if (Object.keys(emails).length > MAX_OBJECTS) {
+      methodIssue(context, "requestTooLarge", `At most ${MAX_OBJECTS} emails`);
+    }
+  }),
+});
+
+type EmailImportArguments = z.output<typeof emailImportArguments>;
+
+/** The bytes of a blob uploaded to this account, or null when there is none. */
+async function uploadedBlob(
+  state: RequestState,
+  owner: JmapAccount,
+  blobId: string
+) {
+  const upload = UPLOAD_BLOB.exec(blobId);
+
+  if (!upload) return null;
+
+  try {
+    return await loadComposerUpload({
+      env: state.context.env,
+      mailboxId: owner.id,
+      userId: state.context.user.id,
+      uploadId: upload[1],
+    });
+  } catch (error) {
+    if (error instanceof UploadValidationError) return null;
+    throw error;
+  }
+}
+
+/**
+ * Stores uploaded messages as the import CLI does: their date, mailbox and
+ * read state kept, threaded, no AI, webhooks or push. A message imported
+ * before (the same bytes or Message-ID) is alreadyExists.
+ */
+async function emailImport(state: RequestState, args: EmailImportArguments) {
+  const owner = account(state, args.accountId);
+  const { env, user } = state.context;
+
+  // Imported mail shows as received, so only its owner may add to a mailbox (as with the CLI).
+  if (!owner.isPersonal) {
+    throw new MethodError(
+      "forbidden",
+      "Mail can be imported only into your own mailboxes"
+    );
+  }
+
+  const stub = mailboxStub(env, owner.id);
+  const oldState = await stub.jmapState();
+
+  if (args.ifInState != null && args.ifInState !== oldState) {
+    throw new MethodError("stateMismatch");
+  }
+
+  const { mailboxes } = await stub.jmapMailboxes(user.id);
+  const created = new Map<string, JsonObject>();
+  const notCreated = new Map<string, JsonObject>();
+
+  for (const [creationId, input] of Object.entries(args.emails)) {
+    const parsed = emailImportObject.safeParse(input);
+
+    if (!parsed.success) {
+      notCreated.set(creationId, invalidProperties(parsed.error.issues));
+      continue;
+    }
+
+    const { blobId, mailboxIds, keywords, receivedAt } = parsed.data;
+    const target = mailboxes.find((row) => row.id === mailboxIds[0]);
+
+    if (!target) {
+      notCreated.set(creationId, {
+        type: "invalidProperties",
+        properties: ["mailboxIds"],
+        description: "No such mailbox",
+      });
+      continue;
+    }
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- one at a time, so a message given twice is stored once
+    const upload = await uploadedBlob(state, owner, blobId);
+
+    if (upload && upload.size > MAX_IMPORT_MESSAGE_BYTES) {
+      notCreated.set(creationId, {
+        type: "tooLarge",
+        description: `Messages are limited to ${MAX_IMPORT_MESSAGE_BYTES / 1024 / 1024} MiB`,
+      });
+      continue;
+    }
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- see above
+    const object = upload ? await env.MAIL_STORAGE.get(upload.r2Key) : null;
+
+    if (!object) {
+      notCreated.set(creationId, { type: "blobNotFound", notFound: [blobId] });
+      continue;
+    }
+
+    const placement =
+      importPlacements.find((place) => place === target.id) ?? "inbox";
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- see above
+    const raw = new Uint8Array(await object.arrayBuffer());
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- see above
+    const result = await importRawMessage({
+      env,
+      mailbox: owner,
+      raw,
+      importKey: raw,
+      receivedAt: receivedAt ? Date.parse(receivedAt) : null,
+      placement,
+      folderName: target.role === null ? target.name : null,
+      seen: Object.hasOwn(keywords ?? {}, "$seen"),
+      thread: null,
+      // The mailbox asked for decides, not the From address.
+      direction:
+        placement === "sent"
+          ? "outgoing"
+          : placement === "inbox"
+            ? "incoming"
+            : null,
+    });
+
+    if (result.status === "unprocessable") {
+      notCreated.set(creationId, {
+        type: "invalidEmail",
+        description: result.reason,
+      });
+    } else if (result.status === "duplicate") {
+      notCreated.set(creationId, {
+        type: "alreadyExists",
+        existingId: result.id,
+      });
+    } else {
+      state.createdIds.set(creationId, result.id);
+      created.set(creationId, {
+        id: result.id,
+        blobId: `raw~${result.id}`,
+        threadId: result.conversationId,
+        size: raw.byteLength,
+      });
+    }
+  }
+
+  // Announces the imports now (counts, open apps, JMAP state), not with the alarm.
+  if (created.size) await stub.finishImport();
+
+  return {
+    accountId: owner.id,
+    oldState,
+    newState: await stub.jmapState(),
+    created: setResult(created),
+    notCreated: setResult(notCreated),
+  };
+}
+
 // --------------------------------------------------- threads and identities
 
 const threadGetArguments = z.object({ accountId, ids: idList });
@@ -1903,6 +2091,14 @@ const methods = new Map<string, MethodHandler>([
       arguments: emailSetArguments,
       scopes: emailSetScopes,
       run: emailSet,
+    }),
+  ],
+  [
+    "Email/import",
+    method({
+      arguments: emailImportArguments,
+      scopes: () => [MAIL_ORGANIZE_SCOPE],
+      run: emailImport,
     }),
   ],
   ["Email/changes", mailboxChanges],

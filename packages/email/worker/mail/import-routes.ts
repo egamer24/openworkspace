@@ -17,6 +17,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
 
+import type { ImportPlacement } from "../../shared/mail-import";
 import {
   importPlacements,
   MAX_IMPORT_KEY_LENGTH,
@@ -28,6 +29,7 @@ import {
   MAIL_ORGANIZE_SCOPE,
 } from "../../shared/permissions";
 import { mailboxStub } from "../mailbox";
+import type { ImportMessageResult } from "../mailbox";
 import { readCappedBody } from "./capped-body";
 import { rawMessageId } from "./inbound";
 
@@ -78,15 +80,68 @@ const importQuerySchema = z.object({
   direction: z.enum(["incoming", "outgoing"]).optional(),
 });
 
-async function sha256Hex(value: string) {
+async function sha256Hex(value: string | Uint8Array<ArrayBuffer>) {
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(value)
+    value instanceof Uint8Array ? value : new TextEncoder().encode(value)
   );
 
   return [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
+}
+
+/**
+ * Stores one raw message in a mailbox as an import: kept once per
+ * `importKey` (and per Message-ID), read for everyone who can open the
+ * mailbox when `seen`, threaded by `thread` when given.
+ */
+export async function importRawMessage(input: {
+  env: Env;
+  mailbox: { id: string; address: string };
+  raw: Uint8Array;
+  /** The message's id at its source (or its bytes); importing it again does nothing. */
+  importKey: string | Uint8Array<ArrayBuffer>;
+  receivedAt: number | null;
+  placement: ImportPlacement;
+  folderName: string | null;
+  seen: boolean;
+  thread: string | null;
+  direction: "incoming" | "outgoing" | null;
+}): Promise<ImportMessageResult> {
+  const { env, mailbox: target, raw } = input;
+  const mailbox = mailboxStub(env, target.id);
+  const importId = `imp_${(await sha256Hex(input.importKey)).slice(0, 32)}`;
+  const known = await mailbox.findImported(importId, rawMessageId(raw));
+
+  if (known) return { status: "duplicate", ...known };
+  const rawObjectKey = `mailboxes/${target.id}/raw/${importId}.eml`;
+  await env.MAIL_STORAGE.put(rawObjectKey, raw, {
+    httpMetadata: { contentType: "message/rfc822" },
+  });
+
+  const seenBy = input.seen
+    ? (
+        await createDb(env.DB)
+          .select({ userId: mailboxAccess.userId })
+          .from(mailboxAccess)
+          .where(eq(mailboxAccess.mailboxId, target.id))
+      ).map((row) => row.userId)
+    : [];
+
+  return mailbox.importMessage({
+    importId,
+    rawObjectKey,
+    mailboxAddress: target.address,
+    receivedAt: input.receivedAt,
+    placement: input.placement,
+    folderName: input.folderName,
+    seenBy,
+    conversationId: input.thread
+      ? `conv_imp_${(await sha256Hex(input.thread)).slice(0, 32)}`
+      : null,
+    direction: input.direction,
+  });
 }
 
 /** A mailbox's import target: where it is and who can open it. */
@@ -228,44 +283,16 @@ export const mailImportRoutes = new Hono<AppEnv>()
         );
       }
 
-      const mailbox = mailboxStub(c.env, target.id);
-      const importId = `imp_${(await sha256Hex(input.sourceId)).slice(0, 32)}`;
-      const known = await mailbox.findImported(importId, rawMessageId(raw));
-
-      if (known) {
-        return c.json({
-          ok: true as const,
-          duplicate: true as const,
-          ...known,
-        });
-      }
-
-      const rawObjectKey = `mailboxes/${target.id}/raw/${importId}.eml`;
-      await c.env.MAIL_STORAGE.put(rawObjectKey, raw, {
-        httpMetadata: { contentType: "message/rfc822" },
-      });
-
-      const seenBy =
-        input.seen === "1"
-          ? (
-              await createDb(c.env.DB)
-                .select({ userId: mailboxAccess.userId })
-                .from(mailboxAccess)
-                .where(eq(mailboxAccess.mailboxId, target.id))
-            ).map((row) => row.userId)
-          : [];
-
-      const result = await mailbox.importMessage({
-        importId,
-        rawObjectKey,
-        mailboxAddress: target.address,
+      const result = await importRawMessage({
+        env: c.env,
+        mailbox: target,
+        raw,
+        importKey: input.sourceId,
         receivedAt: input.receivedAt,
         placement: input.placement,
         folderName: input.folder ?? null,
-        seenBy,
-        conversationId: input.thread
-          ? `conv_imp_${(await sha256Hex(input.thread)).slice(0, 32)}`
-          : null,
+        seen: input.seen === "1",
+        thread: input.thread ?? null,
         direction: input.direction ?? null,
       });
 

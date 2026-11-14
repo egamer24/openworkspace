@@ -404,7 +404,7 @@ describe("JMAP", () => {
   });
 
   /** Signs in as the workspace's first person (bootstrapped by the first test). */
-  async function signIn() {
+  async function signIn(scope = "mail.read mail.send mail.organize") {
     const admin = z
       .object({ id: z.string() })
       .parse(
@@ -424,7 +424,7 @@ describe("JMAP", () => {
     const cookie = sessionCookie(login);
 
     const { accessToken } = await mcpAccessToken(cookie, {
-      scope: "mail.read mail.send mail.organize",
+      scope,
       resource: `${origin}/jmap`,
     });
 
@@ -571,6 +571,217 @@ describe("JMAP", () => {
     expect(result(rejected, setResult).notCreated?.other).toMatchObject({
       type: "blobNotFound",
     });
+  });
+
+  /** Uploads a raw message and answers its blob id. */
+  async function uploadMessage(token: string, accountId: string, raw: string) {
+    const uploaded = await worker.fetch(
+      new Request(`${origin}/jmap/upload/${accountId}`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "message/rfc822",
+        },
+        body: raw,
+      })
+    );
+
+    expect(uploaded.status).toBe(201);
+
+    return (await readJson(uploaded, z.object({ blobId: z.string() }))).blobId;
+  }
+
+  it("imports uploaded messages into a mailbox", async () => {
+    const { accessToken, accountId } = await signIn();
+    await mailbox(accountId).createFolder("fld_receipts", "Receipts");
+
+    const receipt = await uploadMessage(
+      accessToken,
+      accountId,
+      [
+        "From: Shop <orders@shop.example>",
+        "To: jay@example.test",
+        "Subject: Your receipt",
+        "Message-ID: <receipt-1@shop.example>",
+        "Date: Mon, 02 Mar 2026 09:00:00 +0000",
+        "",
+        "Thanks for your order.",
+      ].join("\r\n")
+    );
+
+    const shipped = await uploadMessage(
+      accessToken,
+      accountId,
+      [
+        "From: Shop <orders@shop.example>",
+        "To: jay@example.test",
+        "Subject: Re: Your receipt",
+        "Message-ID: <receipt-2@shop.example>",
+        "In-Reply-To: <receipt-1@shop.example>",
+        "References: <receipt-1@shop.example>",
+        "Date: Tue, 03 Mar 2026 09:00:00 +0000",
+        "",
+        "Your order has shipped.",
+      ].join("\r\n")
+    );
+
+    const [imported] = await jmap(accessToken, [
+      [
+        "Email/import",
+        {
+          accountId,
+          emails: {
+            receipt: {
+              blobId: receipt,
+              mailboxIds: { fld_receipts: true },
+              keywords: { $seen: true },
+              receivedAt: "2026-03-02T10:30:00Z",
+            },
+            shipped: { blobId: shipped, mailboxIds: { fld_receipts: true } },
+            flagged: {
+              blobId: shipped,
+              mailboxIds: { inbox: true },
+              keywords: { $flagged: true },
+            },
+            missing: {
+              blobId: `upl~upl_${"0".repeat(32)}`,
+              mailboxIds: { inbox: true },
+            },
+          },
+        },
+        "i",
+      ],
+    ]);
+
+    const importResult = result(imported, setResult);
+    expect(importResult.newState).not.toBe(importResult.oldState);
+    expect(importResult.notCreated).toEqual({
+      flagged: expect.objectContaining({
+        type: "invalidProperties",
+        properties: ["keywords"],
+      }),
+      missing: expect.objectContaining({ type: "blobNotFound" }),
+    });
+
+    const receiptId = required(
+      importResult.created?.receipt,
+      "the receipt was imported"
+    ).id;
+
+    const shippedId = required(
+      importResult.created?.shipped,
+      "the shipping note was imported"
+    ).id;
+
+    const [got] = await jmap(accessToken, [
+      [
+        "Email/get",
+        {
+          accountId,
+          ids: [receiptId, shippedId],
+          properties: [
+            "subject",
+            "mailboxIds",
+            "keywords",
+            "receivedAt",
+            "threadId",
+          ],
+        },
+        "g",
+      ],
+    ]);
+
+    const [first, second] = result(got, getResult).list;
+    expect(first).toMatchObject({
+      subject: "Your receipt",
+      mailboxIds: { fld_receipts: true },
+      keywords: { $seen: true },
+      receivedAt: "2026-03-02T10:30:00.000Z",
+    });
+    expect(second).toMatchObject({
+      subject: "Re: Your receipt",
+      mailboxIds: { fld_receipts: true },
+      keywords: {},
+      threadId: required(first, "the receipt was found").threadId,
+    });
+
+    // The same message again is the email already there.
+    const [again] = await jmap(accessToken, [
+      [
+        "Email/import",
+        {
+          accountId,
+          emails: { again: { blobId: receipt, mailboxIds: { inbox: true } } },
+        },
+        "a",
+      ],
+    ]);
+
+    expect(result(again, setResult)).toMatchObject({
+      created: null,
+      notCreated: { again: { type: "alreadyExists", existingId: receiptId } },
+    });
+  });
+
+  it("imports with mail.organize and refuses tokens without it", async () => {
+    const organizer = await signIn("mail.read mail.organize");
+
+    const note = await uploadMessage(
+      organizer.accessToken,
+      organizer.accountId,
+      "From: Ada <ada@example.net>\r\nSubject: Old note\r\n\r\nFrom last year."
+    );
+
+    const [imported] = await jmap(organizer.accessToken, [
+      [
+        "Email/import",
+        {
+          accountId: organizer.accountId,
+          emails: { note: { blobId: note, mailboxIds: { archive: true } } },
+        },
+        "i",
+      ],
+    ]);
+
+    const noteId = required(
+      result(imported, setResult).created?.note,
+      "the note was imported"
+    ).id;
+
+    const [got] = await jmap(organizer.accessToken, [
+      [
+        "Email/get",
+        {
+          accountId: organizer.accountId,
+          ids: [noteId],
+          properties: ["mailboxIds"],
+        },
+        "g",
+      ],
+    ]);
+
+    expect(result(got, getResult).list[0]).toMatchObject({
+      mailboxIds: { archive: true },
+    });
+
+    const sender = await signIn("mail.read mail.send");
+
+    const [refused] = await jmap(sender.accessToken, [
+      [
+        "Email/import",
+        {
+          accountId: sender.accountId,
+          emails: { note: { blobId: note, mailboxIds: { inbox: true } } },
+        },
+        "r",
+      ],
+    ]);
+
+    expect(refused).toEqual([
+      "error",
+      expect.objectContaining({ type: "forbidden" }),
+      "r",
+    ]);
   });
 
   it("verifies push subscriptions and pushes state changes to them", async () => {

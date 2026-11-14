@@ -19,6 +19,7 @@ import type { Context } from "hono";
 import { MAX_COMPOSER_ATTACHMENT_BYTES } from "../../shared/mail";
 import { JMAP_PATH } from "../../shared/module";
 import {
+  MAIL_ORGANIZE_SCOPE,
   MAIL_READ_SCOPE,
   MAIL_SEND_SCOPE,
   mailScopes,
@@ -420,20 +421,24 @@ export const jmapRoutes = new Hono<JmapEnv>()
     });
   })
   .post(`${JMAP_PATH}/upload/:accountId`, async (c) => {
-    // Uploads become attachments of mail being sent.
-    const refused = missingScope(c, MAIL_SEND_SCOPE);
-
-    if (refused) return refused;
     const user = c.get("jmapUser");
 
     const account = (await jmapAccounts(c.env, user.id)).find(
       (item) => item.id === c.req.param("accountId")
     );
 
+    // Uploads become attachments of mail being sent, or messages imported
+    // into the person's own mailbox (Email/import, like moving mail there).
+    const imports =
+      account?.isPersonal === true && user.scopes.includes(MAIL_ORGANIZE_SCOPE);
+
+    const refused = imports ? null : missingScope(c, MAIL_SEND_SCOPE);
+
+    if (refused) return refused;
+
     if (!account) return problem(c, 404, "about:blank", "Account not found");
 
-    // Uploads become attachments of sent mail, so they need send access.
-    if (!account.canSend) {
+    if (!imports && !account.canSend) {
       return problem(c, 403, "about:blank", "This account cannot send");
     }
 
