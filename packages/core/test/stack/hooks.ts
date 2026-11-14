@@ -180,36 +180,10 @@ const sso = {
   },
 } satisfies Record<string, TestHook>;
 
-let installedBeforeClaim: ReturnType<typeof workspaceModules> | undefined;
-
-/** A module that already routes some addresses, as mail's aliases do. */
-const addresses = {
-  /** Installs a module that says `claimed` are in use; `null` removes it. */
-  "modules.claimAddresses": (_, claimed: string[] | null) => {
-    installedBeforeClaim ??= workspaceModules();
-
-    installModules(
-      claimed
-        ? [
-            ...installedBeforeClaim,
-            {
-              name: "claims",
-              hooks: {
-                addressInUse: (_env, address) =>
-                  Promise.resolve(claimed.includes(address)),
-              },
-            },
-          ]
-        : installedBeforeClaim
-    );
-  },
-} satisfies Record<string, TestHook>;
-
 export const coreHooks = {
   ...identity,
   ...revocation,
   ...sso,
-  ...addresses,
   /** The OIDC cleanup routes run at random; run it now. */
   "oidc.cleanupExpiredArtifacts": ({ env }) =>
     cleanupExpiredOidcArtifacts(createDb(env.DB)),

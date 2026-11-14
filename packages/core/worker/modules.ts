@@ -101,12 +101,6 @@ export type WorkspaceModule = {
     (env: Env, source: ModuleWebhookSource) => Promise<object>
   >;
   hooks?: {
-    /**
-     * Whether the module already routes `address` (lowercase, full) somewhere
-     * else, e.g. as an alias. Core asks before an administrator creates a
-     * mailbox at an address, and refuses the address if any module says yes.
-     */
-    addressInUse?: (env: Env, address: string) => Promise<boolean>;
     /** An address was deleted; remove what the module stored for it. */
     mailboxDeleted?: (env: Env, mailboxId: string) => Promise<void>;
     /**
@@ -305,7 +299,7 @@ type StatementHook = {
 
 /** Runs every installed module's `hook`, in install order. */
 export async function runModuleHooks<
-  K extends Exclude<keyof ModuleHooks, StatementHook | "addressInUse">,
+  K extends Exclude<keyof ModuleHooks, StatementHook>,
 >(hook: K, ...args: Parameters<NonNullable<ModuleHooks[K]>>) {
   for (const module of installed) {
     // SAFETY: `hooks[hook]` is the hook named K, whose parameters are `args`;
@@ -317,15 +311,6 @@ export async function runModuleHooks<
     // oxlint-disable-next-line eslint/no-await-in-loop -- hooks run in install order, and a failing one stops the rest as before
     if (run) await run(...args);
   }
-}
-
-/** Whether an installed module already uses `address` (see `hooks.addressInUse`). */
-export async function addressUsedByModule(env: Env, address: string) {
-  const answers = await Promise.all(
-    installed.map((module) => module.hooks?.addressInUse?.(env, address))
-  );
-
-  return answers.some(Boolean);
 }
 
 /**
