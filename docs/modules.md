@@ -135,6 +135,52 @@ const ownNotes = new Hono<AppEnv>()
 The Worker refuses to start if two modules use the same name, permission,
 scope, or webhook event.
 
+## Backups
+
+With `OpenWorkspace({ backups })` on, core writes a snapshot every day
+([Backups](configuration.md#backups)): its own data first, then each module's
+part, a batch at a time on the hourly cron. A module joins with `backup` on
+its `WorkspaceModule`:
+
+```ts
+backup: {
+  // One batch; resolves to where the next one starts, or null when done.
+  async export(env, snapshot) {
+    const after = snapshot.cursor;
+    const page = await notesAfter(env, after, 500);
+    snapshot.writeLines("notes", page.map((note) => ({ id: note.id, title: note.title, body: note.body })));
+    return page.length === 500 ? page.at(-1).id : null;
+  },
+  // One line back from `import backup`: add it unless it exists.
+  async restore(c, { folder, line, object }) {
+    const note = noteLineSchema.parse(line);
+    const added = await insertNoteIfMissing(c.env, note);
+    return { status: added ? "restored" : "exists" };
+  },
+},
+```
+
+`snapshot` gives the module core's shared pieces:
+
+- `cursor`: what the last batch returned, kept in D1 between runs. Keep a
+  batch small (a few hundred subrequests); core runs up to 25 an hour and a
+  repeated batch must write the same lines again.
+- `writeLines(folder, lines)`: JSON lines under
+  `backups/<id>/<module>/<folder>/`. Use folders for whatever restores apart,
+  such as mail's addresses.
+- `putObject(bytes, { extension, contentType })`: stores bytes once under
+  `backups/objects/<sha256>.<extension>` and resolves to the hash. Name it in
+  a line as `object: "<sha256>.<extension>"`; core deletes objects no kept
+  snapshot names. Remember which items are stored, as mail keeps each
+  message's hash, so the next snapshot only writes their lines.
+- `error(message)`: shown under **Administration → Backups**.
+
+`import backup` restores core's data first, then sends each line of the
+module's part to `restore` in order, with the bytes of the object it names,
+in a request of an administrator. Add what is missing and leave what exists:
+a restore runs again after a failure, and into workspaces that still have
+most of their data.
+
 ## Screens
 
 The client entry exports a `ClientModule`. Load every screen with `lazy()`.

@@ -17,6 +17,7 @@ import { oauthScope, oauthScopeAnyOf } from "../auth/oauth-scopes";
 import { actsAsAdministrator, requestPermissions } from "../auth/permissions";
 import { personalAccountRecords } from "../auth/personal-account";
 import { revokeUserAccess } from "../auth/revocation";
+import { backupAdminRoutes } from "../backups/routes";
 import {
   configuredMailDomains,
   mailDomainAllowed,
@@ -253,6 +254,7 @@ async function prepareAccessLink(input: {
 
 /** Admin sections whose changes can alter what SSO applications are provisioned with. */
 const provisionedSections = new Set([
+  "backups",
   "users",
   "invitations",
   "teams",
@@ -279,6 +281,7 @@ export const adminRoutes = new Hono<AppEnv>()
   .use("/saml-applications/*", oauthScope("admin.apps"))
   .use("/webhooks/*", oauthScope("admin.webhooks"))
   .use("/branding/*", oauthScope(WORKSPACE_SCOPE))
+  .use("/backups/*", oauthScope(WORKSPACE_SCOPE))
   // Ahead of every route, provisioning's included: apps declared in alchemy.run.ts are read-only here.
   .on(
     ["PATCH", "PUT", "DELETE", "POST"],
@@ -1061,7 +1064,8 @@ export const adminRoutes = new Hono<AppEnv>()
   .route("/", teamAdminRoutes)
   .route("/", mcpClientAdminRoutes)
   .route("/webhooks", webhookAdminRoutes)
-  .route("/branding", brandingAdminRoutes);
+  .route("/branding", brandingAdminRoutes)
+  .route("/backups", backupAdminRoutes);
 
 /**
  * Skipping consent, and scopes that reach mail or administration, are for

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * The workspace's settings: `OpenWorkspace`'s `mailDomains` and `ai` in
+ * The workspace's settings: `OpenWorkspace`'s `mailDomains`, `ai` and `backups` in
  * alchemy.run.ts, checked on deploy and passed to createWorkspace by the
  * generated Worker entry. Secrets never go here; providers read their API keys from the Worker
  * secrets named by apiKeyEnv.
@@ -185,6 +185,29 @@ export const workspaceConfigSchema = z
       )
       .describe("Mail domains, primary first"),
     ai: aiSchema.default({ providers: {}, features: {} }),
+    /**
+     * Daily snapshots to a bucket of their own (worker/backups/job.ts); off
+     * without it. `backups: {}` keeps the defaults.
+     */
+    backups: z
+      .object({
+        keepDays: z
+          .number()
+          .int()
+          .min(1)
+          .max(366)
+          .default(14)
+          .describe("Days whose newest snapshot is kept"),
+        keepWeeks: z
+          .number()
+          .int()
+          .min(0)
+          .max(520)
+          .default(8)
+          .describe("Weeks whose newest snapshot is kept, besides those days"),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

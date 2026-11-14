@@ -1,0 +1,1 @@
+ALTER TABLE `emails` ADD `backup_sha256` text;

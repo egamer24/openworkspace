@@ -13,6 +13,8 @@ const { stack, stackName } = devWorkspaceStack({
   // Push services take only a mailto: or https: contact, and the local app
   // is served over http.
   modules: [Email({ pushContact: "mailto:admin@demo.example" })],
+  // On, so Administration → Backups has a bucket to show.
+  backups: {},
   seed: [demoSeed],
   port: 5173,
 });

@@ -10,6 +10,7 @@ import { avatarRoutes } from "./auth/avatar";
 import { verifySameOrigin } from "./auth/middleware";
 import { mockAuthRoutes } from "./auth/mock";
 import { authRoutes } from "./auth/routes";
+import { runBackupTick } from "./backups/job";
 import { bootstrapRoutes } from "./bootstrap";
 import { configureWorkspace } from "./config";
 import { reportUnlistedMailboxDomains } from "./config/mail-domains";
@@ -184,6 +185,8 @@ export function createWorkspace(options: WorkspaceOptions) {
       ctx.waitUntil(scheduledIdentitySync(env));
       ctx.waitUntil(syncDeclaredSsoApps(env));
       ctx.waitUntil(syncDeclaredWebhooks(env));
+      // Starts the day's backup, or continues one; nothing without `backups`.
+      ctx.waitUntil(runBackupTick(env, new Date(controller.scheduledTime)));
 
       for (const module of modules) {
         if (module.scheduled) {

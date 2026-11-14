@@ -30,10 +30,10 @@ import { zValidator } from "./lib/validator";
 export const logoObjectKey = (logoId: string) => `workspace/logo/${logoId}`;
 
 /** The `settings` row holding the current logo's id; no row, no logo. */
-const LOGO_ID_KEY = "workspace_logo_id";
+export const LOGO_ID_KEY = "workspace_logo_id";
 
 /** The `settings` row holding the workspace's name; no row, the product's name is shown. */
-const NAME_KEY = "workspace_name";
+export const NAME_KEY = "workspace_name";
 
 /** The current logo's id, from the `settings` row. */
 function logoIdQuery(db: Database) {

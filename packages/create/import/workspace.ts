@@ -68,6 +68,14 @@ export class Workspace {
   }
 
   private send(path: string, init: JsonRequest) {
+    if (init.raw) {
+      return this.request(path, {
+        method: init.method ?? "POST",
+        headers: { "content-type": "application/octet-stream" },
+        body: init.raw,
+      });
+    }
+
     return this.request(path, {
       method: init.method ?? "GET",
       headers:
@@ -160,7 +168,12 @@ export class Workspace {
   }
 }
 
-type JsonRequest = { method?: string; body?: unknown };
+type JsonRequest = {
+  method?: string;
+  body?: unknown;
+  /** Bytes sent as they are, instead of a JSON `body`. */
+  raw?: Uint8Array<ArrayBuffer>;
+};
 
 const importResponseSchema = z.object({
   duplicate: z.boolean(),

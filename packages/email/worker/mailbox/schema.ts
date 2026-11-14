@@ -214,6 +214,12 @@ export const emails = sqliteTable(
       .$type<RecipientDeliveryStatus[]>()
       .notNull()
       .default([]),
+    /**
+     * The sha256 of the message's object in the backup bucket, once a
+     * snapshot stored it (worker/backups/mail-backup.ts). A message never
+     * changes, so later snapshots list it without reading it again.
+     */
+    backupSha256: text("backup_sha256"),
   },
   (table) => [
     index("emails_conversation_timeline_idx").on(

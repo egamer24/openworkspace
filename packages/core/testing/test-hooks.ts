@@ -303,6 +303,8 @@ function testHooks(workspace: Handlers, options: TestHookOptions) {
       case "reset": {
         await clearDatabase(env.DB);
         await clearBucket(env.MEDIA);
+
+        if (env.BACKUP_STORAGE) await clearBucket(env.BACKUP_STORAGE);
         await options.reset?.(env);
         resetDeclaredSsoApps();
         resetDeclaredWebhooks();

@@ -1,5 +1,6 @@
 import {
   Bot,
+  DatabaseBackup,
   KeyRound,
   Palette,
   UserRound,
@@ -25,7 +26,8 @@ export type CoreAdminSection =
   | "sso-applications"
   | "webhooks"
   | "connected-apps"
-  | "branding";
+  | "branding"
+  | "backups";
 
 export type AdminSection = CoreAdminSection | (string & {});
 
@@ -69,6 +71,7 @@ function adminGroups(): { label: string; sections: AdminSectionItem[] }[] {
         },
         { id: "connected-apps", label: "Connected apps", Icon: Bot },
         { id: "branding", label: "Branding", Icon: Palette },
+        { id: "backups", label: "Backups", Icon: DatabaseBackup },
       ],
     },
     ...clientModules().flatMap((module) =>

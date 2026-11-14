@@ -444,6 +444,28 @@ describe("read-only mailbox access", () => {
       await mailbox.getConversationSnapshot("conv_visible")
     ).not.toBeNull();
 
+    // Backups hold every mailbox: only administrators see, start or restore them.
+    for (const request of [
+      new Request("http://example.test/api/admin/backups", {
+        headers: { cookie },
+      }),
+      new Request("http://example.test/api/admin/backups/run", {
+        method: "POST",
+        headers: { cookie, origin: "http://example.test" },
+      }),
+      new Request("http://example.test/api/admin/backups/restore/email", {
+        method: "POST",
+        headers: { cookie, origin: "http://example.test" },
+        body: "{}",
+      }),
+    ]) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- three requests
+      const refused = await worker.fetch(request);
+      expect(refused.status).toBe(403);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- see above
+      await refused.text();
+    }
+
     const compose = await worker.fetch(
       new Request("http://example.test/api/mail/messages", {
         method: "POST",

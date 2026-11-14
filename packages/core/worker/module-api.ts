@@ -10,7 +10,11 @@
 
 // The contract.
 export type {
+  BackupRestoreItem,
+  BackupRestoreResult,
+  BackupSnapshot,
   McpToolRegistrar,
+  ModuleBackup,
   ModuleOauthScopes,
   QueueConsumer,
   ScopedToolRegistrar,

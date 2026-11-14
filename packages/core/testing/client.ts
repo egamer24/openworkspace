@@ -386,4 +386,8 @@ export function bucket(binding: string) {
 }
 
 /** The stack's bindings tests read and write directly (a module's test client adds its buckets). */
-export const env = { DB, MEDIA: bucket("MEDIA") };
+export const env = {
+  DB,
+  MEDIA: bucket("MEDIA"),
+  BACKUP_STORAGE: bucket("BACKUP_STORAGE"),
+};

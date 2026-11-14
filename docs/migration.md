@@ -12,8 +12,10 @@ passwords never reach the workspace.
 | Google Takeout, or any mbox file                     | `import mbox`   | Each person, or an administrator with the exports   |
 | IMAP (Gmail, Microsoft 365, Zoho, Fastmail, iCloud…) | `import imap`   | Each person, or an administrator with app passwords |
 | Google Workspace people, aliases and groups          | `import people` | An administrator                                    |
+| A backup snapshot of this or another workspace       | `import backup` | An administrator                                    |
 
-Contacts, calendars and files can't be imported yet.
+Contacts, calendars and files can't be imported yet. Restoring a backup is
+described under [Backups](configuration.md#restore).
 
 ## Cutover steps
 

@@ -18,4 +18,6 @@ export const { stack, stackName } = testWorkspaceStack({
   modules: [
     Email({ pushContact: "mailto:test@example.test", retention: { trash: 7 } }),
   ],
+  // For backups.test.ts.
+  backups: {},
 });

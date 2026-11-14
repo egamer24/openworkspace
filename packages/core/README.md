@@ -38,6 +38,7 @@ export default Alchemy.Stack(
 | `hostname`    | Where the app is served, in a zone of the account. Required. |
 | `mailDomains` | Mail domains, primary first. Required.                       |
 | `ai`          | AI providers and the features that use them.                 |
+| `backups`     | Daily snapshots to a bucket of their own, e.g. `{}`.         |
 | `modules`     | Workspace modules, such as `Email()`.                        |
 | `apps`        | Single sign-on apps declared in code.                        |
 | `webhooks`    | Webhook endpoints declared in code.                          |

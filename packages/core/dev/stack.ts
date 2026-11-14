@@ -49,6 +49,8 @@ export function devWorkspaceStack(props: {
   /** Alchemy's stack name; state lives under `.alchemy/state/<stack>/<stage>`. */
   stack: string;
   modules?: OpenWorkspaceProps["modules"];
+  /** Backups, so Administration → Backups has a bucket to show. */
+  backups?: OpenWorkspaceProps["backups"];
   /** SQL files imported after migrations when the demo sign-in is on. */
   seed: string[];
   /** The local port, unless `PORT` says otherwise. */
@@ -72,6 +74,7 @@ export function devWorkspaceStack(props: {
         // takes localhost as a secure context). No custom domain is made.
         hostname: `${process.env.DEV_HOST ?? "localhost"}:${port}`,
         modules: props.modules ?? [],
+        backups: props.backups,
         mockAuth,
         // Seed files only for the mock-auth demo; OpenWorkspace skips an absent seed.
         seed: mockAuth ? renderSeeds(props.seed, mailDomains[0]) : undefined,

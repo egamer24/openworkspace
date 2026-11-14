@@ -34,6 +34,7 @@ import {
   AdminPanelHeader,
 } from "./admin-panel";
 import { adminStateQuery } from "./admin-state";
+import { Backups } from "./backups";
 import { BrandingSettings } from "./branding-settings";
 import { ConnectedApps } from "./connected-apps";
 import { SsoApps } from "./sso-apps";
@@ -96,6 +97,11 @@ const coreViewCopy: Record<
     title: "Branding",
     description:
       "Your workspace's name and logo, in the app's header and browser tab; the logo is on the sign-in screen too.",
+  },
+  backups: {
+    title: "Backups",
+    description:
+      "Daily copies of the workspace and each app's data, in a bucket of their own.",
   },
   invite: {
     title: "Invite person",
@@ -358,6 +364,7 @@ function AdminSectionPage({
           )}
           {view === "connected-apps" && <ConnectedApps />}
           {view === "branding" && <BrandingSettings />}
+          {view === "backups" && <Backups />}
           {view === "invite" && (
             <div className="max-w-3xl">
               {state.data ? (

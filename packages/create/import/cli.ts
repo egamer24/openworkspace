@@ -18,6 +18,7 @@ const USAGE = `Bring people and mail into an OpenWorkspace.
   bunx @open-workspace/create import mbox <file or Takeout folder>... --into <mailbox>
   bunx @open-workspace/create import imap --host <host> --user <user> --into <mailbox>
   bunx @open-workspace/create import people --google-credentials <file.json> [--admin <email>]
+  bunx @open-workspace/create import backup <backups/<id> folder>
 
 Common options:
   --workspace <url>      The workspace, e.g. https://mail.acme.com (or OPENWORKSPACE_URL)
@@ -384,6 +385,10 @@ const commands = new Map<string, () => Promise<Command>>([
   [
     "imap",
     () => import("./imap-command.ts").then((module) => module.imapCommand),
+  ],
+  [
+    "backup",
+    () => import("./backup-source.ts").then((module) => module.backupCommand),
   ],
   [
     "people",

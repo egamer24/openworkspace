@@ -139,6 +139,13 @@ export type OpenWorkspaceProps = {
    * a provider names the Worker secret that holds its key (`apiKeyEnv`).
    */
   ai?: WorkspaceConfigInput["ai"];
+  /**
+   * Daily snapshots of the workspace to an R2 bucket of its own, which the
+   * deploy creates: `{}` keeps the newest of the last 14 days and of the
+   * last 8 weeks (`keepDays`, `keepWeeks`). Off without it
+   * (docs/configuration.md#backups).
+   */
+  backups?: WorkspaceConfigInput["backups"];
   /** Module infrastructure, e.g. `Email()`. */
   modules?: WorkspaceModuleInfra[];
   /**
@@ -332,6 +339,11 @@ type OptionalVariables = {
   ALLOW_MOCK_AUTH?: string;
 };
 
+/** The backup bucket, bound only with `backups`. */
+type BackupEnv = {
+  BACKUP_STORAGE?: ReturnType<typeof Cloudflare.R2.Bucket>;
+};
+
 /** The runtime every workspace Worker targets. */
 const workerCompatibility = { date: "2026-07-21", flags: ["nodejs_compat"] };
 
@@ -343,7 +355,7 @@ const workerCompatibility = { date: "2026-07-21", flags: ["nodejs_compat"] };
 const workspaceBindings = (
   props: Pick<
     OpenWorkspaceProps,
-    "hostname" | "apps" | "webhooks" | "seed" | "mockAuth"
+    "hostname" | "apps" | "webhooks" | "seed" | "mockAuth" | "backups"
   >,
   origin: string,
   dir: string,
@@ -437,6 +449,12 @@ const workspaceBindings = (
 
     // The demo sign-in, for localhost only (auth/mock.ts).
     if (props.mockAuth) variables.ALLOW_MOCK_AUTH = "true";
+    // A bucket of its own, so a mistake in another can't take the backups with it.
+    const backup: BackupEnv = {};
+
+    if (props.backups) {
+      backup.BACKUP_STORAGE = Cloudflare.R2.Bucket("Backups", {});
+    }
 
     // The Worker's `Env` is derived from this object (`CoreEnv`), so each
     // binding is declared here only.
@@ -446,6 +464,7 @@ const workspaceBindings = (
       // Profile photos and the workspace logo as uploaded
       // (`avatars/<userId>/<id>`, `workspace/logo/<id>`); the Worker serves them.
       MEDIA: Cloudflare.R2.Bucket("Media", {}),
+      ...backup,
       // Crops them to the sizes served, from the bytes read from MEDIA.
       IMAGES: Cloudflare.Images.Images("IMAGES"),
       WEBHOOKS: webhooks,
@@ -482,6 +501,7 @@ function workspaceConfig(props: OpenWorkspaceProps) {
   const input: WorkspaceConfigInput = {
     mailDomains: props.mailDomains,
     ai: props.ai,
+    backups: props.backups,
   };
 
   const parsed = workspaceConfigSchema.safeParse(input);

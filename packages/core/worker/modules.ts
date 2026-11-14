@@ -100,6 +100,12 @@ export type WorkspaceModule = {
     string,
     (env: Env, source: ModuleWebhookSource) => Promise<object>
   >;
+  /**
+   * The module's part of each backup snapshot, and how `import backup` puts
+   * it back (docs/modules.md#backups). Core writes its own data first, then
+   * each module's, in install order.
+   */
+  backup?: ModuleBackup;
   hooks?: {
     /** An address was deleted; remove what the module stored for it. */
     mailboxDeleted?: (env: Env, mailboxId: string) => Promise<void>;
@@ -138,6 +144,62 @@ export type ModuleOauthScopes = {
   title: string;
   scopes: { id: string; label: string; byDefault?: boolean }[];
 };
+
+/**
+ * A module's backups. `export` writes one batch through `snapshot` and
+ * resolves to where the next batch starts, or null when the module's part
+ * is done; it is called again, possibly in a later run of the hourly job,
+ * with that cursor. A batch may be repeated after an interruption, so it
+ * must write the same lines again.
+ *
+ * `restore` gets one line back from `import backup` (in a request of an
+ * administrator), with its object's bytes when the line names one, and adds
+ * what the workspace is missing; it never overwrites what exists.
+ */
+export type ModuleBackup = {
+  export: (env: Env, snapshot: BackupSnapshot) => Promise<string | null>;
+  restore: (
+    c: Context<AppEnv>,
+    item: BackupRestoreItem
+  ) => Promise<BackupRestoreResult>;
+};
+
+/** One batch of a module's part of a snapshot. */
+export type BackupSnapshot = {
+  /** The snapshot's id, e.g. "2026-03-10T041700.000Z". */
+  id: string;
+  /** Where this batch starts: what the last one returned, null at first. */
+  cursor: string | null;
+  /**
+   * Stores `bytes` once under `objects/<sha256>.<extension>`, shared by
+   * every snapshot that lists it, and resolves to the sha256 (hex). A line
+   * names it as `object: "<sha256>.<extension>"`; objects no kept snapshot
+   * names are deleted.
+   */
+  putObject: (
+    bytes: Uint8Array<ArrayBuffer>,
+    type: { extension: string; contentType: string }
+  ) => Promise<string>;
+  /**
+   * Adds JSON lines to the files of `folder` (e.g. a mailbox's address) in
+   * the module's part; a line's `object` names a stored object.
+   */
+  writeLines: (folder: string, lines: { object?: string }[]) => void;
+  /** Records a problem, shown in Administration → Backups; the batch goes on. */
+  error: (message: string) => void;
+};
+
+/** A line of the module's part, as `import backup` sends it back. */
+export type BackupRestoreItem = {
+  folder: string;
+  line: unknown;
+  /** The bytes of the object the line names, checked against its hash. */
+  object: Uint8Array | null;
+};
+
+export type BackupRestoreResult =
+  | { status: "restored" | "exists" }
+  | { status: "skipped"; reason: string };
 
 /** Consumes one batch of a queue. */
 export type QueueConsumer = (

@@ -102,8 +102,9 @@ simply expires keeps them.
 ## Administration
 
 Under **Administration** you manage people, teams, branding (the workspace's
-name and logo), [single sign-on apps](sso.md), [webhooks](webhooks.md), and
-[connected apps](mcp-and-jmap.md#connected-apps).
+name and logo), [single sign-on apps](sso.md), [webhooks](webhooks.md),
+[connected apps](mcp-and-jmap.md#connected-apps), and
+[backups](configuration.md#backups).
 
 You can let members manage people, teams, single sign-on apps, webhooks,
 blocked senders, or mail import. A member can only manage people whose

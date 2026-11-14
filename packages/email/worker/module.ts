@@ -10,6 +10,7 @@ import type { EmailQueueRole } from "../shared/module";
 import { emailPermissions, mailOauthScopes } from "../shared/permissions";
 import { EMAIL_WEBHOOK_SOURCE, emailWebhookEvents } from "../shared/webhooks";
 import { blockedSenderAdminRoutes } from "./admin/blocked-sender-routes";
+import { mailBackup } from "./backups/mail-backup";
 import { jmapRoutes } from "./jmap/routes";
 import { mailBootstrap } from "./mail/bootstrap";
 import { consumeDeliveryEvents } from "./mail/delivery-events";
@@ -78,6 +79,7 @@ export function email(): WorkspaceModule {
       import("./mcp/tools").then((tools) => tools.registerMailTools),
     webhookEvents: emailWebhookEvents,
     webhookSources: { [EMAIL_WEBHOOK_SOURCE]: emailWebhookData },
+    backup: mailBackup,
     hooks: {
       mailboxDeleted: deleteMailboxStorage,
       sessionRevoked: deleteSessionPushSubscriptions,

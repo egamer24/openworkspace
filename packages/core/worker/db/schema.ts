@@ -868,3 +868,30 @@ export const oidcAuditEvents = sqliteTable(
 export type User = typeof users.$inferSelect;
 
 export type Mailbox = typeof mailboxes.$inferSelect;
+
+/**
+ * One row per snapshot in BACKUP_STORAGE (worker/backups/job.ts). `module`
+ * and `cursor` are where the hourly job resumes: the module whose part it is
+ * writing, and that module's own position. With no module left it prunes
+ * old snapshots and, once a week, objects no kept snapshot lists (`swept`).
+ */
+export const backupRuns = sqliteTable("backup_runs", {
+  /** When it started, e.g. 2026-03-10T041700.000Z: its folder in the bucket. */
+  id: text("id").primaryKey(),
+  status: text("status", { enum: ["running", "completed"] }).notNull(),
+  module: text("module"),
+  cursor: text("cursor"),
+  /** Numbers each batch's files, so a repeated batch overwrites its own. */
+  part: integer("part").notNull().default(0),
+  itemCount: integer("item_count").notNull().default(0),
+  newObjectCount: integer("new_object_count").notNull().default(0),
+  newObjectBytes: integer("new_object_bytes").notNull().default(0),
+  errors: text("errors", { mode: "json" })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'[]'`),
+  swept: integer("swept", { mode: "boolean" }).notNull().default(false),
+  leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+});

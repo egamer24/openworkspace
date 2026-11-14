@@ -41,6 +41,8 @@ export function testWorkspaceStack(props: {
   /** The test Worker's wrap: `entry` default-exports `testWorker(...)`. */
   wrap: WorkspaceServerEntry;
   modules?: OpenWorkspaceProps["modules"];
+  /** Turns on backups, for a module's tests of its backup hook. */
+  backups?: OpenWorkspaceProps["backups"];
 }) {
   const stack = Alchemy.Stack(
     props.stack,
@@ -55,6 +57,7 @@ export function testWorkspaceStack(props: {
         // SAML sign for and passkeys belong to, and no custom domain is made.
         hostname: "example.test",
         modules: props.modules ?? [],
+        backups: props.backups,
         wrap: { server: props.wrap },
         mockAuth: true,
         env: {
