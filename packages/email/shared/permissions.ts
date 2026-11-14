@@ -16,6 +16,12 @@ export const IMPORT_MAIL = "import_mail";
 /** The OAuth scope that hands an app IMPORT_MAIL. */
 export const IMPORT_MAIL_SCOPE = "admin.import_mail";
 
+/** Lets a member see the mail archive's state and retry its copies. */
+export const MANAGE_MAIL_ARCHIVE = "manage_mail_archive";
+
+/** The OAuth scope that hands an app MANAGE_MAIL_ARCHIVE. */
+export const MAIL_ARCHIVE_SCOPE = "admin.mail_archive";
+
 /** What the mail module lets an administrator hand to a member. */
 export const emailPermissions: PermissionDefinition[] = [
   {
@@ -29,6 +35,12 @@ export const emailPermissions: PermissionDefinition[] = [
     label: "Import mail",
     scope: IMPORT_MAIL_SCOPE,
     description: "Import existing mail into any mailbox in the workspace.",
+  },
+  {
+    id: MANAGE_MAIL_ARCHIVE,
+    label: "Mail archive",
+    scope: MAIL_ARCHIVE_SCOPE,
+    description: "See the mail archive and retry copies that failed.",
   },
 ];
 

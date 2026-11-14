@@ -6,6 +6,7 @@ import {
 } from "@open-workspace/core/module";
 
 import { mailboxStub } from "../mailbox";
+import { receiveArchived } from "./archive";
 import { inboundDeliveryId } from "./inbound-delivery";
 import { deliverToList } from "./mailing-list";
 
@@ -57,15 +58,23 @@ export async function receiveEmail(message: ForwardableEmailMessage, env: Env) {
   });
 
   const objectKey = `mailboxes/${mailbox.id}/raw/${deliveryId}.eml`;
-  await mailboxStub(env, mailbox.id).enqueueInbound({
-    id: deliveryId,
-    mailboxId: mailbox.id,
-    rawObjectKey: objectKey,
-    envelopeFrom: message.from,
-    envelopeTo: message.to,
-    receivedAt,
-  });
-  await env.MAIL_STORAGE.put(objectKey, raw, {
-    httpMetadata: { contentType: "message/rfc822" },
-  });
+
+  await receiveArchived(
+    env,
+    { id: deliveryId, mailboxId: mailbox.id, sourceKey: objectKey, receivedAt },
+    raw,
+    async () => {
+      await mailboxStub(env, mailbox.id).enqueueInbound({
+        id: deliveryId,
+        mailboxId: mailbox.id,
+        rawObjectKey: objectKey,
+        envelopeFrom: message.from,
+        envelopeTo: message.to,
+        receivedAt,
+      });
+      await env.MAIL_STORAGE.put(objectKey, raw, {
+        httpMetadata: { contentType: "message/rfc822" },
+      });
+    }
+  );
 }

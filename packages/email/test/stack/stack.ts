@@ -14,9 +14,14 @@ export const { stack, stackName } = testWorkspaceStack({
   },
   // Push services need a contact; mailto: as a deployment would give. Trash
   // keeps mail a week, so retention.test.ts covers both folders (Spam's
-  // default is 30 days).
+  // default is 30 days). The archive is on for mail-archive.test.ts (its
+  // lock isn't emulated locally).
   modules: [
-    Email({ pushContact: "mailto:test@example.test", retention: { trash: 7 } }),
+    Email({
+      pushContact: "mailto:test@example.test",
+      retention: { trash: 7 },
+      archive: { years: 10 },
+    }),
   ],
   // For backups.test.ts.
   backups: {},

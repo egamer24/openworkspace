@@ -103,11 +103,12 @@ simply expires keeps them.
 
 Under **Administration** you manage people, teams, branding (the workspace's
 name and logo), [single sign-on apps](sso.md), [webhooks](webhooks.md),
-[connected apps](mcp-and-jmap.md#connected-apps), and
-[backups](configuration.md#backups).
+[connected apps](mcp-and-jmap.md#connected-apps),
+[backups](configuration.md#backups), and the
+[mail archive](configuration.md#mail-archive) if it's on.
 
 You can let members manage people, teams, single sign-on apps, webhooks,
-blocked senders, or mail import. A member can only manage people whose
+blocked senders, mail import, or the mail archive. A member can only manage people whose
 permissions they also hold. Only administrators manage administrators, and the
 last one can't be demoted.
 

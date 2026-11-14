@@ -63,6 +63,12 @@ export type EmailInfraProps = {
    * mail until someone empties it.
    */
   retention?: { trash?: number | null; spam?: number | null };
+  /**
+   * A write-once copy of every received and sent message in a separate R2
+   * bucket whose lock rule keeps each object `years` after it is written
+   * (worker/mail/archive.ts, docs/configuration.md). Off by default.
+   */
+  archive?: { years: number };
 };
 
 /** Optional secrets the module reads, bound when set in the environment or `.env`. */
@@ -147,6 +153,49 @@ function retentionEnv({
   return env;
 }
 
+/** The mail archive's bucket and its lock period, bound only with `archive`. */
+type ArchiveEnv = {
+  MAIL_ARCHIVE?: ReturnType<typeof Cloudflare.R2.Bucket>;
+  MAIL_ARCHIVE_YEARS?: string;
+};
+
+const SECONDS_PER_YEAR = 365.25 * 24 * 60 * 60;
+
+/**
+ * The archive bucket, declared with its lock rule: R2 refuses to delete or
+ * overwrite an object until it is `years` old. Changing `years` (or
+ * dropping `archive`) and deploying changes or removes the rule, and with
+ * it the lock on objects already written.
+ */
+function archiveEnv(archive: EmailInfraProps["archive"]) {
+  const env: ArchiveEnv = {};
+
+  if (!archive) return env;
+
+  if (!Number.isInteger(archive.years) || archive.years < 1) {
+    throw new Error(
+      `Email({ archive }) takes whole years of 1 or more, not ${archive.years}`
+    );
+  }
+
+  env.MAIL_ARCHIVE = Cloudflare.R2.Bucket("MailArchive", {
+    locks: [
+      {
+        id: "mail-archive-retention",
+        enabled: true,
+        prefix: "",
+        condition: {
+          type: "Age",
+          maxAgeSeconds: Math.ceil(archive.years * SECONDS_PER_YEAR),
+        },
+      },
+    ],
+  });
+  env.MAIL_ARCHIVE_YEARS = String(archive.years);
+
+  return env;
+}
+
 /** The module's Worker bindings; the Worker's `Env` is derived from them (`EmailEnv`). */
 const emailEnv = (
   props: EmailInfraProps,
@@ -178,6 +227,7 @@ const emailEnv = (
       VAPID_PRIVATE_KEY: vapid.privateKey,
       ...pushSubject,
       ...retentionEnv(props.retention),
+      ...archiveEnv(props.archive),
       MAIL_STORAGE: bucket,
       /** Signs the remote image proxy's tokens (mail/remote-token.ts). */
       MAIL_REMOTE_KEY: remoteKey.text,

@@ -89,5 +89,9 @@ export const hooks = {
   },
 };
 
-/** The stack's bindings tests read and write directly: D1 and the mail bucket. */
-export const env = { ...coreEnv, MAIL_STORAGE: bucket("MAIL_STORAGE") };
+/** The stack's bindings tests read and write directly: D1, the mail bucket and the archive bucket. */
+export const env = {
+  ...coreEnv,
+  MAIL_STORAGE: bucket("MAIL_STORAGE"),
+  MAIL_ARCHIVE: bucket("MAIL_ARCHIVE"),
+};

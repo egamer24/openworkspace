@@ -13,6 +13,7 @@ import type { ListPostingPolicy } from "@open-workspace/core/shared";
 import { and, eq, sql } from "drizzle-orm";
 
 import { mailboxStub } from "../mailbox";
+import { receiveArchived } from "./archive";
 import { parseInboundAuthentication } from "./auth-headers";
 import { rawHeaderText } from "./inbound";
 import { inboundDeliveryId } from "./inbound-delivery";
@@ -151,25 +152,39 @@ export async function deliverToList(input: {
   });
 
   const objectKey = `lists/${list.id}/raw/${deliveryId}.eml`;
-  await Promise.all(
-    recipients.map(async (mailboxId) =>
-      mailboxStub(env, mailboxId).enqueueInbound({
-        id: await inboundDeliveryId({
-          mailboxId,
-          envelopeFrom: message.from,
-          envelopeTo: message.to,
-          raw,
-        }),
-        mailboxId,
-        rawObjectKey: objectKey,
-        envelopeFrom: message.from,
-        envelopeTo: message.to,
-        listAddress,
-        receivedAt: input.receivedAt,
-      })
-    )
+
+  // Archived once, as the list's: the members' copies share this original.
+  await receiveArchived(
+    env,
+    {
+      id: deliveryId,
+      mailboxId: list.id,
+      sourceKey: objectKey,
+      receivedAt: input.receivedAt,
+    },
+    raw,
+    async () => {
+      await Promise.all(
+        recipients.map(async (mailboxId) =>
+          mailboxStub(env, mailboxId).enqueueInbound({
+            id: await inboundDeliveryId({
+              mailboxId,
+              envelopeFrom: message.from,
+              envelopeTo: message.to,
+              raw,
+            }),
+            mailboxId,
+            rawObjectKey: objectKey,
+            envelopeFrom: message.from,
+            envelopeTo: message.to,
+            listAddress,
+            receivedAt: input.receivedAt,
+          })
+        )
+      );
+      await env.MAIL_STORAGE.put(objectKey, raw, {
+        httpMetadata: { contentType: "message/rfc822" },
+      });
+    }
   );
-  await env.MAIL_STORAGE.put(objectKey, raw, {
-    httpMetadata: { contentType: "message/rfc822" },
-  });
 }

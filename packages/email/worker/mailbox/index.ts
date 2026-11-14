@@ -68,6 +68,7 @@ import {
   EmailAiClassificationError,
   MAILBOX_AI_MAX_ATTEMPTS,
 } from "../mail/ai-classification";
+import { keysAwaitingArchive, sendArchived } from "../mail/archive";
 import { classificationSignals } from "../mail/classification-signals";
 import type { ClassificationSignals } from "../mail/classification-signals";
 import { deliveryFacts } from "../mail/delivery-facts";
@@ -182,6 +183,9 @@ const COUNTS_VERSION_KEY = "inboxCountsVersion";
 const INBOUND_ALARM_BATCH_SIZE = 1;
 const OBJECT_DELETION_ALARM_BATCH_SIZE = 100;
 const MAX_RETRY_DELAY_MS = 60 * 60 * 1000;
+
+/** A raw copy not yet in the mail archive waits for the hourly archive retry. */
+const ARCHIVE_WAIT_MS = 60 * 60 * 1000;
 const MAX_INBOUND_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** Attempts a delivery may end without an outcome (alarm killed) before it is stored unparsed. */
@@ -3900,8 +3904,24 @@ export class MailboxDO extends DurableObject<Env> {
         .run();
     }
 
+    // Raw copies the mail archive doesn't have yet stay until it does.
+    const awaitingArchive = await keysAwaitingArchive(
+      this.bindings,
+      objectKeys.filter((key) => !referencedObjectKeys.has(key))
+    ).catch(() => new Set(objectKeys));
+
+    for (const key of awaitingArchive) {
+      this.db
+        .update(pendingObjectDeletions)
+        .set({ nextAttemptAt: new Date(now + ARCHIVE_WAIT_MS) })
+        .where(eq(pendingObjectDeletions.objectKey, key))
+        .run();
+    }
+
     const deletableJobs = jobs.filter(
-      (job) => !referencedObjectKeys.has(job.objectKey)
+      (job) =>
+        !referencedObjectKeys.has(job.objectKey) &&
+        !awaitingArchive.has(job.objectKey)
     );
 
     if (!deletableJobs.length) return;
@@ -4029,7 +4049,16 @@ export class MailboxDO extends DurableObject<Env> {
     }
 
     try {
-      const result = await this.bindings.EMAIL.send(delivery);
+      const result = await sendArchived(
+        this.bindings,
+        {
+          id: message.id,
+          mailboxId: this.state.id.name ?? "unknown-mailbox",
+          date: message.timelineAt,
+        },
+        delivery
+      );
+
       this.updateTransport(message.id, {
         state: "submitted",
         messageIdHeader: result.messageId,

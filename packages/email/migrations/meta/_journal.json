@@ -15,6 +15,13 @@
       "when": 1794576500541,
       "tag": "0001_overrated_ricochet",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794633666703,
+      "tag": "0002_mail_archive",
+      "breakpoints": true
     }
   ]
 }

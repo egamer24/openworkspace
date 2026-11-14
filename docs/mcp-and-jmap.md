@@ -53,15 +53,15 @@ updates. A few things work differently from other servers:
 Each scope lets an app do one kind of thing. An app gets only the scopes it
 asks for and you approve, and only as far as your own role allows.
 
-| Scope                                                                                                       | Lets the app                                                                                   |
-| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `mail.read`                                                                                                 | Read mail in the mailboxes you can open                                                        |
-| `mail.send`                                                                                                 | Send, reply and forward from the mailboxes you can send from                                   |
-| `mail.organize`                                                                                             | Mark as read, move, report spam, import mail, and manage folders and blocked senders           |
-| `people.read`                                                                                               | See people, teams and mailboxes, if you manage something                                       |
-| `admin.people`, `admin.teams`, `admin.apps`, `admin.webhooks`, `admin.blocked_senders`, `admin.import_mail` | Use the matching permission, if you hold it                                                    |
-| `admin.workspace`                                                                                           | Administrators only: change branding and choose which apps may connect                         |
-| `admin.access`                                                                                              | Administrators only: make people administrators, change permissions, and create recovery links |
+| Scope                                                                                                                             | Lets the app                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `mail.read`                                                                                                                       | Read mail in the mailboxes you can open                                                        |
+| `mail.send`                                                                                                                       | Send, reply and forward from the mailboxes you can send from                                   |
+| `mail.organize`                                                                                                                   | Mark as read, move, report spam, import mail, and manage folders and blocked senders           |
+| `people.read`                                                                                                                     | See people, teams and mailboxes, if you manage something                                       |
+| `admin.people`, `admin.teams`, `admin.apps`, `admin.webhooks`, `admin.blocked_senders`, `admin.import_mail`, `admin.mail_archive` | Use the matching permission, if you hold it                                                    |
+| `admin.workspace`                                                                                                                 | Administrators only: change branding and choose which apps may connect                         |
+| `admin.access`                                                                                                                    | Administrators only: make people administrators, change permissions, and create recovery links |
 
 An app that asks for nothing specific gets `mail.read`, plus staying signed in
 (`offline_access`). The consent screen always appears for mail, people, and

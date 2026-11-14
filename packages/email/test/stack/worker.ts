@@ -29,8 +29,12 @@ type RpcRelay = Record<string, (...args: unknown[]) => Promise<MailboxResult>>;
 // Email's test Worker: the generated entry passes the workspace (core and the mail module) to this wrap.
 export default testWorker({
   hooks: emailHooks,
-  // Mail and uploads go with the rows that point to them.
-  reset: (env) => clearBucket(env.MAIL_STORAGE),
+  // Mail, uploads and archived copies go with the rows that point to them.
+  reset: async (env) => {
+    await clearBucket(env.MAIL_STORAGE);
+
+    if (env.MAIL_ARCHIVE) await clearBucket(env.MAIL_ARCHIVE);
+  },
   // Sender intelligence's DNS lookups, answered offline.
   answer: (request) =>
     isDohRequest(request) ? fakeDohResponse(request) : undefined,

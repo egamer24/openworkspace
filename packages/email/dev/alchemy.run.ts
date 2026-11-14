@@ -11,8 +11,11 @@ import { Email } from "../alchemy/index.ts";
 const { stack, stackName } = devWorkspaceStack({
   stack: "OpenWorkspaceEmailDev",
   // Push services take only a mailto: or https: contact, and the local app
-  // is served over http.
-  modules: [Email({ pushContact: "mailto:admin@demo.example" })],
+  // is served over http. The archive is on so Administration → Mail archive
+  // has a bucket to show.
+  modules: [
+    Email({ pushContact: "mailto:admin@demo.example", archive: { years: 10 } }),
+  ],
   // On, so Administration → Backups has a bucket to show.
   backups: {},
   seed: [demoSeed],

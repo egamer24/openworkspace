@@ -163,3 +163,42 @@ export const mailboxReadCounts = sqliteTable(
   },
   (table) => [primaryKey({ columns: [table.mailboxId, table.userId] })]
 );
+
+/**
+ * Journal of the optional write-once mail archive (`Email({ archive })`,
+ * worker/mail/archive.ts): one row per received delivery or sent message.
+ * No foreign key, so the record outlives the mailbox. Open rows (pending,
+ * failed) are retried by the hourly cron.
+ */
+export const mailArchiveEntries = sqliteTable(
+  "mail_archive_entries",
+  {
+    /** The inbound delivery id, or the sent message's id. */
+    id: text("id").primaryKey(),
+    /** The mailbox, or for list mail the mailing list. */
+    mailboxId: text("mailbox_id").notNull(),
+    direction: text("direction", { enum: ["incoming", "outgoing"] }).notNull(),
+    /**
+     * Where a retry reads the message: received mail's raw copy in
+     * MAIL_STORAGE (kept until it is archived), or a staged copy under
+     * `archive-staging/`. Null for sent mail, rebuilt from the mailbox.
+     */
+    sourceKey: text("source_key"),
+    status: text("status", { enum: ["pending", "archived", "failed"] })
+      .notNull()
+      .default("pending"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    archiveKey: text("archive_key").notNull(),
+    sha256: text("sha256"),
+    size: integer("size"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    index("mail_archive_entries_status_idx").on(table.status, table.createdAt),
+    index("mail_archive_entries_source_idx").on(table.sourceKey),
+    index("mail_archive_entries_mailbox_idx").on(table.mailboxId, table.status),
+  ]
+);

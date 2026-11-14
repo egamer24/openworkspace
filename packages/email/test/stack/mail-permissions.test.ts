@@ -458,8 +458,16 @@ describe("read-only mailbox access", () => {
         headers: { cookie, origin: "http://example.test" },
         body: "{}",
       }),
+      // The mail archive's page needs its permission.
+      new Request("http://example.test/api/mail/archive", {
+        headers: { cookie },
+      }),
+      new Request("http://example.test/api/mail/archive/run", {
+        method: "POST",
+        headers: { cookie, origin: "http://example.test" },
+      }),
     ]) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- three requests
+      // oxlint-disable-next-line eslint/no-await-in-loop -- five requests
       const refused = await worker.fetch(request);
       expect(refused.status).toBe(403);
       // oxlint-disable-next-line eslint/no-await-in-loop -- see above

@@ -17,6 +17,8 @@ export type EmlInput = {
   messageId: string | null;
   inReplyTo: string[];
   references: string[];
+  /** Other headers, as given to Email Sending (e.g. Auto-Submitted). */
+  headers?: Record<string, string>;
   text?: string;
   html?: string;
   attachments: {
@@ -173,6 +175,10 @@ export function serializeEml(input: EmlInput): Uint8Array<ArrayBuffer> {
 
   if (input.references.length) {
     headers.push(`References: ${headerSafe(input.references.join(" "))}`);
+  }
+
+  for (const [name, value] of Object.entries(input.headers ?? {})) {
+    headers.push(`${headerSafe(name)}: ${headerSafe(value)}`);
   }
 
   headers.push("MIME-Version: 1.0");

@@ -318,6 +318,7 @@ describe("permissions", () => {
       "manage_apps",
       "manage_blocked_senders",
       "import_mail",
+      "manage_mail_archive",
     ]);
 
     const blocker = await invite("Blocker", "blocker@example.test");
