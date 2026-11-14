@@ -1,4 +1,11 @@
 import {
+  createDb,
+  mailboxAddressSql,
+  mailboxes,
+} from "@open-workspace/core/module";
+import { eq } from "drizzle-orm";
+
+import {
   forwardSubject,
   MAX_MAIL_RECIPIENTS,
   replySubject,
@@ -12,7 +19,7 @@ import {
 } from "./outbound-threading";
 import { dedupeRecipientFields, recipientCount } from "./recipients";
 import type { RecipientFields } from "./recipients";
-import { buildReplyPlan, canReplyFrom } from "./reply-plan";
+import { buildReplyPlan, canReplyFrom, replyAlias } from "./reply-plan";
 
 type OutgoingContextCode = "BAD_REQUEST" | "NOT_FOUND" | "NOT_READY";
 
@@ -49,6 +56,14 @@ export async function resolveForwardContext(input: {
   };
 }
 
+/** A mailbox's aliases: addresses a reply may come from instead of its own. */
+export function mailboxAliases(db: D1Database, mailboxId: string) {
+  return createDb(db)
+    .select({ address: mailboxAddressSql, displayName: mailboxes.displayName })
+    .from(mailboxes)
+    .where(eq(mailboxes.aliasOf, mailboxId));
+}
+
 export async function resolveReplyContext(input: {
   env: Env;
   mailboxId: string;
@@ -59,6 +74,8 @@ export async function resolveReplyContext(input: {
   bcc: string[];
 }): Promise<{
   source: Email;
+  /** The alias the reply comes from, when the source came through one. */
+  from: { address: string; displayName: string } | null;
   recipients: RecipientFields;
   subject: string;
   detached: boolean;
@@ -83,7 +100,13 @@ export async function resolveReplyContext(input: {
     );
   }
 
-  const plan = buildReplyPlan(input.ownAddress, source);
+  const from = replyAlias(
+    source,
+    await mailboxAliases(input.env.DB, input.mailboxId)
+  );
+
+  const ownAddress = from?.address ?? input.ownAddress;
+  const plan = buildReplyPlan(ownAddress, source);
 
   const action = plan.actions.find(
     (candidate) => candidate.mode === input.mode
@@ -115,16 +138,17 @@ export async function resolveReplyContext(input: {
 
   return {
     source,
+    from,
     recipients,
     subject: replySubject(source.subject),
     detached: shouldDetachOutboundReply({
-      ownAddress: input.ownAddress,
+      ownAddress,
       plan,
       to: recipients.to,
       cc: recipients.cc,
     }),
     includeRelatedContext: hasNewRecipients({
-      ownAddress: input.ownAddress,
+      ownAddress,
       history,
       ...recipients,
     }),

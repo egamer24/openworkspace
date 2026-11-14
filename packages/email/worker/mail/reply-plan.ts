@@ -163,3 +163,22 @@ export function buildReplyPlan(
     actions,
   };
 }
+
+/**
+ * The alias a reply comes from: the one the source was delivered to, or
+ * sent from; null to use the mailbox's own address.
+ */
+export function replyAlias<Alias extends { address: string }>(
+  source: Pick<Email, "direction" | "envelopeTo" | "fromJson">,
+  aliases: readonly Alias[]
+) {
+  const address =
+    source.direction === "incoming"
+      ? source.envelopeTo
+      : (source.fromJson[0]?.address ?? null);
+
+  if (!address) return null;
+  const normalized = normalizeMailboxAddress(address);
+
+  return aliases.find((alias) => alias.address === normalized) ?? null;
+}

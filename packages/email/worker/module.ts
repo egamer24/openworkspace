@@ -15,6 +15,10 @@ import { mailBootstrap } from "./mail/bootstrap";
 import { consumeDeliveryEvents } from "./mail/delivery-events";
 import { demoRoutes } from "./mail/demo-routes";
 import { mailDownloadRoutes } from "./mail/downloads";
+import {
+  addForwardDestinations,
+  forwardDestinationRoutes,
+} from "./mail/forward-destinations";
 import { mailImportRoutes } from "./mail/import-routes";
 import { deleteMailboxStorage } from "./mail/mailbox-deletion";
 import { consumeOfficePreviews } from "./mail/office-preview-queue";
@@ -36,6 +40,7 @@ export const mailAccountApi = new Hono<AppEnv>()
   // first, so that middleware never runs for it).
   .route("/mail/remote", mailRemoteRoutes)
   .route("/mail/import", mailImportRoutes)
+  .route("/mail/forward-destinations", forwardDestinationRoutes)
   .route("/mail", mailRoutes)
   .route("/admin", blockedSenderAdminRoutes);
 
@@ -79,6 +84,7 @@ export function email(): WorkspaceModule {
     webhookEvents: emailWebhookEvents,
     webhookSources: { [EMAIL_WEBHOOK_SOURCE]: emailWebhookData },
     hooks: {
+      mailboxSaved: addForwardDestinations,
       mailboxDeleted: deleteMailboxStorage,
       sessionRevoked: deleteSessionPushSubscriptions,
       sessionsRevoked: deleteUserPushSubscriptions,

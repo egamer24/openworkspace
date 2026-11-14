@@ -77,14 +77,15 @@ async function processDeliveryEvent(env: Env, event: DeliveryEvent) {
   const sender = normalizeMailboxAddress(event.payload.sender);
 
   const [mailbox] = await createDb(env.DB)
-    .select({ id: mailboxes.id })
+    .select({ id: mailboxes.id, aliasOf: mailboxes.aliasOf })
     .from(mailboxes)
     .where(mailboxAddressPredicate(sender))
     .limit(1);
 
   if (!mailbox) return "ignored" as const;
 
-  return mailboxStub(env, mailbox.id).recordDeliveryStatus(
+  // A reply sent from an alias is kept in the alias's mailbox.
+  return mailboxStub(env, mailbox.aliasOf ?? mailbox.id).recordDeliveryStatus(
     event.payload.messageId,
     recipientStatus(event)
   );
