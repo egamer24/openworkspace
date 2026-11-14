@@ -330,11 +330,19 @@ export function moveEmails(
     return false;
   }
 
+  // Retention counts from entering Trash or Spam, so only those moves stamp it.
   sql.exec(
-    `update conversations set mailbox_state = ?, folder_id = ?
+    `update conversations set mailbox_state = ?, folder_id = ?,
+       state_changed_at = case
+         when ? in ('trash', 'spam') and mailbox_state <> ? then ?
+         else state_changed_at
+       end
      where id in (select conversation_id from emails where id in (${emailIds.map(() => "?").join(", ")}))`,
     state,
     folderId,
+    state,
+    state,
+    Date.now(),
     ...emailIds
   );
 

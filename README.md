@@ -31,7 +31,7 @@
 
 - Team mail: personal and shared inboxes and mailing lists across several
   domains, with delivery status, PDF and Office previews, translation, and AI
-  spam checks and filing.
+  spam checks and filing. Spam is emptied after 30 days by default.
 - Passkey sign-in without passwords. People join with a one-time invitation
   link and recover access the same way.
 - An identity provider for your other apps: OIDC and SAML sign-in, access by

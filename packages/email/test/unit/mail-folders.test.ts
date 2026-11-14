@@ -26,6 +26,7 @@ function systemFolder(
     sortOrder,
     totalCount: 0,
     unreadCount: 0,
+    retentionDays: null,
   };
 }
 
@@ -38,6 +39,7 @@ function customFolder(id: string, sortOrder = 100): MailFolder {
     sortOrder,
     totalCount: 0,
     unreadCount: 0,
+    retentionDays: null,
   };
 }
 

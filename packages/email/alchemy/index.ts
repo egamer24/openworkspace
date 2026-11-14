@@ -57,6 +57,12 @@ const deliveryEvents = [
 export type EmailInfraProps = {
   /** Contact for push services (mailto: or https:); defaults to the app's URL. */
   pushContact?: string;
+  /**
+   * Days a conversation stays in Trash or Spam before it is deleted
+   * permanently. Spam defaults to 30; Trash, or a folder set to null, keeps
+   * mail until someone empties it.
+   */
+  retention?: { trash?: number | null; spam?: number | null };
 };
 
 /** Optional secrets the module reads, bound when set in the environment or `.env`. */
@@ -111,6 +117,36 @@ const mailStorage = (origin: string, dev: boolean) => {
 /** The contact push services see, bound only when configured. */
 type PushSubjectEnv = { VAPID_SUBJECT?: string };
 
+/** `Email({ retention })` in days, bound only for folders that delete mail. */
+type RetentionEnv = {
+  TRASH_RETENTION_DAYS?: string;
+  SPAM_RETENTION_DAYS?: string;
+};
+
+function retentionEnv({
+  trash = null,
+  spam = 30,
+}: EmailInfraProps["retention"] = {}) {
+  const env: RetentionEnv = {};
+
+  for (const [name, days] of [
+    ["TRASH_RETENTION_DAYS", trash],
+    ["SPAM_RETENTION_DAYS", spam],
+  ] as const) {
+    if (days === null) continue;
+
+    if (!Number.isInteger(days) || days < 1) {
+      throw new Error(
+        `Email({ retention }) takes whole days of 1 or more, not ${days}`
+      );
+    }
+
+    env[name] = String(days);
+  }
+
+  return env;
+}
+
 /** The module's Worker bindings; the Worker's `Env` is derived from them (`EmailEnv`). */
 const emailEnv = (
   props: EmailInfraProps,
@@ -141,6 +177,7 @@ const emailEnv = (
       VAPID_PUBLIC_KEY: vapid.publicKey,
       VAPID_PRIVATE_KEY: vapid.privateKey,
       ...pushSubject,
+      ...retentionEnv(props.retention),
       MAIL_STORAGE: bucket,
       /** Signs the remote image proxy's tokens (mail/remote-token.ts). */
       MAIL_REMOTE_KEY: remoteKey.text,

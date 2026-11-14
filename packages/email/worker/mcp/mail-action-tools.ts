@@ -6,6 +6,7 @@ import { apiPath, runTool } from "@open-workspace/core/module";
 import { z } from "zod";
 
 import { MAIL_ORGANIZE_SCOPE, MAIL_READ_SCOPE } from "../../shared/permissions";
+import { retentionFolderSchema } from "../mail/schemas";
 import {
   conversationIdsSchema,
   entityIdSchema,
@@ -127,6 +128,27 @@ export function registerMailActionTools(
           method: "PATCH",
           json: { type: "delete_permanently", conversationIds },
         })
+      )
+  );
+
+  tool(MAIL_ORGANIZE_SCOPE)(
+    "empty_folder",
+    {
+      title: "Empty Trash or Spam",
+      description:
+        "Permanently delete up to 100 of the oldest conversations in Trash or Spam. Returns { deleted, remaining }; call again while remaining is above 0. Requires send access.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        folder: retentionFolderSchema,
+      }),
+      annotations: { ...write, destructiveHint: true, idempotentHint: false },
+    },
+    ({ mailboxId, folder }) =>
+      runTool(() =>
+        api.json(
+          `/mail/mailboxes/${encodeURIComponent(mailboxId)}/folders/${folder}/empty`,
+          { method: "POST" }
+        )
       )
   );
 

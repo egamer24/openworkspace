@@ -249,8 +249,17 @@ export const conversations = sqliteTable(
     hasOutgoing: integer("has_outgoing", { mode: "boolean" })
       .notNull()
       .default(false),
+    /**
+     * When the conversation entered Trash or Spam, which retention counts
+     * from. Set only by moves into those two; stale anywhere else.
+     */
+    stateChangedAt: integer("state_changed_at", { mode: "timestamp_ms" }),
   },
   (table) => [
+    index("conversations_state_changed_idx").on(
+      table.mailboxState,
+      table.stateChangedAt
+    ),
     index("conversations_timeline_idx").on(
       table.timelineAt,
       table.latestEmailId

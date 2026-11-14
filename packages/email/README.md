@@ -18,8 +18,11 @@ OpenWorkspace({
 so a zone with another provider's MX records must have them removed first, or
 the deploy fails.
 
-It takes one option, `pushContact`: the `mailto:` or `https:` contact push
-services see. Without it they see the app's URL.
+It takes two options. `pushContact` is the `mailto:` or `https:` contact push
+services see; without it they see the app's URL. `retention` is how many days
+a conversation stays in Trash or Spam before it is deleted, as
+`{ trash, spam }`: Spam defaults to 30, and Trash (or a folder set to `null`)
+keeps mail until someone empties it.
 
 The module adds two permissions administrators can give to members: "Block
 senders" and "Import mail". It reads one optional secret, `SPAMHAUS_DQS_KEY`,

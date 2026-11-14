@@ -20,6 +20,7 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import { ConversationSelectionToolbar } from "./conversation-selection-toolbar";
+import { FolderCleanupBar } from "./folder-cleanup-bar";
 import { SearchField } from "./mail-app-bar";
 import { folderShowsUnreadCount } from "./mail-folders";
 import { MailboxCaption } from "./mail-mailbox-sheet";
@@ -510,6 +511,20 @@ export function ConversationList({ mail }: { mail: MailController }) {
         </div>
         <SearchField mail={mail} className="mb-2.5 h-9 md:hidden" />
       </div>
+
+      {mailbox &&
+        (activeFolder?.systemType === "trash" ||
+          activeFolder?.systemType === "spam") &&
+        activeFolder.totalCount > 0 && (
+          <FolderCleanupBar
+            mailboxId={mailbox.id}
+            folder={activeFolder.systemType}
+            folderName={folderName}
+            conversationCount={activeFolder.totalCount}
+            retentionDays={activeFolder.retentionDays}
+            canEmpty={mailbox.canSend}
+          />
+        )}
 
       <div className="@container/mail-list min-h-0 flex-1 overflow-y-auto pb-24">
         {hasConversations && !mail.listLoading && !mail.listError && (

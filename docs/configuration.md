@@ -56,8 +56,15 @@ export default Alchemy.Stack(
 | `mockAuth`    | Local development and tests only: a demo sign-in that works only on `localhost`.                                                                                 |
 | `seed`, `dev` | Local development only: SQL files to load into the database, and the host and port for `alchemy dev`.                                                            |
 
-`Email()` takes one option, `pushContact`: the `mailto:` or `https:` contact
-push services see, instead of the app's URL.
+`Email()` takes two options:
+
+- `pushContact`: the `mailto:` or `https:` contact push services see, instead
+  of the app's URL.
+- `retention`: how many days a conversation stays in Trash or Spam before it is
+  deleted permanently, as `{ trash, spam }`. Spam defaults to 30 days. Trash,
+  or a folder set to `null`, keeps mail until someone empties it. For example,
+  `Email({ retention: { trash: 30, spam: 14 } })`. Conversations already in
+  Trash or Spam when this ships count from the upgrade.
 
 ### Removing a mail domain
 

@@ -431,6 +431,19 @@ describe("read-only mailbox access", () => {
       await mailbox.getConversationSnapshot("conv_visible")
     ).not.toBeNull();
 
+    // Emptying deletes permanently too, so it needs send access.
+    const empty = await worker.fetch(
+      new Request(
+        `http://example.test/api/mail/mailboxes/${mailboxId}/folders/trash/empty`,
+        { method: "POST", headers: { cookie } }
+      )
+    );
+
+    expect(empty.status).toBe(403);
+    expect(
+      await mailbox.getConversationSnapshot("conv_visible")
+    ).not.toBeNull();
+
     const compose = await worker.fetch(
       new Request("http://example.test/api/mail/messages", {
         method: "POST",

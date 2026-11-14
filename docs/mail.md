@@ -35,6 +35,12 @@ Members of a mailbox can reorder its folders. Inbox always stays first. On
 phones, the bar at the bottom switches mailboxes and scrolls through the
 folders.
 
+Conversations in Spam are deleted permanently 30 days after they arrive
+there, by default. Trash keeps mail until someone empties it. The deployment
+sets both with `Email({ retention })` ([Configuration](configuration.md)). In
+Trash and Spam, a line above the list says how long mail stays, and members
+with send access can **Empty** the folder for everyone in the mailbox.
+
 ## Sender warnings
 
 Incoming mail shows whether the sender passed SPF, DKIM and DMARC, and warns

@@ -39,6 +39,7 @@ const folders = [
     sortOrder: 0,
     totalCount: 0,
     unreadCount: 0,
+    retentionDays: null,
     version: 0,
   },
   {
@@ -49,6 +50,7 @@ const folders = [
     sortOrder: 100,
     totalCount: 0,
     unreadCount: 0,
+    retentionDays: null,
     version: 0,
   },
 ];

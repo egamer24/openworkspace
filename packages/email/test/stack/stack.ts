@@ -12,6 +12,10 @@ export const { stack, stackName } = testWorkspaceStack({
     entry: path.join(import.meta.dirname, "worker.ts"),
     classes: [emailClasses.MAILBOX],
   },
-  // Push services need a contact; mailto: as a deployment would give.
-  modules: [Email({ pushContact: "mailto:test@example.test" })],
+  // Push services need a contact; mailto: as a deployment would give. Trash
+  // keeps mail a week, so retention.test.ts covers both folders (Spam's
+  // default is 30 days).
+  modules: [
+    Email({ pushContact: "mailto:test@example.test", retention: { trash: 7 } }),
+  ],
 });

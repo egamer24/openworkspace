@@ -128,6 +128,8 @@ import {
   nextOfficePreviewAttempt,
   prepareOfficePreviews,
 } from "./office-preview-jobs";
+import { isRetentionFolder, retentionDays, retentionRules } from "./retention";
+import type { RetentionFolder } from "./retention";
 import {
   conversations,
   emailReadStates,
@@ -185,6 +187,10 @@ const MAX_INBOUND_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_UNFINISHED_INBOUND_ATTEMPTS = 3;
 
 const ALARM_WAKE_DELAY_MS = 1000;
+
+/** Bounds one emptying or retention pass, so a huge Trash can't hold the object. */
+const RETENTION_BATCH_SIZE = 100;
+
 const PRESENCE_TTL_MS = 60_000;
 const AI_CONFIGURATION_ID = "default";
 
@@ -1306,7 +1312,11 @@ export class MailboxDO extends DurableObject<Env> {
       return known;
     });
 
-    if (moved) this.publishUpdate();
+    if (moved) {
+      this.publishUpdate();
+
+      if (isRetentionFolder(target)) this.scheduleRetention();
+    }
 
     return moved;
   }
@@ -1710,7 +1720,11 @@ export class MailboxDO extends DurableObject<Env> {
 
   /** `listFolders` with the change counter it reflects. */
   folderView(userId: string) {
-    return { folders: this.listFolders(userId), version: this.version() };
+    return {
+      folders: this.listFolders(userId),
+      version: this.version(),
+      retention: retentionDays(this.bindings),
+    };
   }
 
   getFolderCounts(userId: string, folderId: string): FolderCounts | null {
@@ -2086,8 +2100,17 @@ export class MailboxDO extends DurableObject<Env> {
       );
 
       if (placement) {
+        // The new message just moved the conversation to Inbox, so compare
+        // with where it was before.
+        const entered =
+          isRetentionFolder(placement.mailboxState) &&
+          before?.mailboxState !== placement.mailboxState;
+
         tx.update(conversations)
-          .set(placement)
+          .set({
+            ...placement,
+            stateChangedAt: entered ? new Date() : undefined,
+          })
           .where(eq(conversations.id, email.conversationId))
           .run();
       }
@@ -2466,7 +2489,11 @@ export class MailboxDO extends DurableObject<Env> {
 
       if (placement.state) {
         tx.update(conversations)
-          .set({ mailboxState: placement.state, folderId: null })
+          .set({
+            mailboxState: placement.state,
+            folderId: null,
+            stateChangedAt: new Date(),
+          })
           .where(activeConversation)
           .run();
       } else if (trustedFolder && startsConversation) {
@@ -2583,11 +2610,11 @@ export class MailboxDO extends DurableObject<Env> {
       pattern
     );
 
-    return this.state.storage.sql
+    const moved = this.state.storage.sql
       .exec<{ id: string }>(
         `
       update conversations
-      set mailbox_state = 'spam', folder_id = null
+      set mailbox_state = 'spam', folder_id = null, state_changed_at = ?
       where mailbox_state in ('active', 'archive')
         and id in (
           select message.conversation_id from emails message
@@ -2595,9 +2622,14 @@ export class MailboxDO extends DurableObject<Env> {
         )
       returning id
     `,
+        Date.now(),
         ...predicate.bindings
       )
       .toArray().length;
+
+    if (moved) this.scheduleRetention();
+
+    return moved;
   }
 
   blockSender(pattern: string, moveExisting: boolean) {
@@ -2708,7 +2740,11 @@ export class MailboxDO extends DurableObject<Env> {
       return (
         tx
           .update(conversations)
-          .set({ mailboxState: "spam", folderId: null })
+          .set({
+            mailboxState: "spam",
+            folderId: null,
+            stateChangedAt: new Date(),
+          })
           .where(
             and(
               eq(conversations.id, email.conversationId),
@@ -2722,6 +2758,8 @@ export class MailboxDO extends DurableObject<Env> {
 
     this.recentParticipantSources = null;
     this.publishUpdate();
+
+    if (moved) this.scheduleRetention();
 
     return {
       email: required(this.getEmail(email.id), "The reported email exists"),
@@ -3078,6 +3116,9 @@ export class MailboxDO extends DurableObject<Env> {
           .set({
             mailboxState: conversation.mailboxState,
             folderId: conversation.folderId,
+            stateChangedAt: isRetentionFolder(conversation.mailboxState)
+              ? new Date()
+              : undefined,
           })
           .where(eq(conversations.id, conversation.id))
           .run();
@@ -3085,6 +3126,7 @@ export class MailboxDO extends DurableObject<Env> {
     });
     this.recentParticipantSources = null;
     await this.syncInboxCounts();
+    this.scheduleRetention();
 
     return { folders: folderValues.length, emails: emailValues.length };
   }
@@ -3135,7 +3177,7 @@ export class MailboxDO extends DurableObject<Env> {
 
     if (!candidates.length) return 0;
     const assignments: string[] = [];
-    const values: (string | null)[] = [];
+    const values: (string | number | null)[] = [];
 
     // A custom folder is a classification inside the active Inbox
     // distribution, so assigning one also restores the conversation.
@@ -3146,6 +3188,14 @@ export class MailboxDO extends DurableObject<Env> {
     if (mailboxState !== undefined) {
       assignments.push("mailbox_state = ?");
       values.push(mailboxState);
+    }
+
+    // Retention counts from entering Trash or Spam, not from a move within it.
+    if (isRetentionFolder(mailboxState)) {
+      assignments.push(
+        "state_changed_at = case when mailbox_state = ? then state_changed_at else ? end"
+      );
+      values.push(mailboxState, Date.now());
     }
 
     if (update.folderId !== undefined) {
@@ -3189,12 +3239,20 @@ export class MailboxDO extends DurableObject<Env> {
       return moved;
     });
 
-    if (result.length) this.publishUpdate();
+    if (result.length) {
+      this.publishUpdate();
+
+      if (isRetentionFolder(mailboxState)) this.scheduleRetention();
+    }
 
     return result.length;
   }
 
-  async permanentlyDeleteConversations(conversationIds: string[]) {
+  /** Deletes conversations that are all in `fromState` (Trash unless emptying Spam). */
+  async permanentlyDeleteConversations(
+    conversationIds: string[],
+    fromState: RetentionFolder = "trash"
+  ) {
     const candidates = [...new Set(conversationIds)];
 
     if (!candidates.length) {
@@ -3220,7 +3278,7 @@ export class MailboxDO extends DurableObject<Env> {
 
     if (
       storedConversations.some(
-        (conversation) => conversation.mailboxState !== "trash"
+        (conversation) => conversation.mailboxState !== fromState
       )
     ) {
       return { outcome: "not_in_trash" as const, deletedCount: 0 };
@@ -3450,6 +3508,7 @@ export class MailboxDO extends DurableObject<Env> {
 
     try {
       await this.processInboundJobs(now);
+      await this.processRetention(now);
     } finally {
       // Previews of the mail just stored are queued in the same wake.
       await dispatchOfficePreviewJobs(
@@ -3820,9 +3879,14 @@ export class MailboxDO extends DurableObject<Env> {
       this.state.storage.sql
     );
 
+    const retentionAt = this.nextRetentionAt();
+
     const attemptTimes = [
       nextInbound,
       nextObjectDeletion,
+      ...(retentionAt === null
+        ? []
+        : [{ nextAttemptAt: new Date(retentionAt) }]),
       ...(officePreviewAttempt === undefined
         ? []
         : [{ nextAttemptAt: new Date(officePreviewAttempt) }]),
@@ -3912,6 +3976,89 @@ export class MailboxDO extends DurableObject<Env> {
     if (!delivered) throw new Error("Submitted message was not persisted");
 
     return delivered;
+  }
+
+  /** Permanently deletes one batch from Trash or Spam; callers repeat while `remaining > 0`. */
+  async emptyFolder(state: RetentionFolder) {
+    const ids = this.db
+      .select({ id: conversations.id })
+      .from(conversations)
+      .where(eq(conversations.mailboxState, state))
+      .orderBy(asc(conversations.timelineAt))
+      .limit(RETENTION_BATCH_SIZE)
+      .all()
+      .map((row) => row.id);
+
+    const result = ids.length
+      ? await this.permanentlyDeleteConversations(ids, state)
+      : { deletedCount: 0 };
+
+    const remaining =
+      this.db
+        .select({ count: sql<number>`count(*)` })
+        .from(conversations)
+        .where(eq(conversations.mailboxState, state))
+        .all()[0]?.count ?? 0;
+
+    return { deleted: result.deletedCount, remaining };
+  }
+
+  private async processRetention(now: number) {
+    for (const { state, ms } of retentionRules(this.bindings)) {
+      const expired = this.db
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.mailboxState, state),
+            lte(conversations.stateChangedAt, new Date(now - ms))
+          )
+        )
+        .orderBy(asc(conversations.stateChangedAt))
+        .limit(RETENTION_BATCH_SIZE)
+        .all()
+        .map((row) => row.id);
+
+      if (expired.length) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Trash then Spam, one bounded batch each
+        await this.permanentlyDeleteConversations(expired, state);
+      }
+    }
+  }
+
+  /** When the oldest Trash or Spam conversation reaches its retention limit. */
+  private nextRetentionAt() {
+    const due = retentionRules(this.bindings).flatMap(({ state, ms }) => {
+      const oldest = this.db
+        .select({ at: conversations.stateChangedAt })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.mailboxState, state),
+            isNotNull(conversations.stateChangedAt)
+          )
+        )
+        .orderBy(asc(conversations.stateChangedAt))
+        .limit(1)
+        .all()[0]?.at;
+
+      return oldest ? [oldest.getTime() + ms] : [];
+    });
+
+    return due.length > 0 ? Math.min(...due) : null;
+  }
+
+  /**
+   * Call after mail enters Trash or Spam: wakes when the oldest there is due.
+   * Only moves the alarm earlier, so it can run beside `scheduleRemainingWork`.
+   */
+  private scheduleRetention() {
+    const at = this.nextRetentionAt();
+
+    if (at === null) return;
+    this.state.waitUntil(
+      this.scheduleAlarm(Math.max(Date.now() + ALARM_WAKE_DELAY_MS, at))
+    );
   }
 
   private async scheduleAlarm(at: number) {

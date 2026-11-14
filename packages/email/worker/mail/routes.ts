@@ -32,6 +32,7 @@ import {
 } from "../../shared/permissions";
 import { mailboxStub } from "../mailbox";
 import type { MailboxDO } from "../mailbox";
+import { isRetentionFolder } from "../mailbox/retention";
 import type { Email } from "../mailbox/schema";
 import {
   accessibleMailbox,
@@ -90,6 +91,7 @@ import {
   recipientSuggestionQuerySchema,
   renameFolderSchema,
   reorderFoldersSchema,
+  retentionFolderSchema,
   replySchema,
   uploadIdSchema,
 } from "./schemas";
@@ -375,6 +377,10 @@ export function folderListView(view: ReturnType<MailboxDO["folderView"]>) {
       sortOrder: folder.sortOrder,
       totalCount: folder.totalCount,
       unreadCount: folder.unreadCount,
+      /** Days mail stays in Trash or Spam before it is deleted; null keeps it. */
+      retentionDays: isRetentionFolder(folder.systemType)
+        ? view.retention[folder.systemType]
+        : null,
     })),
   };
 }
@@ -613,6 +619,30 @@ export const mailRoutes = new Hono<AppEnv>()
           c.req.valid("json")
         ),
       });
+    }
+  )
+  .post(
+    "/mailboxes/:id/folders/:folder/empty",
+    oauthScope(MAIL_ORGANIZE_SCOPE),
+    zValidator(
+      "param",
+      z.object({ id: z.string(), folder: retentionFolderSchema })
+    ),
+    async (c) => {
+      const { id: mailboxId, folder } = c.req.valid("param");
+
+      if (!(await accessibleMailbox(c, mailboxId, "send"))) {
+        return apiError(
+          c,
+          403,
+          "FORBIDDEN",
+          "Send access is required to delete conversations permanently"
+        );
+      }
+
+      const result = await mailboxStub(c.env, mailboxId).emptyFolder(folder);
+
+      return c.json({ ok: true as const, ...result });
     }
   )
   .post(

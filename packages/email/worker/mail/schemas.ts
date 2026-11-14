@@ -32,6 +32,8 @@ export const mailboxAiConfigurationSchema = z.object({
   confidenceThreshold: z.number().int().min(50).max(100),
 });
 
+export const retentionFolderSchema = z.enum(["trash", "spam"]);
+
 /** Every folder but Inbox, in order: the movable system folders and the custom ones. */
 export const reorderFoldersSchema = z.object({
   folderIds: z
