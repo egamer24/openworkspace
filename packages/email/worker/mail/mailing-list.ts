@@ -86,7 +86,7 @@ async function mayPost(
   const orm = createDb(db);
 
   const [mailbox] = await orm
-    .select({ id: mailboxes.id })
+    .select({ id: mailboxes.id, aliasOf: mailboxes.aliasOf })
     .from(mailboxes)
     .where(sql`${mailboxAddressSql} = ${sender}`)
     .limit(1);
@@ -108,7 +108,8 @@ async function mayPost(
     )
     .where(
       and(
-        eq(mailboxAccess.mailboxId, mailbox.id),
+        // Posting from an alias counts as posting from its mailbox.
+        eq(mailboxAccess.mailboxId, mailbox.aliasOf ?? mailbox.id),
         eq(mailboxAccess.canSend, true)
       )
     )

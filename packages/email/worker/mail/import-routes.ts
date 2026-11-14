@@ -12,7 +12,7 @@ import {
   zValidator,
 } from "@open-workspace/core/module";
 import type { Database, AppEnv } from "@open-workspace/core/module";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
@@ -153,7 +153,13 @@ async function importMailbox(db: Database, mailboxId: string) {
       ownerUserId: mailboxes.ownerUserId,
     })
     .from(mailboxes)
-    .where(eq(mailboxes.id, mailboxId))
+    .where(
+      and(
+        eq(mailboxes.id, mailboxId),
+        // Aliases and forwards keep no mail of their own.
+        inArray(mailboxes.delivery, ["inbox", "list"])
+      )
+    )
     .limit(1);
 
   return mailbox ?? null;

@@ -69,6 +69,11 @@ export type EmailInfraProps = {
 const emailSecrets = [
   // Spamhaus Data Query Service key, for blocklist checks.
   "SPAMHAUS_DQS_KEY",
+  // Email Routing's API (worker/mail/email-routing.ts). Deployed, `Email()`
+  // mints and binds them; under `alchemy dev` they're bound only when set,
+  // as the stack tests do for their fake API.
+  "EMAIL_ROUTING_ACCOUNT_ID",
+  "EMAIL_ROUTING_API_TOKEN",
 ] as const;
 
 function emailResources() {
@@ -113,6 +118,34 @@ const mailStorage = (origin: string, dev: boolean) => {
 
   return Cloudflare.R2.Bucket("MailStorage", props);
 };
+
+/**
+ * An account API token that may only manage Email Routing destination
+ * addresses, for forwards (worker/mail/email-routing.ts), and its account.
+ * Minted when deployed; `alchemy dev` has no Email Routing to call.
+ */
+const emailRoutingToken = () =>
+  Effect.gen(function* () {
+    const { accountId } = yield* yield* Cloudflare.CloudflareEnvironment;
+
+    const token = yield* Cloudflare.ApiToken.AccountApiToken(
+      "EmailRoutingToken",
+      {
+        policies: [
+          {
+            effect: "allow",
+            permissionGroups: ["Email Routing Addresses Write"],
+            resources: { [`com.cloudflare.api.account.${accountId}`]: "*" },
+          },
+        ],
+      }
+    );
+
+    return {
+      EMAIL_ROUTING_ACCOUNT_ID: token.accountId,
+      EMAIL_ROUTING_API_TOKEN: token.value,
+    };
+  });
 
 /** The contact push services see, bound only when configured. */
 type PushSubjectEnv = { VAPID_SUBJECT?: string };
@@ -166,6 +199,10 @@ const emailEnv = (
 
     if (props.pushContact) pushSubject.VAPID_SUBJECT = props.pushContact;
 
+    const emailRouting: Partial<
+      Effect.Success<ReturnType<typeof emailRoutingToken>>
+    > = dev ? {} : yield* emailRoutingToken();
+
     return {
       /**
        * S3 credentials for the mail bucket alone, as JSON, for presigned
@@ -178,6 +215,7 @@ const emailEnv = (
       VAPID_PRIVATE_KEY: vapid.privateKey,
       ...pushSubject,
       ...retentionEnv(props.retention),
+      ...emailRouting,
       MAIL_STORAGE: bucket,
       /** Signs the remote image proxy's tokens (mail/remote-token.ts). */
       MAIL_REMOTE_KEY: remoteKey.text,

@@ -27,9 +27,11 @@ const MAILBOX_FANOUT = 20;
 
 /** Moves existing mail from a newly blocked pattern to Spam in every mailbox. */
 async function moveBlockedMailToSpam(env: Env, pattern: string) {
+  // Only mailboxes keep mail; lists, aliases and forwards have none.
   const rows = await createDb(env.DB)
     .select({ id: mailboxes.id })
-    .from(mailboxes);
+    .from(mailboxes)
+    .where(eq(mailboxes.delivery, "inbox"));
 
   let conversations = 0;
   let affectedMailboxes = 0;

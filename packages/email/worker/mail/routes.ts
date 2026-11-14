@@ -68,12 +68,13 @@ import {
 import {
   OutgoingContextError,
   resolveForwardContext,
+  mailboxAliases,
   resolveReplyContext,
 } from "./outgoing-context";
 import { participantLabels } from "./participants";
 import { signR2GetUrl } from "./r2-presigned-urls";
 import { signRemoteToken } from "./remote-token";
-import { buildReplyPlan } from "./reply-plan";
+import { buildReplyPlan, replyAlias } from "./reply-plan";
 import { mailSafetyRoutes } from "./safety-routes";
 import {
   attachmentPreflightSchema,
@@ -928,21 +929,23 @@ export const mailRoutes = new Hono<AppEnv>()
         ...new Set(view.readStates.map((readState) => readState.userId)),
       ].filter((userId) => userId !== currentUserId);
 
-      const [readers, [identity, workspaceBlocks], bodies] = await Promise.all([
-        otherReaderIds.length
-          ? timed(c, "d1", "readers", () =>
-              listMailboxUsersByIds(c.env.DB, mailboxId, otherReaderIds)
+      const [readers, [identity, workspaceBlocks], bodies, aliases] =
+        await Promise.all([
+          otherReaderIds.length
+            ? timed(c, "d1", "readers", () =>
+                listMailboxUsersByIds(c.env.DB, mailboxId, otherReaderIds)
+              )
+            : [],
+          workspace,
+          Promise.all(
+            view.messages.map((stored) =>
+              stored.bodyHtmlR2Key
+                ? readStoredBody(c, stored.bodyHtmlR2Key)
+                : null
             )
-          : [],
-        workspace,
-        Promise.all(
-          view.messages.map((stored) =>
-            stored.bodyHtmlR2Key
-              ? readStoredBody(c, stored.bodyHtmlR2Key)
-              : null
-          )
-        ),
-      ]);
+          ),
+          timed(c, "d1", "aliases", () => mailboxAliases(c.env.DB, mailboxId)),
+        ]);
 
       /** One proxy token per remote image URL in the HTML (remote-token.ts). */
       const remoteTokens = async (bodyHtml: string) =>
@@ -1015,7 +1018,8 @@ export const mailRoutes = new Hono<AppEnv>()
           return {
             ...toMessageDetail(
               email,
-              access.address,
+              // Mail that came through an alias is answered from it.
+              replyAlias(email, aliases)?.address ?? access.address,
               identity,
               view.history,
               safety,
@@ -1731,8 +1735,9 @@ export const mailRoutes = new Hono<AppEnv>()
           related: context.source,
           forwarded: null,
           includeRelatedContext: context.includeRelatedContext,
-          fromAddress: access.address,
-          fromName: access.displayName,
+          // Mail that came through an alias is answered from that alias.
+          fromAddress: context.from?.address ?? access.address,
+          fromName: context.from?.displayName ?? access.displayName,
           defer: (task) => c.executionCtx.waitUntil(task),
         });
 
