@@ -104,17 +104,18 @@ export const uploadIdSchema = z
   .max(80)
   .regex(/^upl_[a-f0-9]{32}$/u, "Attachment upload id is invalid");
 
+const contentIdSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(255)
+  .regex(/^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+$/u, "Content ID is invalid");
+
 export const outboundAttachmentSchema = z
   .object({
     uploadId: uploadIdSchema,
     disposition: z.enum(["attachment", "inline"]).default("attachment"),
-    contentId: z
-      .string()
-      .trim()
-      .min(1)
-      .max(255)
-      .regex(/^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+$/u, "Content ID is invalid")
-      .optional(),
+    contentId: contentIdSchema.optional(),
   })
   .superRefine((attachment, context) => {
     if (attachment.disposition === "inline" && !attachment.contentId) {
@@ -134,8 +135,28 @@ export const outboundAttachmentSchema = z
     }
   });
 
+export const signatureSchema = z.object({
+  /** Stored as given; empty text with no images removes the signature. */
+  html: z.string().max(20_000),
+  text: z.string().max(10_000),
+  /** The composer uploads behind the `cid:` images in `html`. */
+  images: z
+    .array(z.object({ uploadId: uploadIdSchema, contentId: contentIdSchema }))
+    .max(10)
+    .default([]),
+  /** The mailbox the images were uploaded through (uploads are per mailbox). */
+  uploadMailboxId: z.string().min(1).max(80).optional(),
+  useOnNew: z.boolean().default(true),
+  useOnReply: z.boolean().default(true),
+});
+
 export const outboundMessageContentFields = {
   bodyText: z.string().max(500_000).default(""),
+  /**
+   * Appends the signature that applies: the team address's, or the sender's
+   * own for their own mailbox. The web app always asks.
+   */
+  includeSignature: z.boolean().optional(),
   bodyHtml: z.string().max(1_000_000).optional(),
   attachments: z
     .array(outboundAttachmentSchema)

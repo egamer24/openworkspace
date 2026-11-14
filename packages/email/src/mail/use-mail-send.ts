@@ -16,6 +16,8 @@ type MessageContent = {
   mailboxId: string;
   bodyText: string;
   bodyHtml?: string;
+  /** The Worker appends the signature; the plain-text reply box asks for it. */
+  includeSignature?: boolean;
   uploadedAttachments?: SubmittedComposerUpload[];
 };
 
@@ -85,6 +87,7 @@ export function useMailSend() {
         bodyText: input.bodyText,
         bodyHtml: input.bodyHtml,
         attachments: input.uploadedAttachments ?? [],
+        includeSignature: input.includeSignature,
       };
 
       if (input.kind === "reply") {

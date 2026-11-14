@@ -6,6 +6,7 @@ import {
   composerAttachmentLimitError,
   isComposerInlineImageContentType,
 } from "../../shared/mail";
+import type { SignatureImage } from "../db/schema";
 import type { StoredAttachment } from "../mailbox/model";
 import type { Email, NewEmail } from "../mailbox/schema";
 import {
@@ -31,6 +32,8 @@ const DOWNLOAD_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 export type OutgoingMessageInput = z.infer<typeof composeSchema> & {
   /** Set by the route from the authenticated session. */
   userId: string;
+  /** The appended signature's images (signatures.ts), sent inline like composer images. */
+  signatureImages?: (SignatureImage & { r2Key: string })[];
 };
 
 type PreparedAttachment = StoredAttachment & {
@@ -43,7 +46,13 @@ export class ComposerAttachmentLimitError extends Error {}
 
 type OutgoingAttachmentDraft = Pick<
   OutgoingMessageInput,
-  "attachments" | "bodyHtml" | "bodyText" | "mailboxId" | "subject" | "userId"
+  | "attachments"
+  | "bodyHtml"
+  | "bodyText"
+  | "mailboxId"
+  | "subject"
+  | "userId"
+  | "signatureImages"
 >;
 
 export async function discardPreparedObjects(env: Env, storageKeys: string[]) {
@@ -163,18 +172,41 @@ export async function messageIdForRequest(
   return `msg_${await hashToken(`${mailboxId}:${requestId}`)}`;
 }
 
-function loadPreparedComposerAttachments(input: {
+async function loadPreparedComposerAttachments(input: {
   env: Env;
   compose: OutgoingAttachmentDraft;
   storagePrefix: string;
   finalized: boolean;
-}) {
+}): Promise<PreparedAttachment[]> {
   const loadUpload = input.finalized
     ? loadComposerUpload
     : loadComposerUploadMetadata;
 
-  return Promise.all(
-    input.compose.attachments.map(async (file, index) => {
+  const uploads = input.compose.attachments;
+
+  const signatureImages = (input.compose.signatureImages ?? []).map(
+    (image, offset) => {
+      const id = `att_${uploads.length + offset + 1}`;
+
+      return {
+        id,
+        sourceObjectKey: image.r2Key,
+        r2Key: `${input.storagePrefix}/attachments/${id}`,
+        filename: image.filename,
+        contentType: image.contentType,
+        size: image.size,
+        contentId: image.contentId,
+        disposition: "inline",
+        delivery: "attached",
+        downloadTokenHash: null,
+        downloadExpiresAt: null,
+        downloadUrl: null,
+      } satisfies PreparedAttachment;
+    }
+  );
+
+  const uploaded = await Promise.all(
+    uploads.map(async (file, index) => {
       try {
         const upload = await loadUpload({
           env: input.env,
@@ -216,6 +248,8 @@ function loadPreparedComposerAttachments(input: {
       }
     })
   );
+
+  return [...uploaded, ...signatureImages];
 }
 
 function planOutgoingAttachments(input: {

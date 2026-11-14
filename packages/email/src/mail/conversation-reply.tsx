@@ -39,6 +39,7 @@ import type { RecipientFieldValue } from "./composer-recipients";
 import { useComposerSession } from "./composer-session";
 import { RecipientCombobox } from "./recipient-combobox";
 import { ReplyToWarning } from "./reply-to-warning";
+import { ReplySignature } from "./signature-preview";
 import type {
   Mailbox,
   MessageDetail,
@@ -92,6 +93,12 @@ export function ConversationReply({
   const initialAction = findAction(parent, mode);
   const fieldsSource = `${mode}\0${parent.id}`;
   const [body, setBody] = useState("");
+
+  // Shown under the box and appended by the Worker, unless removed.
+  const [signatureRemoved, setSignatureRemoved] = useState(false);
+
+  const signature = mailbox?.signature?.useOnReply ? mailbox.signature : null;
+  const includeSignature = Boolean(signature) && !signatureRemoved;
   const [cc, setCc] = useState(() => recipientField(initialAction?.cc ?? []));
   const [bcc, setBcc] = useState<RecipientFieldValue>(EMPTY_RECIPIENT_FIELD);
   const [showCc, setShowCc] = useState(Boolean(initialAction?.cc.length));
@@ -146,11 +153,13 @@ export function ConversationReply({
     action,
     recipients,
     body,
+    includeSignature,
     uploadLimitError,
     uploadsPending,
     uploadsFailed,
     onSuccess: (result) => {
       setBody("");
+      setSignatureRemoved(false);
       setBcc(EMPTY_RECIPIENT_FIELD);
       onSent(result);
     },
@@ -378,6 +387,13 @@ export function ConversationReply({
                 : `Reply to ${action.to.join(", ")}`
             }
           />
+          {signature && !signatureRemoved ? (
+            <ReplySignature
+              signature={signature}
+              disabled={busy}
+              onRemove={() => setSignatureRemoved(true)}
+            />
+          ) : null}
           <InputGroupAddon
             align="block-end"
             className="border-border border-t px-2 py-1.5"

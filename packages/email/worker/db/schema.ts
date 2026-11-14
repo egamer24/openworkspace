@@ -1,6 +1,7 @@
 import { mailboxes, oidcGrants, users } from "@open-workspace/core/module";
 import { sql } from "drizzle-orm";
 import {
+  check,
   foreignKey,
   index,
   integer,
@@ -31,6 +32,55 @@ export const mailboxNotificationPreferences = sqliteTable(
     index("mailbox_notification_preferences_user_idx").on(table.userId),
   ]
 );
+
+/**
+ * Signatures: a person's own, used from their own mailboxes, or a team
+ * address's, used by everyone sending from it. Exactly one owner is set.
+ * Images are in R2 under `signatures/<owner id>/<content id>`.
+ */
+export const signatures = sqliteTable(
+  "signatures",
+  {
+    userId: text("user_id").references(() => users.id, {
+      onDelete: "cascade",
+    }),
+    mailboxId: text("mailbox_id").references(() => mailboxes.id, {
+      onDelete: "cascade",
+    }),
+    /** As the editor wrote it; images are `cid:` references. */
+    html: text("html").notNull(),
+    /** The editor's plain-text version, for text bodies. */
+    text: text("text").notNull(),
+    images: text("images", { mode: "json" })
+      .$type<SignatureImage[]>()
+      .notNull(),
+    useOnNew: integer("use_on_new", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    useOnReply: integer("use_on_reply", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+      .notNull()
+      .default(sql`(unixepoch() * 1000)`),
+  },
+  (table) => [
+    uniqueIndex("signatures_user_idx").on(table.userId),
+    uniqueIndex("signatures_mailbox_idx").on(table.mailboxId),
+    check(
+      "signatures_one_owner",
+      sql`(${table.userId} is null) <> (${table.mailboxId} is null)`
+    ),
+  ]
+);
+
+/** An inline image of a signature, sent as a `cid:` attachment. */
+export type SignatureImage = {
+  contentId: string;
+  filename: string;
+  contentType: string;
+  size: number;
+};
 
 /**
  * Browsers that get new-mail notifications, one row per device, bound to

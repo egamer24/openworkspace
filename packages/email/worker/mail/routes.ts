@@ -98,6 +98,8 @@ import {
 import { cachedWorkspaceIdentity, spamhausDqsKey } from "./security-settings";
 import type { WorkspaceIdentity } from "./security-settings";
 import { storedSenderIntel } from "./sender-intel";
+import { signatureRoutes } from "./signature-routes";
+import { withSignature } from "./signatures";
 import {
   createComposerUploadIntent,
   discardComposerUploads,
@@ -356,10 +358,33 @@ function outgoingFailure(c: Parameters<typeof apiError>[0], cause: unknown) {
 export function mailboxListView(rows: MailboxListRow[]) {
   return {
     mailboxes: rows.map(
-      ({ ownerUserId, isPrimary: _isPrimary, ...mailbox }) => ({
-        ...mailbox,
-        kind: mailboxKind(ownerUserId),
-      })
+      ({
+        ownerUserId,
+        isPrimary: _isPrimary,
+        signatureUserId,
+        signatureMailboxId,
+        signatureHtml,
+        signatureUseOnNew,
+        signatureUseOnReply,
+        ...mailbox
+      }) => {
+        const signatureOwnerId = signatureUserId ?? signatureMailboxId;
+
+        return {
+          ...mailbox,
+          kind: mailboxKind(ownerUserId),
+          /** The signature sending from here adds (signatures.ts), if any. */
+          signature:
+            signatureOwnerId && signatureHtml !== null
+              ? {
+                  ownerId: signatureOwnerId,
+                  html: signatureHtml,
+                  useOnNew: signatureUseOnNew ?? true,
+                  useOnReply: signatureUseOnReply ?? true,
+                }
+              : null,
+        };
+      }
     ),
   };
 }
@@ -1656,12 +1681,20 @@ export const mailRoutes = new Hono<AppEnv>()
     oauthScope(MAIL_SEND_SCOPE),
     zValidator("json", composeSchema),
     async (c) => {
-      const input = c.req.valid("json");
-      const access = await accessibleMailbox(c, input.mailboxId, "send");
+      const body = c.req.valid("json");
+      const access = await accessibleMailbox(c, body.mailboxId, "send");
 
       if (!access) {
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
+
+      const input = await withSignature({
+        env: c.env,
+        sender: c.get("user"),
+        mailbox: access,
+        kind: "new",
+        message: body,
+      });
 
       try {
         const submission = await submitOutgoing({
@@ -1694,12 +1727,20 @@ export const mailRoutes = new Hono<AppEnv>()
     oauthScope(MAIL_SEND_SCOPE),
     zValidator("json", replySchema),
     async (c) => {
-      const input = c.req.valid("json");
-      const access = await accessibleMailbox(c, input.mailboxId, "send");
+      const body = c.req.valid("json");
+      const access = await accessibleMailbox(c, body.mailboxId, "send");
 
       if (!access) {
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
+
+      const input = await withSignature({
+        env: c.env,
+        sender: c.get("user"),
+        mailbox: access,
+        kind: "reply",
+        message: body,
+      });
 
       try {
         const context = await resolveReplyContext({
@@ -1724,6 +1765,7 @@ export const mailRoutes = new Hono<AppEnv>()
             bodyText: input.bodyText,
             bodyHtml: input.bodyHtml,
             attachments: input.attachments,
+            signatureImages: input.signatureImages,
           },
           conversationId: context.detached
             ? createId("conv")
@@ -1750,12 +1792,20 @@ export const mailRoutes = new Hono<AppEnv>()
     oauthScope(MAIL_SEND_SCOPE),
     zValidator("json", forwardSchema),
     async (c) => {
-      const input = c.req.valid("json");
-      const access = await accessibleMailbox(c, input.mailboxId, "send");
+      const body = c.req.valid("json");
+      const access = await accessibleMailbox(c, body.mailboxId, "send");
 
       if (!access) {
         return apiError(c, 403, "FORBIDDEN", "Send access is required");
       }
+
+      const input = await withSignature({
+        env: c.env,
+        sender: c.get("user"),
+        mailbox: access,
+        kind: "reply",
+        message: body,
+      });
 
       try {
         const context = await resolveForwardContext({
@@ -1790,4 +1840,5 @@ export const mailRoutes = new Hono<AppEnv>()
       }
     }
   )
-  .route("/", mailSafetyRoutes);
+  .route("/", mailSafetyRoutes)
+  .route("/", signatureRoutes);

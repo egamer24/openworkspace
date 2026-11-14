@@ -24,6 +24,17 @@ Under **Teams** you create team addresses. Each one is either:
 - a mailing list, which copies each message into every member's primary
   mailbox.
 
+Each shared inbox can have one signature, set in its address's editor under
+**Teams**: everyone sending from it gets the same one, with `{name}` replaced
+by the sender's name. A shared inbox without one adds no signature. Your own
+signature, under **Settings → Signature**, goes on mail from your own
+addresses. Both can hold images and can be left off new messages or off
+replies and forwards. A new message or forward opens with the
+signature already in it, so you can change or delete it for that message. A
+reply shows it, with its images, under the reply box: it's added when you
+send, and you can remove it for that reply but not edit it. API callers ask for
+it with `includeSignature: true`.
+
 The Everyone team includes everyone, at `all@`. You also use teams to choose
 who can sign in to each [single sign-on app](sso.md).
 
@@ -89,15 +100,16 @@ simply expires keeps them.
 
 ## Settings
 
-| Page           | What it holds                                                                                 |
-| -------------- | --------------------------------------------------------------------------------------------- |
-| Profile        | Your profile photo (JPEG, PNG, WebP or GIF, up to 2 MB)                                       |
-| Appearance     | Light, dark, or your device's theme                                                           |
-| Sessions       | Where you're signed in. Revoke a session to sign that browser out and stop its notifications. |
-| MCP            | How to connect an AI agent ([MCP and JMAP](mcp-and-jmap.md))                                  |
-| Connected apps | The apps you approved ([MCP and JMAP](mcp-and-jmap.md#connected-apps))                        |
-| Notifications  | Push notifications on this device, and which mailboxes send them                              |
-| Mail apps      | The address for mail apps ([MCP and JMAP](mcp-and-jmap.md#connect-a-jmap-mail-client))        |
+| Page           | What it holds                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------ |
+| Profile        | Your profile photo (JPEG, PNG, WebP or GIF, up to 2 MB)                                                |
+| Appearance     | Light, dark, or your device's theme                                                                    |
+| Sessions       | Where you're signed in. Revoke a session to sign that browser out and stop its notifications.          |
+| MCP            | How to connect an AI agent ([MCP and JMAP](mcp-and-jmap.md))                                           |
+| Connected apps | The apps you approved ([MCP and JMAP](mcp-and-jmap.md#connected-apps))                                 |
+| Notifications  | Push notifications on this device, and which mailboxes send them                                       |
+| Signature      | Your signature for mail from your own addresses, and whether new messages, replies and forwards get it |
+| Mail apps      | The address for mail apps ([MCP and JMAP](mcp-and-jmap.md#connect-a-jmap-mail-client))                 |
 
 ## Administration
 

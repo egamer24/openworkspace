@@ -1,7 +1,13 @@
 import { preloadable } from "@open-workspace/core/ui";
-import type { ClientModule } from "@open-workspace/core/ui";
-import { Bell, Mail, MonitorSmartphone, ShieldBan } from "lucide-react";
-import { lazy } from "react";
+import type { ClientModule, TeamAddress } from "@open-workspace/core/ui";
+import {
+  Bell,
+  Mail,
+  MonitorSmartphone,
+  PenLine,
+  ShieldBan,
+} from "lucide-react";
+import { lazy, Suspense } from "react";
 
 import { MAIL_ROUTE } from "../shared/mail-path";
 import { EMAIL_MODULE } from "../shared/module";
@@ -25,6 +31,21 @@ const mailBackground = preloadable(() =>
 
 const MailboxRoute = mailboxRoute.Component;
 
+const TeamSignature = lazy(() =>
+  import("./admin/team-signature").then((module) => ({
+    default: module.TeamSignature,
+  }))
+);
+
+// Core renders team address sections without a Suspense boundary of their own.
+function TeamSignatureSection({ address }: { address: TeamAddress }) {
+  return (
+    <Suspense fallback={null}>
+      <TeamSignature address={address} />
+    </Suspense>
+  );
+}
+
 const mail: ClientModule = {
   name: EMAIL_MODULE,
   home: { label: "mail", Component: MailboxRoute },
@@ -43,6 +64,17 @@ const mail: ClientModule = {
       ),
     },
     {
+      id: "signature",
+      label: "Signature",
+      description: "Added to messages you send from your own mailboxes.",
+      Icon: PenLine,
+      Component: lazy(() =>
+        import("./settings/signature-page").then((module) => ({
+          default: module.SignatureSettings,
+        }))
+      ),
+    },
+    {
       id: "mail-apps",
       label: "Mail apps",
       description: "Connect a JMAP mail app with your account.",
@@ -54,6 +86,7 @@ const mail: ClientModule = {
       ),
     },
   ],
+  teamAddress: [{ id: "signature", Component: TeamSignatureSection }],
   admin: [
     {
       id: "blocked-senders",

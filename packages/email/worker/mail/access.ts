@@ -13,11 +13,11 @@ import type {
   AppEnv,
   Database,
 } from "@open-workspace/core/module";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import type { Context } from "hono";
 import { z } from "zod";
 
-import { mailboxCounts, mailboxReadCounts } from "../db/schema";
+import { mailboxCounts, mailboxReadCounts, signatures } from "../db/schema";
 
 const accessColumns = {
   id: mailboxes.id,
@@ -41,6 +41,11 @@ const listColumns = {
   version: sql<number>`coalesce(${mailboxCounts.version}, 0)`.as(
     "counts_version"
   ),
+  signatureUserId: signatures.userId,
+  signatureMailboxId: signatures.mailboxId,
+  signatureHtml: signatures.html,
+  signatureUseOnNew: signatures.useOnNew,
+  signatureUseOnReply: signatures.useOnReply,
 };
 
 const inboxCountsJoin = eq(mailboxCounts.mailboxId, mailboxAccess.mailboxId);
@@ -48,6 +53,18 @@ const inboxCountsJoin = eq(mailboxCounts.mailboxId, mailboxAccess.mailboxId);
 const readCountsJoin = and(
   eq(mailboxReadCounts.mailboxId, mailboxAccess.mailboxId),
   eq(mailboxReadCounts.userId, mailboxAccess.userId)
+);
+
+/**
+ * The signature sending from each mailbox adds: a team address's own, or the
+ * listing person's for their own mailbox (signatures.ts, signatureOwner).
+ */
+const signatureJoin = or(
+  and(isNull(mailboxes.ownerUserId), eq(signatures.mailboxId, mailboxes.id)),
+  and(
+    eq(mailboxes.ownerUserId, mailboxAccess.userId),
+    eq(signatures.userId, mailboxAccess.userId)
+  )
 );
 
 const listOrder = [
@@ -70,6 +87,11 @@ export const mailboxListRowSchema = accessRowSchema.extend({
   isPrimary: z.boolean(),
   unreadCount: z.number(),
   version: z.number(),
+  signatureUserId: z.string().nullable(),
+  signatureMailboxId: z.string().nullable(),
+  signatureHtml: z.string().nullable(),
+  signatureUseOnNew: z.boolean().nullable(),
+  signatureUseOnReply: z.boolean().nullable(),
 });
 
 export type MailboxListRow = z.infer<typeof mailboxListRowSchema>;
@@ -99,6 +121,7 @@ function listQuery(db: Database, userId: string) {
     .innerJoin(mailboxes, eq(mailboxAccess.mailboxId, mailboxes.id))
     .leftJoin(mailboxCounts, inboxCountsJoin)
     .leftJoin(mailboxReadCounts, readCountsJoin)
+    .leftJoin(signatures, signatureJoin)
     .where(eq(mailboxAccess.userId, userId))
     .orderBy(...listOrder);
 }
@@ -127,6 +150,7 @@ export function sessionMailboxListQuery(
     .innerJoin(mailboxes, eq(mailboxAccess.mailboxId, mailboxes.id))
     .leftJoin(mailboxCounts, inboxCountsJoin)
     .leftJoin(mailboxReadCounts, readCountsJoin)
+    .leftJoin(signatures, signatureJoin)
     .orderBy(...listOrder);
 }
 

@@ -1,3 +1,4 @@
+import { useAuth } from "@open-workspace/core/ui";
 import {
   useEffect,
   useEffectEvent,
@@ -10,6 +11,7 @@ import type { DragEvent, RefObject } from "react";
 import { toast } from "sonner";
 
 import { forwardSubject } from "../../shared/mail";
+import { signatureHtmlWithName } from "../../shared/signature";
 import {
   ComposeWindowFooter,
   ComposeWindowHeader,
@@ -25,6 +27,7 @@ import type { RecipientFieldValue } from "./composer-recipients";
 import { useComposerSession } from "./composer-session";
 import { isInlineComposerImage } from "./composer-upload-client";
 import { ReplyToWarning } from "./reply-to-warning";
+import { signatureEditorHtml } from "./signature-content";
 import type { Mailbox, MessageDetail } from "./types";
 import { useComposeSubmission } from "./use-compose-submission";
 import { useComposerAttachmentPreflight } from "./use-composer-attachment-preflight";
@@ -201,6 +204,26 @@ export function ComposeWindow({
     mailbox.id,
     forwardedMessage?.attachments
   );
+
+  const { user } = useAuth();
+  const signing = useRef(false);
+
+  // The mailbox's signature goes in as ordinary, editable content, once its
+  // images are uploaded. The window opens empty, so it is never added twice.
+  useEffect(() => {
+    const { signature } = mailbox;
+
+    if (signing.current || !signature) return;
+    signing.current = true;
+
+    if (!(forwardedMessage ? signature.useOnReply : signature.useOnNew)) return;
+
+    void signatureEditorHtml(
+      session,
+      signature.ownerId,
+      signatureHtmlWithName(signature.html, user?.name ?? "")
+    ).then((html) => editor.current?.appendHtml(html));
+  }, [forwardedMessage, mailbox, session, user]);
 
   const recipients = validateComposerRecipients({
     to,

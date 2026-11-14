@@ -18,6 +18,7 @@ const mailboxes = [
     canSend: true,
     unreadCount: 0,
     version: 0,
+    signature: null,
   },
   {
     id: "mailbox-read-only",
@@ -27,6 +28,7 @@ const mailboxes = [
     canSend: false,
     unreadCount: 0,
     version: 0,
+    signature: null,
   },
 ];
 

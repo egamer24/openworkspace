@@ -36,6 +36,8 @@ export type ComposerEditorHandle = {
   insertAssets: (assets: ComposerAssetRecord[], position?: number) => void;
   reconcileAssets: () => void;
   removeAsset: (assetId: string) => boolean;
+  /** Adds `html` after everything else, leaving the cursor where it is. */
+  appendHtml: (html: string) => void;
   focus: () => void;
 };
 
@@ -52,6 +54,12 @@ export const ComposerEditor = forwardRef<
     onSubmitShortcut: () => void;
     dragging: boolean;
     disabled: boolean;
+    /** What the editor opens with, e.g. a saved signature; read once. */
+    initialHtml?: string;
+    /** The editor's accessible name; read once. */
+    label?: string;
+    /** Read once. */
+    placeholder?: string;
   }
 >(function ComposerEditor(
   {
@@ -64,6 +72,9 @@ export const ComposerEditor = forwardRef<
     onSubmitShortcut,
     dragging,
     disabled,
+    initialHtml = "",
+    label = "Message body",
+    placeholder = "Write a message",
   },
   ref
 ) {
@@ -102,11 +113,11 @@ export const ComposerEditor = forwardRef<
         },
         strike: false,
       }),
-      Placeholder.configure({ placeholder: "Write a message" }),
+      Placeholder.configure({ placeholder }),
       // Read once, when the editor is created: pass a stable function.
       ComposerAsset.configure({ session, onAssetsChanged: onAssetsChange }),
     ],
-    content: "",
+    content: initialHtml,
     editorProps: {
       attributes: {
         class: [
@@ -121,7 +132,7 @@ export const ComposerEditor = forwardRef<
           "[&_.is-editor-empty:first-child::before]:pointer-events-none [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:text-muted-foreground [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
         ].join(" "),
         role: "textbox",
-        "aria-label": "Message body",
+        "aria-label": label,
         "aria-multiline": "true",
         "data-composer-editor-content": "",
       },
@@ -247,6 +258,11 @@ export const ComposerEditor = forwardRef<
         editor.view.dispatch(transaction);
 
         return true;
+      },
+      appendHtml: (html) => {
+        editor.commands.insertContentAt(editor.state.doc.content.size, html, {
+          updateSelection: false,
+        });
       },
       focus: () => editor.commands.focus(),
     }),

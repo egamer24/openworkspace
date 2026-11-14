@@ -18,6 +18,8 @@ type ReplySubmissionInput = {
   action?: ReplyAction;
   recipients: ValidatedComposerRecipients;
   body: string;
+  /** Asks the Worker to append the mailbox's signature (ReplySignature). */
+  includeSignature: boolean;
   uploadLimitError: string | null;
   uploadsPending: boolean;
   uploadsFailed: boolean;
@@ -101,6 +103,7 @@ async function prepareReplySubmission(
     cc: input.recipients.cc,
     bcc: input.recipients.bcc,
     bodyText: input.body,
+    includeSignature: input.includeSignature,
     uploadedAttachments,
     parentEmailId: input.parent.id,
     mode: input.action.mode,

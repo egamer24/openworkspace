@@ -444,6 +444,34 @@ describe("read-only mailbox access", () => {
       await mailbox.getConversationSnapshot("conv_visible")
     ).not.toBeNull();
 
+    // A team inbox's signature is for people who manage teams.
+    const signatureCalls = await Promise.all(
+      ["GET", "PUT"].map((method) =>
+        worker.fetch(
+          new Request(
+            `http://example.test/api/mail/team-signatures/${mailboxId}`,
+            {
+              method,
+              headers: { cookie, "content-type": "application/json" },
+              body:
+                method === "PUT"
+                  ? JSON.stringify({ html: "<p>Reader</p>", text: "Reader" })
+                  : undefined,
+            }
+          )
+        )
+      )
+    );
+
+    expect(signatureCalls.map((response) => response.status)).toEqual([
+      403, 403,
+    ]);
+    await Promise.all(signatureCalls.map((response) => response.json()));
+
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM signatures").first()
+    ).toEqual({ count: 0 });
+
     const compose = await worker.fetch(
       new Request("http://example.test/api/mail/messages", {
         method: "POST",
