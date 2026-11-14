@@ -66,6 +66,12 @@ export {
   mailboxKindOrderSql,
 } from "./db/mailboxes";
 
+// Addresses, created and deleted with core's checks, webhooks and hooks.
+export {
+  createMailboxAddress,
+  deleteMailboxAddress,
+} from "./admin/mailbox-routes";
+
 // Answers and input.
 export { apiError, type ApiErrorCode } from "./lib/http";
 

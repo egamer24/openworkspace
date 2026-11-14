@@ -1,9 +1,13 @@
 import { env as workerEnv } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { poll } from "../../testing/poll.ts";
 import type { HookContext, TestHook } from "../../testing/test-hooks.ts";
-import { deleteMailboxAddress } from "../../worker/admin/mailbox-routes.ts";
+import {
+  createMailboxAddress,
+  deleteMailboxAddress,
+} from "../../worker/admin/mailbox-routes.ts";
 import { revokeUserAccess } from "../../worker/auth/revocation.ts";
 import { revokeUserSession } from "../../worker/auth/session-records.ts";
 import {
@@ -13,7 +17,7 @@ import {
 } from "../../worker/auth/webauthn.ts";
 import { createDb } from "../../worker/db/client.ts";
 import type { Database } from "../../worker/db/client.ts";
-import { users } from "../../worker/db/schema.ts";
+import { mailboxes, users } from "../../worker/db/schema.ts";
 import { installModules, workspaceModules } from "../../worker/modules.ts";
 import {
   BackchannelLogoutError,
@@ -192,6 +196,160 @@ const recordedJob = z.object({
   }),
 });
 
+/**
+ * Runs `run` with a WEBHOOKS queue that records what it is sent; the
+ * result, and the events queued once the deferred tasks are done.
+ */
+async function withRecordedWebhooks<T>(
+  env: Env,
+  run: (env: Env, defer: (task: Promise<unknown>) => void) => Promise<T>
+) {
+  const events: { eventType: string; mailboxId: string }[] = [];
+  const tasks: Promise<unknown>[] = [];
+
+  const noBacklog = { backlogCount: 0, backlogBytes: 0 };
+
+  const record = (job: z.infer<typeof recordedJob>) => {
+    events.push({
+      eventType: job.eventType,
+      mailboxId: job.source.data?.mailbox?.id ?? "",
+    });
+  };
+
+  const webhooks: Env["WEBHOOKS"] = {
+    metrics: () => Promise.resolve(noBacklog),
+    send: (body) => {
+      record(recordedJob.parse(body));
+
+      return Promise.resolve({ metadata: { metrics: noBacklog } });
+    },
+    sendBatch: (messages) => {
+      for (const message of messages) record(recordedJob.parse(message.body));
+
+      return Promise.resolve({ metadata: { metrics: noBacklog } });
+    },
+  };
+
+  const result = await run(
+    { ...env, WEBHOOKS: webhooks },
+    (task) => void tasks.push(task)
+  );
+
+  await Promise.all(tasks);
+
+  return { result, events };
+}
+
+/**
+ * A small module such as a throwaway-address one: it creates aliases of a
+ * mailbox for a person, and deletes them once that person may no longer
+ * send from it. Its own table is this map, alias id to creator.
+ */
+const moduleAliases = new Map<string, string>();
+
+/** The aliases the module deleted on an access change, in order. */
+const lostAliases: string[] = [];
+
+let installedBeforeAliases: ReturnType<typeof workspaceModules> | undefined;
+
+async function mayStillSend(env: Env, aliasId: string, userId: string) {
+  const row = await env.DB.prepare(
+    `SELECT 1 FROM mailboxes AS alias
+     INNER JOIN mailbox_access ON mailbox_access.mailbox_id = alias.alias_of
+     INNER JOIN users ON users.id = mailbox_access.user_id
+     WHERE alias.id = ? AND mailbox_access.user_id = ?
+       AND mailbox_access.can_send = 1 AND users.status = 'active'`
+  )
+    .bind(aliasId, userId)
+    .first();
+
+  return Boolean(row);
+}
+
+const aliasModule = {
+  /** Installs the alias module; false removes it and forgets its aliases. */
+  "modules.aliasModule": (_, on: boolean) => {
+    installedBeforeAliases ??= workspaceModules();
+    moduleAliases.clear();
+    lostAliases.length = 0;
+
+    installModules(
+      on
+        ? [
+            ...installedBeforeAliases,
+            {
+              name: "aliases",
+              hooks: {
+                mailboxAccessChanged: async (env, defer) => {
+                  const db = createDb(env.DB);
+
+                  for (const [aliasId, userId] of moduleAliases) {
+                    // oxlint-disable-next-line eslint/no-await-in-loop -- a test module with a handful of aliases
+                    if (await mayStillSend(env, aliasId, userId)) continue;
+
+                    // oxlint-disable-next-line eslint/no-await-in-loop -- as above
+                    await deleteMailboxAddress(env, db, aliasId, defer);
+                    moduleAliases.delete(aliasId);
+                    lostAliases.push(aliasId);
+                  }
+                },
+                mailboxDeleted: (_env, id) => {
+                  moduleAliases.delete(id);
+
+                  return Promise.resolve();
+                },
+              },
+            },
+          ]
+        : installedBeforeAliases
+    );
+  },
+  /**
+   * Creates `address` as an alias of `aliasOf` for `userId`, through the
+   * module API: the alias has its target's owner or team. The created id
+   * or refusal, and the webhook events queued.
+   */
+  "modules.createAlias": (
+    { env },
+    aliasOf: string,
+    address: string,
+    userId: string
+  ) =>
+    withRecordedWebhooks(env, async (recording, defer) => {
+      const db = createDb(env.DB);
+
+      const [target] = await db
+        .select({
+          ownerUserId: mailboxes.ownerUserId,
+          teamId: mailboxes.teamId,
+        })
+        .from(mailboxes)
+        .where(eq(mailboxes.id, aliasOf))
+        .limit(1);
+
+      const created = await createMailboxAddress(
+        recording,
+        db,
+        {
+          address,
+          displayName: "Throwaway",
+          ownerUserId: target?.ownerUserId ?? null,
+          teamId: target?.teamId ?? null,
+          delivery: "alias",
+          aliasOf,
+        },
+        userId,
+        defer
+      );
+
+      if ("mailboxId" in created) moduleAliases.set(created.mailboxId, userId);
+
+      return created;
+    }),
+  /** The aliases the module deleted since the last read. */
+  "modules.lostAliases": () => lostAliases.splice(0),
+} satisfies Record<string, TestHook>;
+
 /** What modules' address hooks were called with, in order. */
 const addressHookCalls: string[] = [];
 
@@ -230,44 +388,10 @@ const addressHooks = {
   /** The recorded calls since the last read. */
   "modules.addressHookCalls": () => addressHookCalls.splice(0),
   /** Deletes an address as the admin API does; the webhook events it queued. */
-  "modules.deleteAddress": async ({ env }, mailboxId: string) => {
-    const events: { eventType: string; mailboxId: string }[] = [];
-    const tasks: Promise<unknown>[] = [];
-
-    const noBacklog = { backlogCount: 0, backlogBytes: 0 };
-
-    const record = (job: z.infer<typeof recordedJob>) => {
-      events.push({
-        eventType: job.eventType,
-        mailboxId: job.source.data?.mailbox?.id ?? "",
-      });
-    };
-
-    const webhooks: Env["WEBHOOKS"] = {
-      metrics: () => Promise.resolve(noBacklog),
-      send: (body) => {
-        record(recordedJob.parse(body));
-
-        return Promise.resolve({ metadata: { metrics: noBacklog } });
-      },
-      sendBatch: (messages) => {
-        for (const message of messages) record(recordedJob.parse(message.body));
-
-        return Promise.resolve({ metadata: { metrics: noBacklog } });
-      },
-    };
-
-    const result = await deleteMailboxAddress(
-      { ...env, WEBHOOKS: webhooks },
-      createDb(env.DB),
-      mailboxId,
-      (task) => void tasks.push(task)
-    );
-
-    await Promise.all(tasks);
-
-    return { result, events };
-  },
+  "modules.deleteAddress": ({ env }, mailboxId: string) =>
+    withRecordedWebhooks(env, (recording, defer) =>
+      deleteMailboxAddress(recording, createDb(env.DB), mailboxId, defer)
+    ),
 } satisfies Record<string, TestHook>;
 
 export const coreHooks = {
@@ -275,6 +399,7 @@ export const coreHooks = {
   ...revocation,
   ...sso,
   ...addressHooks,
+  ...aliasModule,
   /** The OIDC cleanup routes run at random; run it now. */
   "oidc.cleanupExpiredArtifacts": ({ env }) =>
     cleanupExpiredOidcArtifacts(createDb(env.DB)),

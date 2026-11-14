@@ -144,6 +144,21 @@ const ownNotes = new Hono<AppEnv>()
   `hooks.mailboxSaved` runs after an address is created or changed, and
   `hooks.mailboxDeleted` after one is deleted. Deleting a mailbox deletes its
   aliases first, so both run for each of them.
+- Don't write `mailboxes` yourself. `createMailboxAddress` and
+  `deleteMailboxAddress` from `@open-workspace/core/module` create and delete
+  an address the way the admin API does: they check the domain, that the
+  address is free and that its delivery is valid, send the `mailbox.created`
+  and `mailbox.deleted` webhooks and run the hooks above. Who may create the
+  address is yours to check. An alias gets the `ownerUserId` or `teamId` of
+  the mailbox it delivers into, and `createdByUserId` names the person it was
+  made for.
+- `hooks.mailboxAccessChanged` runs after someone may have lost access to a
+  mailbox: a person was disabled or taken off a team, a team's members or
+  send rights changed, or a team address moved to another team. If the module
+  keeps something per person and mailbox, such as an alias made for them,
+  check it against `mailboxAccess` (`canSend`) and `users.status` (a disabled
+  person keeps their rows in `mailboxAccess`) and remove what no longer holds.
+  Pass the hook's `defer` to `deleteMailboxAddress`.
 - Register MCP tools through `tool(scope)`, and implement them by calling your
   own routes through `api`, so a token only sees what its scopes allow.
 - Declare webhook events once in `shared/`, on both the server and client

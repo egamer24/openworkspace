@@ -18,6 +18,7 @@ import {
   mailboxWebhookData,
   queueMailboxWebhookEvent,
 } from "../webhooks/service";
+import { announceMailboxAccessChanged } from "./mailbox-routes";
 import { hasKnownUserIds } from "./records";
 import { personTeamsSchema, teamInputSchema } from "./schemas";
 
@@ -159,6 +160,9 @@ export const teamAdminRoutes = new Hono<AppEnv>()
     }
 
     await announceMailboxAccess(c, db, await teamMailboxIds(db, [teamId]));
+    await announceMailboxAccessChanged(c.env, (task) =>
+      c.executionCtx.waitUntil(task)
+    );
     // Team membership is also access to SSO apps.
     await revokeLostOidcAccess(c.env);
 
@@ -262,6 +266,13 @@ export const teamAdminRoutes = new Hono<AppEnv>()
         db,
         await teamMailboxIds(db, [...added, ...removed])
       );
+
+      if (removed.length) {
+        await announceMailboxAccessChanged(c.env, (task) =>
+          c.executionCtx.waitUntil(task)
+        );
+      }
+
       await revokeLostOidcAccess(c.env);
 
       return c.json({ ok: true as const });

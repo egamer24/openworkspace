@@ -112,6 +112,19 @@ export type WorkspaceModule = {
      */
     mailboxDeleted?: (env: Env, mailboxId: string) => Promise<void>;
     /**
+     * Someone may have lost access to a mailbox: a person was disabled or
+     * taken off a team, a team's members or send rights changed, or a team
+     * address moved to another team. Runs after the change is stored; a
+     * failure is logged, not undone. Check what the module keeps per person
+     * against `mailboxAccess` (`canSend`) and `users.status`: a disabled
+     * person keeps their rows there. `defer` is the request's `waitUntil`,
+     * for `deleteMailboxAddress`.
+     */
+    mailboxAccessChanged?: (
+      env: Env,
+      defer: (task: Promise<unknown>) => void
+    ) => Promise<void>;
+    /**
      * One browser session ended on purpose: the person or an administrator
      * revoked it, or it signed out. Returns the statements that drop what
      * the module keeps for the device on that session; they run in the D1
