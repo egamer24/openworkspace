@@ -63,16 +63,6 @@ const COMPOSER_ATTRIBUTES = [
   "title",
 ];
 
-/** Composer-made HTML (a sent body, a signature) made safe for the app's own document. */
-export function sanitizeComposerHtml(html: string) {
-  return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: COMPOSER_TAGS,
-    ALLOWED_ATTR: COMPOSER_ATTRIBUTES,
-    ALLOW_ARIA_ATTR: false,
-    ALLOW_DATA_ATTR: false,
-  });
-}
-
 const DANGEROUS_CSS =
   /expression\s*\(|-moz-binding|behavior\s*:|@import|javascript\s*:|vbscript\s*:|data\s*:\s*text\/html/giu;
 
@@ -394,7 +384,12 @@ export function sanitizeEmailHtml(input: {
   // Composer HTML is rendered in the app document, so sender-controlled CSS,
   // classes, and layout attributes must not cross that boundary. The iframe
   // path below remains intentionally more permissive for external email.
-  const composerHtml = sanitizeComposerHtml(body);
+  const composerHtml = DOMPurify.sanitize(body, {
+    ALLOWED_TAGS: COMPOSER_TAGS,
+    ALLOWED_ATTR: COMPOSER_ATTRIBUTES,
+    ALLOW_ARIA_ATTR: false,
+    ALLOW_DATA_ATTR: false,
+  });
 
   // Keep the layout guard after sender styles: email templates commonly use
   // fixed 600px tables that otherwise overflow a narrow message iframe.

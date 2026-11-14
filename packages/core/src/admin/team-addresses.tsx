@@ -310,7 +310,11 @@ function AddressEditor({
         idPrefix={idPrefix}
         delivery={delivery}
         listPosting={listPosting}
-        onDeliveryChange={setDelivery}
+        onDeliveryChange={(next) => {
+          setDelivery(next);
+          // A section's error goes with it when the delivery hides it.
+          setSectionError(null);
+        }}
         onListPostingChange={setListPosting}
       />
       {mailbox ? (

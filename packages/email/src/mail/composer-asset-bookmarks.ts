@@ -244,8 +244,7 @@ export function createComposerAssetBookmarksPlugin(
   return new Plugin<BookmarkState>({
     key: composerAssetBookmarksKey,
     state: {
-      // Assets in the initial content (a saved signature's images) start bookmarked.
-      init: (_config, state) => visibleAssets(state.doc),
+      init: () => new Map(),
       apply: applyBookmarkTransaction,
     },
     view(initialView) {
