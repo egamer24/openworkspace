@@ -3,7 +3,7 @@ import { mergeAttributes, Node } from "@tiptap/react";
 import type { StoredImageRef } from "../../shared/rich-content";
 
 /**
- * Saved rich content (a signature; auto-replies later) in the composer's
+ * Saved rich content (a signature, an auto-reply) in the composer's
  * editor. Its images are already in R2, so the editor shows them from there
  * as `storedImage` nodes instead of uploading them again; a message sends
  * them as references (`storedImages`) and the Worker copies them in, and a

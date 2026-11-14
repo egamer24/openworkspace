@@ -41,6 +41,7 @@ import {
 } from "./access";
 import type { MailboxListRow } from "./access";
 import { translateEmailSegments } from "./ai-translation";
+import { autoReplyRoutes } from "./auto-reply-routes";
 import { BIMI_LOGO_HEADERS, bimiLogoPath, bimiObjectKey } from "./bimi";
 import {
   decodeConversationCursor,
@@ -1846,4 +1847,5 @@ export const mailRoutes = new Hono<AppEnv>()
     }
   )
   .route("/", mailSafetyRoutes)
-  .route("/", signatureRoutes);
+  .route("/", signatureRoutes)
+  .route("/", autoReplyRoutes);

@@ -29,6 +29,13 @@
       "when": 1794610010950,
       "tag": "0003_trash_retention",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794631913534,
+      "tag": "0004_auto_replies",
+      "breakpoints": true
     }
   ]
 }

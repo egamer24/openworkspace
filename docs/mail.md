@@ -127,7 +127,26 @@ simply expires keeps them.
 | Connected apps | The apps you approved ([MCP and JMAP](mcp-and-jmap.md#connected-apps))                                 |
 | Notifications  | Push notifications on this device, and which mailboxes send them                                       |
 | Signature      | Your signature for mail from your own addresses, and whether new messages, replies and forwards get it |
+| Auto-reply     | Automatic replies from your own mailboxes while you're away ([Auto-reply](#auto-reply))                |
 | Mail apps      | The address for mail apps ([MCP and JMAP](mcp-and-jmap.md#connect-a-jmap-mail-client))                 |
+
+## Auto-reply
+
+An address with its own mailbox can answer incoming mail automatically, from
+a start to an end you pick, or until turned off. It has two messages, each of
+which can be off: one for people at the workspace's mail domains and one for
+everyone else, or only for people the mailbox has written to. Messages can
+hold images; no signature is added. Each sender gets at most one reply every
+few days (four unless changed).
+
+You set your own under **Settings → Auto-reply**; while it runs, a banner in
+Mail turns it off. A shared inbox's is set in its address's editor under
+**Teams**, and anyone's under **People**, saved with **Save address**. Mail to
+an alias is answered from the alias by its mailbox's auto-reply; mail through
+a plus address or the catch-all is answered too. Copies of mailing list posts,
+mail from other lists, bounces, other automatic replies, calendar mail, and
+mail in Spam or Trash never are. Replies are marked `Auto-Submitted:
+auto-replied` and aren't kept in Sent.
 
 ## Administration
 

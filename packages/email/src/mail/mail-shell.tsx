@@ -2,6 +2,7 @@ import { cn } from "@open-workspace/core/ui";
 import { lazy, Suspense, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
+import { AutoReplyBanner } from "./auto-reply-banner";
 import { ConversationList } from "./conversation-list";
 import { FolderManager } from "./folder-manager";
 import { AppBar } from "./mail-app-bar";
@@ -45,6 +46,7 @@ export function MailShell({ route }: { route: MailRoute }) {
   return (
     <div className="bg-background text-foreground flex h-dvh min-h-0 flex-col gap-1.5 overflow-hidden p-2 pt-1 text-[13px] lg:gap-2 lg:p-2.5 lg:pt-1.5">
       <AppBar mail={mail} />
+      {mail.mailbox ? <AutoReplyBanner mailbox={mail.mailbox} /> : null}
 
       <div className="flex min-h-0 flex-1 gap-2.5">
         <aside

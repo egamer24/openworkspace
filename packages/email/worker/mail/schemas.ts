@@ -10,6 +10,7 @@ import {
   MAX_CUSTOM_FOLDER_COUNT,
   MAX_MAIL_RECIPIENTS,
   replyActionModes,
+  autoReplyAudiences,
 } from "../../shared/mail";
 import {
   MAX_TRANSLATION_CHARACTERS,
@@ -162,6 +163,49 @@ export const signatureSchema = z.object({
   useOnNew: z.boolean().default(true),
   useOnReply: z.boolean().default(true),
 });
+
+const timestamp = z.iso
+  .datetime({ offset: true })
+  .transform((value) => new Date(value));
+
+/** One of an auto-reply's two messages; kept when switched off. */
+const autoReplyMessageFields = {
+  enabled: z.boolean(),
+  subject: z
+    .string()
+    .trim()
+    .max(998)
+    .nullable()
+    .default(null)
+    .transform((value) => value || null),
+  ...richContentFields,
+};
+
+export const autoReplyFields = {
+  enabled: z.boolean(),
+  startsAt: timestamp.nullable().default(null),
+  endsAt: timestamp.nullable().default(null),
+  replyIntervalDays: z.number().int().min(1).max(30).default(4),
+  /** For senders in the workspace's mail domains. */
+  inside: z.object(autoReplyMessageFields),
+  /** For everyone else, or only people the mailbox has written to. */
+  outside: z.object({
+    ...autoReplyMessageFields,
+    audience: z.enum(autoReplyAudiences).default("everyone"),
+  }),
+};
+
+export const autoReplySchema = z
+  .object(autoReplyFields)
+  .superRefine((value, context) => {
+    if (value.startsAt && value.endsAt && value.endsAt <= value.startsAt) {
+      context.addIssue({
+        code: "custom",
+        path: ["endsAt"],
+        message: "The end must be after the start",
+      });
+    }
+  });
 
 export const outboundMessageContentFields = {
   bodyText: z.string().max(500_000).default(""),

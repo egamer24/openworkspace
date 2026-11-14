@@ -5,6 +5,7 @@ import type {
 import { apiPath, runTool } from "@open-workspace/core/module";
 import { z } from "zod";
 
+import { autoReplyAudiences } from "../../shared/mail";
 import { MAIL_ORGANIZE_SCOPE, MAIL_READ_SCOPE } from "../../shared/permissions";
 import { retentionFolderSchema } from "../mail/schemas";
 import {
@@ -148,6 +149,76 @@ export function registerMailActionTools(
         api.json(
           `/mail/mailboxes/${encodeURIComponent(mailboxId)}/folders/${folder}/empty`,
           { method: "POST" }
+        )
+      )
+  );
+
+  tool(MAIL_READ_SCOPE)(
+    "get_auto_reply",
+    {
+      title: "Get auto-reply",
+      description:
+        "Read a mailbox's automatic reply: its schedule, its status now (off, scheduled, active, ended), and its two messages, for people inside the workspace and for everyone else. Your own mailboxes; anyone's with Manage people, and team inboxes with Manage teams.",
+      inputSchema: z.object({ mailboxId: mailboxIdSchema }),
+      annotations: { ...write, readOnlyHint: true },
+    },
+    ({ mailboxId }) =>
+      runTool(() =>
+        api.json(
+          apiPath(`/mail/mailboxes/${encodeURIComponent(mailboxId)}/auto-reply`)
+        )
+      )
+  );
+
+  const autoReplyMessage = z.object({
+    enabled: z.boolean(),
+    subject: z
+      .string()
+      .max(998)
+      .nullable()
+      .optional()
+      .describe('Defaults to "Auto: <original subject>".'),
+    html: z.string().max(20_000).describe("The reply as HTML."),
+    text: z.string().max(10_000).describe("The same reply as plain text."),
+  });
+
+  tool(MAIL_ORGANIZE_SCOPE)(
+    "set_auto_reply",
+    {
+      title: "Set auto-reply",
+      description:
+        "Turn a mailbox's automatic reply on or off, with an optional schedule and one message for people inside the workspace and one for everyone else (or only people the mailbox has written to). Replaces both messages and drops their images. Mailing lists, bounces, other auto-responders, Spam and Trash are never answered, and each sender gets at most one reply per interval.",
+      inputSchema: z.object({
+        mailboxId: mailboxIdSchema,
+        enabled: z.boolean(),
+        startsAt: z.iso
+          .datetime({ offset: true })
+          .nullable()
+          .optional()
+          .describe("When replies start; omit or null to start now."),
+        endsAt: z.iso
+          .datetime({ offset: true })
+          .nullable()
+          .optional()
+          .describe("When replies stop; omit or null for no end."),
+        replyIntervalDays: z.number().int().min(1).max(30).optional(),
+        inside: autoReplyMessage,
+        outside: autoReplyMessage.extend({
+          audience: z.enum(autoReplyAudiences).optional(),
+        }),
+      }),
+      annotations: write,
+    },
+    ({ mailboxId, ...settings }) =>
+      runTool(() =>
+        api.json(
+          apiPath(
+            `/mail/mailboxes/${encodeURIComponent(mailboxId)}/auto-reply`
+          ),
+          {
+            method: "PUT",
+            json: settings,
+          }
         )
       )
   );

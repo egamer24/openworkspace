@@ -29,7 +29,7 @@ export type RichContentEditorHandle = {
 };
 
 /**
- * Saved rich content (a signature; auto-replies later) in the composer's own
+ * Saved rich content (a signature, an auto-reply) in the composer's own
  * editor, so it looks as it will once sent. Saved images show at once from
  * where they are stored (`imageUrl`); new ones upload through
  * `uploadMailboxId`, a mailbox the person can send from.

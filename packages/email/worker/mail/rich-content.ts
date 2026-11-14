@@ -11,7 +11,7 @@ import {
 } from "./uploads";
 
 /**
- * Saved rich content (signatures; auto-replies and templates later): HTML
+ * Saved rich content (signatures, auto-replies): HTML
  * from the composer's editor whose images live in R2 under an owner prefix
  * that never expires, sent as inline `cid:` attachments.
  */

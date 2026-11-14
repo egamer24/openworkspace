@@ -7,6 +7,13 @@ export const mailboxStates = ["active", "archive", "spam", "trash"] as const;
 
 export type MailboxState = (typeof mailboxStates)[number];
 
+/** Who outside the workspace an auto-reply answers: anyone, or only people the mailbox has written to. */
+export const autoReplyAudiences = ["everyone", "knownSenders"] as const;
+
+export type AutoReplyAudience = (typeof autoReplyAudiences)[number];
+
+export type AutoReplyStatus = "off" | "scheduled" | "active" | "ended";
+
 export const transportStates = [
   "received",
   "unconfirmed",

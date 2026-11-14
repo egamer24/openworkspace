@@ -1,10 +1,15 @@
 import { preloadable } from "@open-workspace/core/ui";
-import type { ClientModule, TeamAddress } from "@open-workspace/core/ui";
+import type {
+  ClientModule,
+  TeamAddress,
+  UserAddress,
+} from "@open-workspace/core/ui";
 import {
   Bell,
   Mail,
   MonitorSmartphone,
   PenLine,
+  Plane,
   ShieldBan,
 } from "lucide-react";
 import { lazy, Suspense } from "react";
@@ -47,6 +52,24 @@ function TeamSignatureSection({ address }: { address: TeamAddress }) {
   );
 }
 
+const AddressAutoReply = lazy(() =>
+  import("./admin/address-auto-reply").then((module) => ({
+    default: module.AddressAutoReply,
+  }))
+);
+
+function AddressAutoReplySection({
+  address,
+}: {
+  address: TeamAddress | UserAddress;
+}) {
+  return (
+    <Suspense fallback={null}>
+      <AddressAutoReply address={address} />
+    </Suspense>
+  );
+}
+
 const mail: ClientModule = {
   name: EMAIL_MODULE,
   home: { label: "mail", Component: MailboxRoute },
@@ -76,6 +99,17 @@ const mail: ClientModule = {
       ),
     },
     {
+      id: "auto-reply",
+      label: "Auto-reply",
+      description: "Answer incoming mail automatically while you're away.",
+      Icon: Plane,
+      Component: lazy(() =>
+        import("./settings/auto-reply-page").then((module) => ({
+          default: module.AutoReplySettings,
+        }))
+      ),
+    },
+    {
       id: "mail-apps",
       label: "Mail apps",
       description: "Connect a JMAP mail app with your account.",
@@ -87,7 +121,6 @@ const mail: ClientModule = {
       ),
     },
   ],
-  teamAddress: [{ id: "signature", Component: TeamSignatureSection }],
   admin: [
     {
       id: "blocked-senders",
@@ -104,9 +137,16 @@ const mail: ClientModule = {
       ),
     },
   ],
-  // A forward's destinations, Confirmed or Waiting, in both address editors.
-  teamAddress: [{ id: "forward-destinations", Component: ForwardDestinations }],
-  userAddress: [{ id: "forward-destinations", Component: ForwardDestinations }],
+  teamAddress: [
+    { id: "signature", Component: TeamSignatureSection },
+    { id: "auto-reply", Component: AddressAutoReplySection },
+    // A forward's destinations, Confirmed or Waiting, in both address editors.
+    { id: "forward-destinations", Component: ForwardDestinations },
+  ],
+  userAddress: [
+    { id: "auto-reply", Component: AddressAutoReplySection },
+    { id: "forward-destinations", Component: ForwardDestinations },
+  ],
   webhookEvents: emailWebhookEvents,
   background: mailBackground.Component,
   preload: async () => {

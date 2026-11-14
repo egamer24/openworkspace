@@ -2,7 +2,11 @@ import {
   aiObjectRunner,
   aiFeatureEnabled,
   aiModel,
+  createDb,
   createId,
+  mailboxAddressSql,
+  mailboxes,
+  mailDomainAllowed,
   normalizeMailboxAddress,
   deferWebhookTask,
   queueWebhookEvent,
@@ -15,6 +19,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
   isNull,
@@ -67,6 +72,15 @@ import {
   EmailAiClassificationError,
   MAILBOX_AI_MAX_ATTEMPTS,
 } from "../mail/ai-classification";
+import {
+  AUTO_REPLY_HOURLY_CAP,
+  autoReplyImagePrefix,
+  autoReplyRecipient,
+  autoReplyStatus,
+  buildAutoReply,
+  messageSkipReason,
+  parseHeaderBlock,
+} from "../mail/auto-reply";
 import { classificationSignals } from "../mail/classification-signals";
 import type { ClassificationSignals } from "../mail/classification-signals";
 import { deliveryFacts } from "../mail/delivery-facts";
@@ -86,6 +100,8 @@ import { emailListKey } from "../mail/message-view";
 import { prepareOutboundDelivery } from "../mail/outbound-delivery";
 import { suggestParticipants } from "../mail/participants";
 import type { ParticipantSource } from "../mail/participants";
+import { replyAlias } from "../mail/reply-plan";
+import { inlineImages } from "../mail/rich-content";
 import { buildEmailSearchQuery } from "../mail/search";
 import { spamhausDqsKey, workspaceIdentity } from "../mail/security-settings";
 import type { WorkspaceIdentity } from "../mail/security-settings";
@@ -131,6 +147,8 @@ import {
 import { isRetentionFolder, retentionDays, retentionRules } from "./retention";
 import type { RetentionFolder } from "./retention";
 import {
+  autoReplyLog,
+  autoReplySettings,
   conversations,
   emailReadStates,
   emails,
@@ -143,6 +161,7 @@ import {
   unsubscriptions,
 } from "./schema";
 import type {
+  AutoReplySettings,
   Email,
   FolderRecord,
   NewEmail,
@@ -187,6 +206,13 @@ const MAX_INBOUND_RETRY_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_UNFINISHED_INBOUND_ATTEMPTS = 3;
 
 const ALARM_WAKE_DELAY_MS = 1000;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type AutoReplyInput = Omit<
+  AutoReplySettings,
+  "id" | "updatedBy" | "updatedAt"
+>;
 
 /** Bounds one emptying or retention pass, so a huge Trash can't hold the object. */
 const RETENTION_BATCH_SIZE = 100;
@@ -3675,6 +3701,12 @@ export class MailboxDO extends DurableObject<Env> {
         throw new Error("Parsed inbound email was not persisted");
       }
 
+      // After the message is stored, and never able to delay or fail it.
+      this.state.waitUntil(
+        this.maybeAutoReply(job, stored, rawMime).catch((error) => {
+          console.error(`Auto-reply check failed for ${stored.id}`, error);
+        })
+      );
       await this.finishStoredInbound(job, stored, now, true);
     } catch (error) {
       if (error instanceof UnprocessableInboundEmailError) {
@@ -4059,6 +4091,241 @@ export class MailboxDO extends DurableObject<Env> {
     this.state.waitUntil(
       this.scheduleAlarm(Math.max(Date.now() + ALARM_WAKE_DELAY_MS, at))
     );
+  }
+
+  getAutoReply(): AutoReplySettings | null {
+    return this.db.select().from(autoReplySettings).all()[0] ?? null;
+  }
+
+  setAutoReply(input: AutoReplyInput, userId: string) {
+    const previous = this.getAutoReply();
+
+    const settings: AutoReplySettings = {
+      ...input,
+      id: 1,
+      updatedBy: userId,
+      updatedAt: new Date(),
+    };
+
+    // Each absence starts fresh: switching on or moving the window forgets
+    // who has been answered.
+    const newAbsence =
+      input.enabled &&
+      (!previous?.enabled ||
+        previous.startsAt?.getTime() !== input.startsAt?.getTime() ||
+        previous.endsAt?.getTime() !== input.endsAt?.getTime());
+
+    this.db.transaction((tx) => {
+      tx.insert(autoReplySettings)
+        .values(settings)
+        .onConflictDoUpdate({ target: autoReplySettings.id, set: settings })
+        .run();
+
+      if (newAbsence) tx.delete(autoReplyLog).run();
+    });
+
+    return settings;
+  }
+
+  turnOffAutoReply(userId: string) {
+    this.db
+      .update(autoReplySettings)
+      .set({ enabled: false, updatedBy: userId, updatedAt: new Date() })
+      .run();
+
+    return this.getAutoReply();
+  }
+
+  /** Whether this mailbox has written to `address` (To, Cc or Bcc). */
+  private hasSentTo(address: string) {
+    const needle = `"address":${JSON.stringify(address.toLowerCase())}`;
+
+    return (
+      this.db
+        .select({ id: emails.id })
+        .from(emails)
+        .where(
+          and(
+            eq(emails.direction, "outgoing"),
+            or(
+              sql`instr(lower(${emails.toJson}), ${needle}) > 0`,
+              sql`instr(lower(${emails.ccJson}), ${needle}) > 0`,
+              sql`instr(lower(${emails.bccJson}), ${needle}) > 0`
+            )
+          )
+        )
+        .limit(1)
+        .all().length > 0
+    );
+  }
+
+  /**
+   * The automatic reply to a live delivery (never an import): the message
+   * for people inside the workspace or the one for everyone else. It is
+   * sent, not stored, and never retried: the sender is logged before
+   * sending, so a failure can't turn into a loop.
+   */
+  private async maybeAutoReply(
+    job: PendingInbound,
+    email: Email,
+    rawMime: ArrayBuffer
+  ) {
+    const settings = this.getAutoReply();
+    const now = new Date();
+
+    if (!settings || autoReplyStatus(settings, now) !== "active") return;
+
+    const conversation = this.db
+      .select({ mailboxState: conversations.mailboxState })
+      .from(conversations)
+      .where(eq(conversations.id, email.conversationId))
+      .all()[0];
+
+    const mailboxId = this.state.id.name ?? "";
+    const db = createDb(this.bindings.DB);
+
+    const [mailbox, aliases] = await Promise.all([
+      db
+        .select({
+          address: mailboxAddressSql,
+          displayName: mailboxes.displayName,
+        })
+        .from(mailboxes)
+        .where(eq(mailboxes.id, mailboxId))
+        .limit(1)
+        .then((rows) => rows[0]),
+      db
+        .select({
+          address: mailboxAddressSql,
+          displayName: mailboxes.displayName,
+        })
+        .from(mailboxes)
+        .where(eq(mailboxes.aliasOf, mailboxId)),
+    ]);
+
+    if (!mailbox) return;
+
+    const mailboxAddress = normalizeMailboxAddress(mailbox.address);
+
+    if (
+      messageSkipReason({
+        headers: parseHeaderBlock(rawMime),
+        envelopeFrom: job.envelopeFrom,
+        ownAddresses: [
+          mailboxAddress,
+          ...aliases.map((alias) => alias.address),
+        ].map((address) => address.toLowerCase()),
+        listAddress: job.listAddress,
+        mailboxState: conversation?.mailboxState,
+        email,
+      })
+    ) {
+      return;
+    }
+
+    const recipient = autoReplyRecipient(job.envelopeFrom);
+    // One reply per sender, however they spell their address's case.
+    const sender = recipient.toLowerCase();
+    const inside = mailDomainAllowed(recipient);
+    const message = inside ? settings.inside : settings.outside;
+
+    if (!message.enabled) return;
+
+    if (
+      !inside &&
+      settings.outside.audience === "knownSenders" &&
+      !this.hasSentTo(recipient)
+    ) {
+      return;
+    }
+
+    const intervalMs = settings.replyIntervalDays * DAY_MS;
+
+    const reserved = this.db.transaction((tx) => {
+      tx.delete(autoReplyLog)
+        .where(
+          lt(autoReplyLog.lastRepliedAt, new Date(now.getTime() - intervalMs))
+        )
+        .run();
+
+      if (
+        tx
+          .select({ sender: autoReplyLog.senderAddress })
+          .from(autoReplyLog)
+          .where(eq(autoReplyLog.senderAddress, sender))
+          .all().length > 0
+      ) {
+        return false;
+      }
+
+      const lastHour =
+        tx
+          .select({ count: sql<number>`count(*)` })
+          .from(autoReplyLog)
+          .where(
+            gt(autoReplyLog.lastRepliedAt, new Date(now.getTime() - 3_600_000))
+          )
+          .all()[0]?.count ?? 0;
+
+      if (lastHour >= AUTO_REPLY_HOURLY_CAP) return false;
+
+      tx.insert(autoReplyLog)
+        .values({
+          senderAddress: sender,
+          lastRepliedAt: now,
+          lastOriginalEmailId: email.id,
+        })
+        .run();
+
+      return true;
+    });
+
+    if (!reserved) return;
+
+    // Mail that came through an alias is answered from the alias.
+    const from = replyAlias(email, aliases) ?? mailbox;
+
+    try {
+      const images = await Promise.all(
+        inlineImages(
+          autoReplyImagePrefix(mailboxId),
+          message.html,
+          message.images
+        ).map(async (image) => {
+          const object = await this.bindings.MAIL_STORAGE.get(image.r2Key);
+
+          if (!object) throw new Error(`Image ${image.contentId} is missing`);
+
+          return {
+            contentId: image.contentId,
+            filename: image.filename,
+            type: image.contentType,
+            content: await object.arrayBuffer(),
+          };
+        })
+      );
+
+      const result = await this.bindings.EMAIL.send(
+        buildAutoReply({
+          from: {
+            address: normalizeMailboxAddress(from.address),
+            name: from.displayName,
+          },
+          recipient,
+          original: email,
+          message,
+          images,
+        })
+      );
+
+      this.db
+        .update(autoReplyLog)
+        .set({ lastOutboundMessageId: result.messageId })
+        .where(eq(autoReplyLog.senderAddress, sender))
+        .run();
+    } catch (error) {
+      console.error(`Auto-reply to ${recipient} failed`, error);
+    }
   }
 
   private async scheduleAlarm(at: number) {

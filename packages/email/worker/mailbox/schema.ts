@@ -8,6 +8,8 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { transportStates } from "../../shared/mail";
+import type { AutoReplyAudience } from "../../shared/mail";
+import type { RichImage } from "../../shared/rich-content";
 import { mailboxStates } from "./folder-model";
 import type {
   DeliveryFacts,
@@ -344,6 +346,47 @@ export const unsubscriptions = sqliteTable("unsubscriptions", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+/** One of an auto-reply's two messages; its images are under `autoReplyImagePrefix`. */
+export type AutoReplyMessage = {
+  enabled: boolean;
+  /** Null for "Auto: <original subject>". */
+  subject: string | null;
+  html: string;
+  text: string;
+  images: RichImage[];
+};
+
+/** One row (id 1): this mailbox's auto-reply. */
+export const autoReplySettings = sqliteTable("auto_reply_settings", {
+  id: integer("id").primaryKey(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull(),
+  startsAt: integer("starts_at", { mode: "timestamp_ms" }),
+  endsAt: integer("ends_at", { mode: "timestamp_ms" }),
+  replyIntervalDays: integer("reply_interval_days").notNull(),
+  /** For senders in the workspace's mail domains. */
+  inside: text("inside", { mode: "json" }).$type<AutoReplyMessage>().notNull(),
+  /** For everyone else, or only people this mailbox has written to. */
+  outside: text("outside", { mode: "json" })
+    .$type<AutoReplyMessage & { audience: AutoReplyAudience }>()
+    .notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+});
+
+/** One row per sender answered during the current absence. */
+export const autoReplyLog = sqliteTable(
+  "auto_reply_log",
+  {
+    senderAddress: text("sender_address").primaryKey(),
+    lastRepliedAt: integer("last_replied_at", {
+      mode: "timestamp_ms",
+    }).notNull(),
+    lastOriginalEmailId: text("last_original_email_id").notNull(),
+    lastOutboundMessageId: text("last_outbound_message_id"),
+  },
+  (table) => [index("auto_reply_log_replied_idx").on(table.lastRepliedAt)]
+);
+
 export const mailboxAiConfiguration = sqliteTable("mailbox_ai_configuration", {
   id: text("id").primaryKey(),
   instructions: text("instructions").notNull().default(""),
@@ -388,6 +431,8 @@ export type PendingObjectDeletion = typeof pendingObjectDeletions.$inferSelect;
 export type NewPendingInbound = typeof pendingInbound.$inferInsert;
 
 export type ConversationRecord = typeof conversations.$inferSelect;
+
+export type AutoReplySettings = typeof autoReplySettings.$inferSelect;
 
 export type FolderRecord = typeof folders.$inferSelect;
 

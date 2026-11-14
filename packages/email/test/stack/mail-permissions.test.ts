@@ -472,6 +472,43 @@ describe("read-only mailbox access", () => {
       await env.DB.prepare("SELECT count(*) AS count FROM signatures").first()
     ).toEqual({ count: 0 });
 
+    // A team inbox's auto-reply is the team's: for people who manage teams.
+    const autoReplyCalls = await Promise.all(
+      ["GET", "PUT"].map((method) =>
+        worker.fetch(
+          new Request(
+            `http://example.test/api/mail/mailboxes/${mailboxId}/auto-reply`,
+            {
+              method,
+              headers: { cookie, "content-type": "application/json" },
+              body:
+                method === "PUT"
+                  ? JSON.stringify({
+                      enabled: true,
+                      inside: {
+                        enabled: true,
+                        html: "<p>Away</p>",
+                        text: "Away",
+                      },
+                      outside: {
+                        enabled: true,
+                        html: "<p>Away</p>",
+                        text: "Away",
+                      },
+                    })
+                  : undefined,
+            }
+          )
+        )
+      )
+    );
+
+    expect(autoReplyCalls.map((response) => response.status)).toEqual([
+      403, 403,
+    ]);
+    await Promise.all(autoReplyCalls.map((response) => response.json()));
+    expect(await mailbox.getAutoReply()).toBeNull();
+
     const compose = await worker.fetch(
       new Request("http://example.test/api/mail/messages", {
         method: "POST",
